@@ -1,0 +1,96 @@
+diff -uNr a/vtools/Makefile b/vtools/Makefile
+--- a/vtools/Makefile 3a31d3128ad8bdb247aa99415a56dbdcbcb6177dd1db12d0ced431dded317204cb3fbae47787f812285bfd54fd7666714ecaa9fb3d6a030ec58086c1367b26ee
++++ b/vtools/Makefile 959297e64d03622a1b1f78cb67f5412699b143ccf60ba31fa11dcb1482708dc63821cff414f81ac3e14b25d73fc2a3f103336ecb45b7c0bb1aeaf2d92773676d
+@@ -30,7 +30,7 @@
+ OBJECTS=$(SRCS:.c=.o)
+ 
+ vdiff: $(SOURCES) $(HEADERS)
+-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -std=c99 -Ilib/ -Isrc/ -o $@ $(SOURCES)
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -std=c99 -pedantic -Ilib/ -Isrc/ -o $@ $(SOURCES)
+ 
+ clean:
+ 	@rm -f vdiff
+diff -uNr a/vtools/lib/xalloc.h b/vtools/lib/xalloc.h
+--- a/vtools/lib/xalloc.h c89b884326f0533d71f7c6bd7e6cb09ec4447612e00143494542d5f677c8d7493afebb6c4c5ff539334152647f5b055d0e1591c4f7920c3698aeb8a31df210bf
++++ b/vtools/lib/xalloc.h 98ba7212fafa4a61f6d6096f1a2953a67a70fcf185965ed7199a223f6897c9b9f2996d391a3f363282236889413973d0beada0e36d57068549bea672fd110d8d
+@@ -10,7 +10,7 @@
+    gnulib's xalloc-die module.  This is the function to call when one
+    wants the program to die because of a memory allocation
+    failure.  */
+-extern _Noreturn void xalloc_die(void);
++extern void xalloc_die(void) __attribute__((noreturn));
+ 
+ void *xmalloc(size_t s);
+ void *xzalloc(size_t s);
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest d3639727eb8df2071b6d94764c053944846a7f1eb0d0acebc11e78a66d747227c4c16e80a8bd97e9deaab1ee267a733058735a6371732044243579b3273e8a18
++++ b/vtools/manifest cd4f264760f48450b1a45df3222e05e5e998f54d3a00844a0502632f233bb65865e074e09e25d9d4f667ea165aecc8477c820237c7fb69d75e97f0b8010d9180
+@@ -1,2 +1,4 @@
+ 2018-02-21 phf
+ Initial release of vtools. Genesis contains stripped down version of diffutils 3.6, with most of functionality not relevant to vpatch removed.
++2018-02-28 phf
++Fixes for C99 compatability, support for "No newline at end of file" directive.
+diff -uNr a/vtools/src/analyze.c b/vtools/src/analyze.c
+--- a/vtools/src/analyze.c 9987a76b5935de34d172591ec469e716c37add21c783e02310147e18e30ee6e891328181c8799caa01ee586277894f4d44d90b2633b8f9ec0b0fffd477a2986d
++++ b/vtools/src/analyze.c d2d49c127344b2768732c4ccedd75c503459ab2d44efdc9c28c6cd5f4d0570de7517f95fd3eeb7d42ae67c5ae1e7136e79024ae993c23d2a6fb6bf1378349219
+@@ -579,14 +579,6 @@
+             p = e->link;
+             free(e);
+         }
+-
+-        for (f = 0; f < 2; ++f)
+-            if (cmp->file[f].missing_newline) {
+-                error(0, 0, "%s: %s\n",
+-                      file_label[f] ? file_label[f] : cmp->file[f].name,
+-                      "No newline at end of file");
+-                changes = 2;
+-            }
+     }
+ 
+     if (cmp->file[0].buffer != cmp->file[1].buffer)
+diff -uNr a/vtools/src/io.c b/vtools/src/io.c
+--- a/vtools/src/io.c 95c84e641e6f1d92d0a44d0a7e0cf978fc2f7f258109fc537beb38bf8d1fc03683984d14cae421de94349fc95a7126a9b905f7d9f3bd38c8916dc6714f4f6e8c
++++ b/vtools/src/io.c ea3ee84e4afdd0a89a13bab976e035a3d74e6db29f9074b1040014967e0fd812a7a4e55d5959b805fd48670d06229c50021a58fc2f4ad2d92e7695bb7735bbba
+@@ -196,6 +196,15 @@
+         bucket = &buckets[h % nbuckets];
+         length = p - ip - 1;
+ 
++        if (p == bufend
++            && current->missing_newline) {
++            /* The last line is incomplete.  If the line cannot
++               compare equal to any complete line, put it into
++               buckets[-1] so that it can compare equal only to the
++               other file's incomplete line (if one exists).  */
++                bucket = &buckets[-1];
++        }
++
+         for (i = *bucket;; i = eqs[i].next)
+             if (!i) {
+                 /* Create a new equivalence class in this bucket.  */
+@@ -271,9 +280,9 @@
+         linbuf[line] = p;
+ 
+         if (p == bufend) {
+-            /* If the last line is incomplete and we do not silently
+-               complete lines, don't count its appended newline.  */
+-            if (current->missing_newline && false) /* our output style not robust */
++            /* If the last line is incomplete, don't count its
++               appended newline.  */
++            if (current->missing_newline)
+                 linbuf[line]--;
+             break;
+         }
+@@ -395,10 +404,9 @@
+ 
+         /* Don't mistakenly count missing newline as part of
+            prefix.  */
+-        if (false
+-            && ((buffer0 + n0 - filevec[0].missing_newline < p0)
+-                !=
+-                (buffer1 + n1 - filevec[1].missing_newline < p1)))
++        if ((buffer0 + n0 - filevec[0].missing_newline < p0)
++            !=
++            (buffer1 + n1 - filevec[1].missing_newline < p1))
+             p0--, p1--;
+     }
+ 

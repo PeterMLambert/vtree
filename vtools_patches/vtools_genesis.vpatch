@@ -1,0 +1,5552 @@
+diff -uNr a/vtools/Makefile b/vtools/Makefile
+--- a/vtools/Makefile false
++++ b/vtools/Makefile 3a31d3128ad8bdb247aa99415a56dbdcbcb6177dd1db12d0ced431dded317204cb3fbae47787f812285bfd54fd7666714ecaa9fb3d6a030ec58086c1367b26ee
+@@ -0,0 +1,37 @@
++
++CC:=gcc
++LDFLAGS:=-static
++
++SOURCES=lib/cmpbuf.c \
++	lib/dirname.c \
++	lib/error.c \
++	lib/filenamecat.c \
++	lib/filetype.c \
++	lib/hash.c \
++	lib/progname.c \
++	lib/xalloc.c \
++	src/analyze.c \
++	src/context.c \
++	src/diff.c \
++	src/dir.c \
++	src/io.c \
++	src/util.c
++HEADERS=lib/cmpbuf.h \
++	lib/diffseq.h \
++	lib/dirname.h \
++	lib/error.h \
++	lib/filenamecat.h \
++	lib/filetype.h \
++	lib/hash.h \
++	lib/progname.h \
++	lib/xalloc.h \
++	src/diff.h \
++	src/system.h
++OBJECTS=$(SRCS:.c=.o)
++
++vdiff: $(SOURCES) $(HEADERS)
++	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -std=c99 -Ilib/ -Isrc/ -o $@ $(SOURCES)
++
++clean:
++	@rm -f vdiff
++
+diff -uNr a/vtools/lib/cmpbuf.c b/vtools/lib/cmpbuf.c
+--- a/vtools/lib/cmpbuf.c false
++++ b/vtools/lib/cmpbuf.c 71dcc526d79dcda506ed8712953b76930eb4036bc816e2df96480957970486d83a276bfb2b99e7616edfa136e5cd6aaa267652dcf64d184d023c020827bffb0a
+@@ -0,0 +1,57 @@
++#include <errno.h>
++#include <limits.h>
++#include <signal.h>
++#include <unistd.h>
++#include <stdint.h>
++#include "system.h"
++#include "cmpbuf.h"
++
++/* Read |nbytes| bytes from descriptor |fd| into |buf|.  |nbytes| must
++   not be |SIZE_MAX|.  Return the number of characters successfully
++   read.  On error, return |SIZE_MAX|, setting |errno|.  The number
++   returned is always |nbytes| unless end-of-file or error.  */
++
++size_t
++block_read(int fd, char *buf, size_t nbytes) {
++    char *bp = buf;
++    char const *buflim = buf + nbytes;
++    size_t readlim = MIN (SSIZE_MAX, SIZE_MAX);
++
++    do {
++        size_t bytes_remaining = buflim - bp;
++        size_t bytes_to_read = MIN (bytes_remaining, readlim);
++        ssize_t nread = read(fd, bp, bytes_to_read);
++        if (nread <= 0) {
++            if (nread == 0)
++                break;
++            return SIZE_MAX;
++        }
++        bp += nread;
++    } while (bp < buflim);
++
++    return bp - buf;
++}
++
++/* Least common multiple of two buffer sizes |a| and |b|.  However, if
++   either |a| or |b| is zero, or if the multiple is greater than
++   |lcm_max|, return a reasonable buffer size. */
++
++size_t
++buffer_lcm(size_t a, size_t b, size_t lcm_max) {
++    size_t lcm, m, n, q, r;
++
++    /* Yield reasonable values if buffer sizes are zero.  */
++    if (!a)
++        return b ? b : 8 * 1024;
++    if (!b)
++        return a;
++
++    /* |n = gcd (a, b)| */
++    for (m = a, n = b; (r = m % n) != 0; m = n, n = r)
++        continue;
++
++    /* Yield a if there is an overflow.  */
++    q = a / n;
++    lcm = q * b;
++    return lcm <= lcm_max && lcm / b == q ? lcm : a;
++}
+diff -uNr a/vtools/lib/cmpbuf.h b/vtools/lib/cmpbuf.h
+--- a/vtools/lib/cmpbuf.h false
++++ b/vtools/lib/cmpbuf.h 3b2fbd8a9e000babb3da6531365439e90698e5994c0e6475bb1443dae9d245fc489822e9ba1ceaeb93906215081c79a175f0a198ecaaf20700ef4bfc7d3791d8
+@@ -0,0 +1,4 @@
++
++size_t block_read(int, char *, size_t);
++
++size_t buffer_lcm(size_t, size_t, size_t);
+diff -uNr a/vtools/lib/diffseq.h b/vtools/lib/diffseq.h
+--- a/vtools/lib/diffseq.h false
++++ b/vtools/lib/diffseq.h 885c5cf5db5b269acb88ebddda6ee230961ccbafa2c0eb012f2cbc34bf239920429763aaa7a30ca8325127b14ac3eed8474f00deb4e3938e4b2a64db3337edf1
+@@ -0,0 +1,478 @@
++
++/* The basic idea is to consider two vectors as similar if, when
++   transforming the first vector into the second vector through a
++   sequence of edits (inserts and deletes of one element each), this
++   sequence is short - or equivalently, if the ordered list of
++   elements that are untouched by these edits is long.  For a good
++   introduction to the subject, read about the ``Levenshtein
++   distance'' in Wikipedia.
++
++   The basic algorithm is described in: ``An O(ND) Difference
++   Algorithm and its Variations'', Eugene W. Myers, Algorithmica
++   Vol. 1, 1986, pp. 251-266,
++   \url{http://dx.doi.org/10.1007/BF01840446}.  See especially section
++   4.2, which describes the variation used below.
++
++   The basic algorithm was independently discovered as described in:
++   ``Algorithms for Approximate String Matching'', Esko Ukkonen,
++   Information and Control Vol. 64, 1985, pp. 100-118,
++   \url{http://dx.doi.org/10.1016/S0019-9958(85)80046-2}.
++
++   Unless the |find_minimal| flag is set, this code uses the
++   |TOO_EXPENSIVE| heuristic, by Paul Eggert, to limit the cost to
++   $O(N^1.5 \log N)$ at the price of producing suboptimal output for
++   large inputs with many differences.  */
++
++/* Before including this file, you need to define:
++     |ELEMENT|                   The element type of the vectors being compared.
++     |EQUAL|                     A two-argument macro that tests two elements for
++                               equality.
++     |OFFSET|                    A signed integer type sufficient to hold the
++                               difference between two indices.  Usually
++                               something like |ptrdiff_t|.
++     |EXTRA_CONTEXT_FIELDS|    Declarations of fields for 'struct context'.
++     |NOTE_DELETE(ctxt, xoff)| Record the removal of the object xvec[xoff].
++     |NOTE_INSERT(ctxt, yoff)| Record the insertion of the object yvec[yoff].
++     |EARLY_ABORT(ctxt)|       (Optional) A boolean expression that triggers an
++                               early abort of the computation.
++     |USE_HEURISTIC|          (Optional) Define if you want to support the
++                               heuristic for large vectors.
++   It is also possible to use this file with abstract arrays.  In this case,
++   xvec and yvec are not represented in memory.  They only exist conceptually.
++   In this case, the list of defines above is amended as follows:
++     |ELEMENT|                 Undefined.
++     |EQUAL|                   Undefined.
++     |XVECREF_YVECREF_EQUAL(ctxt, xoff, yoff)|
++                             A three-argument macro: References xvec[xoff] and
++                             yvec[yoff] and tests these elements for equality.
++   Before including this file, you also need to include:
++     |#include <limits.h>
++     #include <stdbool.h>|
++ */
++
++/* Maximum value of type |OFFSET|.  */
++#define OFFSET_MAX \
++  ((((OFFSET)1 << (sizeof (OFFSET) * CHAR_BIT - 2)) - 1) * 2 + 1)
++
++/* Default to no early abort.  */
++#ifndef EARLY_ABORT
++# define EARLY_ABORT(ctxt) false
++#endif
++
++/* Use this to suppress gcc's ``...may be used before initialized''
++   warnings.  Beware: The Code argument must not contain commas.  */
++#ifndef IF_LINT
++# if defined GCC_LINT || defined lint
++#  define IF_LINT(Code) Code
++# else
++#  define IF_LINT(Code) /* empty */
++# endif
++#endif
++
++/* As above, but when Code must contain one comma. */
++#ifndef IF_LINT2
++# if defined GCC_LINT || defined lint
++#  define IF_LINT2(Code1, Code2) Code1, Code2
++# else
++#  define IF_LINT2(Code1, Code2) /* empty */
++# endif
++#endif
++
++/*
++ * Context of comparison operation.
++ */
++struct context {
++#ifdef ELEMENT
++    /* Vectors being compared.  */
++    ELEMENT const *xvec;
++    ELEMENT const *yvec;
++#endif
++
++    /* Extra fields.  */
++    EXTRA_CONTEXT_FIELDS
++
++    /* Vector, indexed by diagonal, containing 1 + the X coordinate of
++       the point furthest along the given diagonal in the forward
++       search of the edit matrix.  */
++    OFFSET *fdiag;
++
++    /* Vector, indexed by diagonal, containing the X coordinate of the
++       point furthest along the given diagonal in the backward search
++       of the edit matrix.  */
++    OFFSET *bdiag;
++
++#ifdef USE_HEURISTIC
++    /* This corresponds to the |diff --speed-large-files| flag.  With
++       this heuristic, for vectors with a constant small density of
++       changes, the algorithm is linear in the vector size.  */
++    bool heuristic;
++#endif
++
++    /* Edit scripts longer than this are too expensive to compute.  */
++    OFFSET too_expensive;
++
++    /* Snakes bigger than this are considered "big".  */
++#define SNAKE_LIMIT 20
++};
++
++struct partition {
++    /* Midpoints of this partition.  */
++    OFFSET xmid;
++    OFFSET ymid;
++
++    /* True if low half will be analyzed minimally.  */
++    bool lo_minimal;
++
++    /* Likewise for high half.  */
++    bool hi_minimal;
++};
++
++
++/* Find the midpoint of the shortest edit script for a specified
++   portion of the two vectors.
++
++   Scan from the beginnings of the vectors, and simultaneously from
++   the ends, doing a breadth-first search through the space of
++   edit-sequence.  When the two searches meet, we have found the
++   midpoint of the shortest edit sequence.
++
++   If |find_minimal| is true, find the minimal edit script regardless
++   of expense.  Otherwise, if the search is too expensive, use
++   heuristics to stop the search and report a suboptimal answer.
++
++   Set |part->(xmid,ymid)| to the midpoint |(xmid,ymid)|.  The
++   diagonal number |xmid - ymid| equals the number of inserted
++   elements minus the number of deleted elements (counting only
++   elements before the midpoint).
++
++   Set |part->lo_minimal| to true iff the minimal edit script for the
++   left half of the partition is known; similarly for
++   |part->hi_minimal|.
++
++   This function assumes that the first elements of the specified
++   portions of the two vectors do not match, and likewise that the
++   last elements do not match.  The caller must trim matching elements
++   from the beginning and end of the portions it is going to specify.
++
++   If we return the "wrong" partitions, the worst this can do is cause
++   suboptimal diff output.  It cannot cause incorrect diff output.  */
++
++static void
++diag(OFFSET xoff, OFFSET xlim, OFFSET yoff, OFFSET ylim, bool find_minimal,
++     struct partition *part, struct context *ctxt) {
++    OFFSET *const fd = ctxt->fdiag;       /* Give the compiler a chance. */
++    OFFSET *const bd = ctxt->bdiag;       /* Additional help for the compiler. */
++#ifdef ELEMENT
++    ELEMENT const *const xv = ctxt->xvec; /* Still more help for the compiler. */
++    ELEMENT const *const yv = ctxt->yvec; /* And more and more . . . */
++#define XREF_YREF_EQUAL(x, y)  EQUAL (xv[x], yv[y])
++#else
++#define XREF_YREF_EQUAL(x,y)  XVECREF_YVECREF_EQUAL (ctxt, x, y)
++#endif
++    const OFFSET dmin = xoff - ylim;      /* Minimum valid diagonal. */
++    const OFFSET dmax = xlim - yoff;      /* Maximum valid diagonal. */
++    const OFFSET fmid = xoff - yoff;      /* Center diagonal of top-down search. */
++    const OFFSET bmid = xlim - ylim;      /* Center diagonal of bottom-up search. */
++    OFFSET fmin = fmid;
++    OFFSET fmax = fmid;           /* Limits of top-down search. */
++    OFFSET bmin = bmid;
++    OFFSET bmax = bmid;           /* Limits of bottom-up search. */
++    OFFSET c;                     /* Cost. */
++    bool odd = (fmid - bmid) & 1; /* True if southeast corner is on an odd
++                                   diagonal with respect to the northwest. */
++
++    fd[fmid] = xoff;
++    bd[bmid] = xlim;
++
++    for (c = 1;; ++c) {
++        OFFSET d;                 /* Active diagonal. */
++        bool big_snake = false;
++
++        /* Extend the top-down search by an edit step in each diagonal. */
++        if (fmin > dmin)
++            fd[--fmin - 1] = -1;
++        else
++            ++fmin;
++        if (fmax < dmax)
++            fd[++fmax + 1] = -1;
++        else
++            --fmax;
++        for (d = fmax; d >= fmin; d -= 2) {
++            OFFSET x;
++            OFFSET y;
++            OFFSET tlo = fd[d - 1];
++            OFFSET thi = fd[d + 1];
++            OFFSET x0 = tlo < thi ? thi : tlo + 1;
++
++            for (x = x0, y = x0 - d;
++                 x < xlim && y < ylim && XREF_YREF_EQUAL (x, y);
++                 x++, y++)
++                continue;
++            if (x - x0 > SNAKE_LIMIT)
++                big_snake = true;
++            fd[d] = x;
++            if (odd && bmin <= d && d <= bmax && bd[d] <= x) {
++                part->xmid = x;
++                part->ymid = y;
++                part->lo_minimal = part->hi_minimal = true;
++                return;
++            }
++        }
++
++        /* Similarly extend the bottom-up search.  */
++        if (bmin > dmin)
++            bd[--bmin - 1] = OFFSET_MAX;
++        else
++            ++bmin;
++        if (bmax < dmax)
++            bd[++bmax + 1] = OFFSET_MAX;
++        else
++            --bmax;
++        for (d = bmax; d >= bmin; d -= 2) {
++            OFFSET x;
++            OFFSET y;
++            OFFSET tlo = bd[d - 1];
++            OFFSET thi = bd[d + 1];
++            OFFSET x0 = tlo < thi ? tlo : thi - 1;
++
++            for (x = x0, y = x0 - d;
++                 xoff < x && yoff < y && XREF_YREF_EQUAL (x - 1, y - 1);
++                 x--, y--)
++                continue;
++            if (x0 - x > SNAKE_LIMIT)
++                big_snake = true;
++            bd[d] = x;
++            if (!odd && fmin <= d && d <= fmax && x <= fd[d]) {
++                part->xmid = x;
++                part->ymid = y;
++                part->lo_minimal = part->hi_minimal = true;
++                return;
++            }
++        }
++
++        if (find_minimal)
++            continue;
++
++#ifdef USE_HEURISTIC
++        /* Heuristic: check occasionally for a diagonal that has made
++           lots of progress compared with the edit distance.  If we
++           have any such, find the one that has made the most progress
++           and return it as if it had succeeded.
++
++           With this heuristic, for vectors with a constant small
++           density of changes, the algorithm is linear in the vector
++           size.  */
++
++        if (200 < c && big_snake && ctxt->heuristic) {
++            {
++                OFFSET best = 0;
++
++                for (d = fmax; d >= fmin; d -= 2) {
++                    OFFSET dd = d - fmid;
++                    OFFSET x = fd[d];
++                    OFFSET y = x - d;
++                    OFFSET v = (x - xoff) * 2 - dd;
++
++                    if (v > 12 * (c + (dd < 0 ? -dd : dd))) {
++                        if (v > best
++                            && xoff + SNAKE_LIMIT <= x && x < xlim
++                            && yoff + SNAKE_LIMIT <= y && y < ylim) {
++                            /* We have a good enough best diagonal;
++                               now insist that it end with a
++                               significant snake.  */
++                            int k;
++
++                            for (k = 1; XREF_YREF_EQUAL (x - k, y - k); k++)
++                                if (k == SNAKE_LIMIT) {
++                                    best = v;
++                                    part->xmid = x;
++                                    part->ymid = y;
++                                    break;
++                                }
++                        }
++                    }
++                }
++                if (best > 0) {
++                    part->lo_minimal = true;
++                    part->hi_minimal = false;
++                    return;
++                }
++            }
++
++            {
++                OFFSET best = 0;
++
++                for (d = bmax; d >= bmin; d -= 2) {
++                    OFFSET dd = d - bmid;
++                    OFFSET x = bd[d];
++                    OFFSET y = x - d;
++                    OFFSET v = (xlim - x) * 2 + dd;
++
++                    if (v > 12 * (c + (dd < 0 ? -dd : dd))) {
++                        if (v > best
++                            && xoff < x && x <= xlim - SNAKE_LIMIT
++                            && yoff < y && y <= ylim - SNAKE_LIMIT) {
++                            /* We have a good enough best diagonal;
++                               now insist that it end with a
++                               significant snake.  */
++                            int k;
++
++                            for (k = 0; XREF_YREF_EQUAL (x + k, y + k); k++)
++                                if (k == SNAKE_LIMIT - 1) {
++                                    best = v;
++                                    part->xmid = x;
++                                    part->ymid = y;
++                                    break;
++                                }
++                        }
++                    }
++                }
++                if (best > 0) {
++                    part->lo_minimal = false;
++                    part->hi_minimal = true;
++                    return;
++                }
++            }
++        }
++#endif
++
++        /* Heuristic: if we've gone well beyond the call of duty, give
++           up and report halfway between our best results so far.  */
++        if (c >= ctxt->too_expensive) {
++            OFFSET fxybest;
++            OFFSET fxbest IF_LINT (= 0);
++            OFFSET bxybest;
++            OFFSET bxbest IF_LINT (= 0);
++
++            /* Find forward diagonal that maximizes |X + Y|.  */
++            fxybest = -1;
++            for (d = fmax; d >= fmin; d -= 2) {
++                OFFSET x = MIN (fd[d], xlim);
++                OFFSET y = x - d;
++                if (ylim < y) {
++                    x = ylim + d;
++                    y = ylim;
++                }
++                if (fxybest < x + y) {
++                    fxybest = x + y;
++                    fxbest = x;
++                }
++            }
++
++            /* Find backward diagonal that minimizes |X + Y|.  */
++            bxybest = OFFSET_MAX;
++            for (d = bmax; d >= bmin; d -= 2) {
++                OFFSET x = MAX (xoff, bd[d]);
++                OFFSET y = x - d;
++                if (y < yoff) {
++                    x = yoff + d;
++                    y = yoff;
++                }
++                if (x + y < bxybest) {
++                    bxybest = x + y;
++                    bxbest = x;
++                }
++            }
++
++            /* Use the better of the two diagonals.  */
++            if ((xlim + ylim) - bxybest < fxybest - (xoff + yoff)) {
++                part->xmid = fxbest;
++                part->ymid = fxybest - fxbest;
++                part->lo_minimal = true;
++                part->hi_minimal = false;
++            } else {
++                part->xmid = bxbest;
++                part->ymid = bxybest - bxbest;
++                part->lo_minimal = false;
++                part->hi_minimal = true;
++            }
++            return;
++        }
++    }
++#undef XREF_YREF_EQUAL
++}
++
++
++/* Compare in detail contiguous subsequences of the two vectors which
++   are known, as a whole, to match each other.
++
++   The subsequence of vector 0 is |[xoff, xlim)| and likewise for
++   vector 1.
++
++   Note that |xlim, ylim| are exclusive bounds.  All indices into the
++   vectors are origin-0.
++
++   If |find_minimal|, find a minimal difference no matter how
++   expensive it is.
++
++   The results are recorded by invoking |note_delete| and
++   |note_insert|.
++
++   Return false if terminated normally, or true if terminated through
++   early abort.  */
++
++static bool
++compareseq(OFFSET xoff, OFFSET xlim, OFFSET yoff, OFFSET ylim,
++           bool find_minimal, struct context *ctxt) {
++#ifdef ELEMENT
++    ELEMENT const *xv = ctxt->xvec; /* Help the compiler.  */
++    ELEMENT const *yv = ctxt->yvec;
++#define XREF_YREF_EQUAL(x, y)  EQUAL (xv[x], yv[y])
++#else
++#define XREF_YREF_EQUAL(x,y)  XVECREF_YVECREF_EQUAL (ctxt, x, y)
++#endif
++
++    /* Slide down the bottom initial diagonal.  */
++    while (xoff < xlim && yoff < ylim && XREF_YREF_EQUAL (xoff, yoff)) {
++        xoff++;
++        yoff++;
++    }
++
++    /* Slide up the top initial diagonal. */
++    while (xoff < xlim && yoff < ylim && XREF_YREF_EQUAL (xlim - 1, ylim - 1)) {
++        xlim--;
++        ylim--;
++    }
++
++    /* Handle simple cases. */
++    if (xoff == xlim)
++        while (yoff < ylim) {
++            NOTE_INSERT (ctxt, yoff);
++            if (EARLY_ABORT (ctxt))
++                return true;
++            yoff++;
++        }
++    else if (yoff == ylim)
++        while (xoff < xlim) {
++            NOTE_DELETE (ctxt, xoff);
++            if (EARLY_ABORT (ctxt))
++                return true;
++            xoff++;
++        }
++    else {
++        struct partition part IF_LINT2 (= { .xmid = 0, .ymid = 0 });
++
++        /* Find a point of correspondence in the middle of the vectors.  */
++        diag(xoff, xlim, yoff, ylim, find_minimal, &part, ctxt);
++
++        /* Use the partitions to split this problem into subproblems.  */
++        if (compareseq(xoff, part.xmid, yoff, part.ymid, part.lo_minimal, ctxt))
++            return true;
++        if (compareseq(part.xmid, xlim, part.ymid, ylim, part.hi_minimal, ctxt))
++            return true;
++    }
++
++    return false;
++#undef XREF_YREF_EQUAL
++}
++
++#undef ELEMENT
++#undef EQUAL
++#undef OFFSET
++#undef EXTRA_CONTEXT_FIELDS
++#undef NOTE_DELETE
++#undef NOTE_INSERT
++#undef EARLY_ABORT
++#undef USE_HEURISTIC
++#undef XVECREF_YVECREF_EQUAL
++#undef OFFSET_MAX
+diff -uNr a/vtools/lib/dirname.c b/vtools/lib/dirname.c
+--- a/vtools/lib/dirname.c false
++++ b/vtools/lib/dirname.c 3b4f8a1efdab9e5a97cf46313b268203b9a49831750e45c8ede1a2080d757e1bb1492f2c33ede6f9f230146d597ad6a91f4d6d3bddf161c12a4efb7c2840b827
+@@ -0,0 +1,41 @@
++#include "dirname.h"
++#include <string.h>
++#include <stdbool.h>
++
++/* Return the address of the last file name component of |name|.  If
++   |name| has no relative file name components because it is a file
++   system root, return the empty string.  */
++
++char *
++last_component(char const *name) {
++    char const *base = name + 0;
++    char const *p;
++    bool saw_slash = false;
++
++    while (((*base) == '/'))
++        base++;
++
++    for (p = base; *p; p++) {
++        if (((*p) == '/'))
++            saw_slash = true;
++        else if (saw_slash) {
++            base = p;
++            saw_slash = false;
++        }
++    }
++
++    return (char *) base;
++}
++
++/* Return the length of the basename |name|.  Typically |name| is the
++   value returned by |base_name| or |last_component|.  Act like
++   |strlen(name)|, except omit all trailing slashes.  */
++
++size_t
++base_len(char const *name) {
++    size_t len;
++
++    for (len = strlen(name); 1 < len && ((name[len - 1]) == '/'); len--)
++        continue;
++    return len;
++}
+diff -uNr a/vtools/lib/dirname.h b/vtools/lib/dirname.h
+--- a/vtools/lib/dirname.h false
++++ b/vtools/lib/dirname.h 0e0acf05b52699616f45369d780a0e9f9143370767b54866b257c63d74462783de97593dbcd87af95043f762a0ab89b6d671756483dee19bb52a591e53480f5a
+@@ -0,0 +1,10 @@
++#ifndef DIRNAME_H_
++#define DIRNAME_H_ 1
++
++#include <stddef.h>
++
++size_t base_len(char const *file);
++
++char *last_component(char const *file);
++
++#endif
+diff -uNr a/vtools/lib/error.c b/vtools/lib/error.c
+--- a/vtools/lib/error.c false
++++ b/vtools/lib/error.c 23414223665774cffb9bde19ed92dab889ba5e6f2bc1834357d2d8c3d86435d1bad49b0036d09050ff1a29124c8288ab165df15a3b6e1d1d0c6d600d6aa973d6
+@@ -0,0 +1,78 @@
++/* Written by David MacKenzie <djm@gnu.ai.mit.edu>.  */
++
++#include "system.h"
++#include "error.h"
++#include "progname.h"
++#include <stdarg.h>
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <fcntl.h>
++
++/* If |NULL|, error will flush |stdout|, then print on |stderr| the
++   program name, a colon and a space.  Otherwise, error will call this
++   function without parameters instead.  */
++void (*error_print_progname)(void);
++
++/* This variable is incremented each time |error| is called.  */
++unsigned int error_message_count;
++
++
++/* Return non-zero if |fd| is open.  */
++static int
++is_open(int fd) {
++    return 0 <= fcntl(fd, F_GETFL);
++}
++
++static void
++flush_stdout(void) {
++    if (is_open(1))
++        fflush(stdout);
++}
++
++static void
++print_errno_message(int errnum) {
++    char const *s;
++    char errbuf[1024];
++    if (strerror_r(errnum, errbuf, sizeof errbuf) == 0)
++        s = errbuf;
++    else
++        s = 0;
++    if (!s)
++        s = "Unknown system error";
++    fprintf(stderr, ": %s", s);
++}
++
++static void
++error_tail(int status, int errnum, const char *message, va_list args) {
++    vfprintf(stderr, message, args);
++    va_end (args);
++
++    ++error_message_count;
++    if (errnum)
++        print_errno_message(errnum);
++    putc ('\n', stderr);
++    fflush(stderr);
++    if (status)
++        exit(status);
++}
++
++
++/* Print the program name and error message |message|, which is a
++   printf-style format string with optional args.  If |errnum| is
++   nonzero, print its corresponding system error message.  Exit with
++   status |status| if it is nonzero.  */
++void
++error(int status, int errnum, const char *message, ...) {
++    va_list args;
++    flush_stdout();
++    if (error_print_progname)
++        (*error_print_progname)();
++    else {
++        fprintf(stderr, "%s: ", get_program_name());
++    }
++
++    va_start (args, message);
++    error_tail(status, errnum, message, args);
++}
++
+diff -uNr a/vtools/lib/error.h b/vtools/lib/error.h
+--- a/vtools/lib/error.h false
++++ b/vtools/lib/error.h c4889bba1b6865fcdb24d74b9fa19a4a174580c567b9e462359ee72b263e262d41082a624d2a94ea74a26d5dd229acf351ce1b7b5aaf5cdb0a610170f1d72a17
+@@ -0,0 +1,25 @@
++#ifndef _ERROR_H
++#define _ERROR_H 1
++
++/* Print a message with |fprintf(stderr, format, ...);| if |errnum| is
++   nonzero, follow it with ": " and |strerror(errnum)|.  If |status|
++   is nonzero, terminate the program with |exit(status)|.  */
++
++extern void error(int __status, int __errnum, const char *__format, ...);
++
++extern void error_at_line(int __status, int __errnum, const char *__fname,
++                          unsigned int __lineno, const char *__format, ...);
++
++/* If |NULL|, error will flush |stdout|, then print on |stderr| the
++   program name, a colon and a space.  Otherwise, error will call this
++   function without parameters instead.  */
++extern void (*error_print_progname)(void);
++
++/* This variable is incremented each time |error| is called.  */
++extern unsigned int error_message_count;
++
++/* Sometimes we want to have at most one error per line.  This
++   variable controls whether this mode is selected or not.  */
++extern int error_one_per_line;
++
++#endif
+diff -uNr a/vtools/lib/filenamecat.c b/vtools/lib/filenamecat.c
+--- a/vtools/lib/filenamecat.c false
++++ b/vtools/lib/filenamecat.c 3a3c08f41f3a3af5a519ad9529379b379f84ca7adb021ad794c1e61e09c79a1d3a8e7b378b08c0e068fea80cbcd73e31d76156cde260c2accae569e74dc19a9d
+@@ -0,0 +1,83 @@
++
++/* Written by Jim Meyering.  */
++
++/* Specification.  */
++#include "filenamecat.h"
++
++#include <stdlib.h>
++#include <string.h>
++#include "xalloc.h"
++
++#include "dirname.h"
++
++#if !HAVE_MEMPCPY && !defined mempcpy
++# define mempcpy(D, S, N) ((void *) ((char *) memcpy (D, S, N) + (N)))
++#endif
++
++/* Return the longest suffix of |f| that is a relative file name.  If
++   it has no such suffix, return the empty string.  */
++
++static char const *
++longest_relative_suffix(char const *f) {
++    for (f += 0; ((*f) == '/'); f++)
++        continue;
++    return f;
++}
++
++/* Concatenate two file name components, |dir| and |abase|, in
++   newly-allocated storage and return the result.  The resulting file
++   name |f| is such that the commands |ls F| and |(cd DIR; ls BASE)|
++   refer to the same file, where |base| is |abase| with any file
++   system prefixes and leading separators removed.  Arrange for a
++   directory separator if necessary between |dir| and |base| in the
++   result, removing any redundant separators.  In any case, if
++   |base_in_result| is non-|NULL|, set |*base_in_result| to point to
++   the copy of |abase| in the returned concatenation.  However, if
++   |abase| begins with more than one slash, set |*base_in_result| to
++   point to the sole corresponding slash that is copied into the
++   result buffer.
++
++   Return |NULL| if |malloc| fails.  */
++
++char *
++mfile_name_concat(char const *dir, char const *abase, char **base_in_result) {
++    char const *dirbase = last_component(dir);
++    size_t dirbaselen = base_len(dirbase);
++    size_t dirlen = dirbase - dir + dirbaselen;
++    size_t needs_separator = (dirbaselen && !((dirbase[dirbaselen - 1]) == '/'));
++
++    char const *base = longest_relative_suffix(abase);
++    size_t baselen = strlen(base);
++
++    char *p_concat = malloc(dirlen + needs_separator + baselen + 1);
++    char *p;
++
++    if (p_concat == NULL)
++        return NULL;
++
++    p = mempcpy (p_concat, dir, dirlen);
++    *p = '/';
++    p += needs_separator;
++
++    if (base_in_result)
++        *base_in_result = p - (abase[0] == '/');
++
++    p = mempcpy (p, base, baselen);
++    *p = '\0';
++
++    return p_concat;
++}
++
++/* Written by Jim Meyering.  */
++
++/* Just like |mfile_name_concat| (|filenamecat-lgpl.c|), except,
++   rather than returning |NULL| upon |malloc| failure, here, we report
++   the "memory exhausted" condition and exit.  */
++
++char *
++file_name_concat(char const *dir, char const *abase, char **base_in_result) {
++    char *p = mfile_name_concat(dir, abase, base_in_result);
++    if (p == NULL)
++        xalloc_die();
++    return p;
++}
+diff -uNr a/vtools/lib/filenamecat.h b/vtools/lib/filenamecat.h
+--- a/vtools/lib/filenamecat.h false
++++ b/vtools/lib/filenamecat.h 59c6c96ce46407baed2ac862dbdd00ab23e23138fd6f2c4e0eac82cba9bb88041f57a047ea1ea6027683647afcd531c50ede08adac8c77486a85dd8ba6a56c1c
+@@ -0,0 +1,7 @@
++/* Written by Jim Meyering.  */
++
++char *file_name_concat(char const *dir, char const *base,
++                       char **base_in_result);
++
++char *mfile_name_concat(char const *dir, char const *base,
++                        char **base_in_result);
+diff -uNr a/vtools/lib/filetype.c b/vtools/lib/filetype.c
+--- a/vtools/lib/filetype.c false
++++ b/vtools/lib/filetype.c d145344fc875a7956c3de729da26b27f6034e92e329b3c5835c8a324b5b472d96faace8a3ebc8877cf0e781bcd58de23b7c1c592984065d739677db0a8686000
+@@ -0,0 +1,87 @@
++/* Written by Paul Eggert.  */
++
++#include "filetype.h"
++
++char const *
++file_type(struct stat const *st) {
++    /* To keep diagnostics grammatical in English, the returned string
++       must start with a consonant.  */
++
++    /* Do these three first, as they're the most common.  */
++
++    if (S_ISREG (st->st_mode))
++        return st->st_size == 0 ? ("regular empty file") : ("regular file");
++
++    if (S_ISDIR (st->st_mode))
++        return ("directory");
++
++    if (S_ISLNK (st->st_mode))
++        return ("symbolic link");
++
++#if 0
++    /* Do the |S_TYPEIS*| macros next, as they may be implemented in
++       terms of |S_ISNAM|, and we want the more-specialized
++       interpretation.  */
++
++    if (S_TYPEISMQ (st))
++        return ("message queue");
++
++    if (S_TYPEISSEM (st))
++        return ("semaphore");
++
++    if (S_TYPEISSHM (st))
++        return ("shared memory object");
++
++    if (S_TYPEISTMO (st))
++        return ("typed memory object");
++
++    /* The remaining are in alphabetical order.  */
++
++    if (S_ISBLK (st->st_mode))
++        return ("block special file");
++
++    if (S_ISCHR (st->st_mode))
++        return ("character special file");
++
++    if (S_ISCTG (st->st_mode))
++        return ("contiguous data");
++
++    if (S_ISFIFO (st->st_mode))
++        return ("fifo");
++
++    if (S_ISDOOR (st->st_mode))
++        return ("door");
++
++    if (S_ISMPB (st->st_mode))
++        return ("multiplexed block special file");
++
++    if (S_ISMPC (st->st_mode))
++        return ("multiplexed character special file");
++
++    if (S_ISMPX (st->st_mode))
++        return ("multiplexed file");
++
++    if (S_ISNAM (st->st_mode))
++        return ("named file");
++
++    if (S_ISNWK (st->st_mode))
++        return ("network special file");
++
++    if (S_ISOFD (st->st_mode))
++        return ("migrated file with data");
++
++    if (S_ISOFL (st->st_mode))
++        return ("migrated file without data");
++
++    if (S_ISPORT (st->st_mode))
++        return ("port");
++
++    if (S_ISSOCK (st->st_mode))
++        return ("socket");
++
++    if (S_ISWHT (st->st_mode))
++        return ("whiteout");
++#endif
++
++    return ("weird file");
++}
+diff -uNr a/vtools/lib/filetype.h b/vtools/lib/filetype.h
+--- a/vtools/lib/filetype.h false
++++ b/vtools/lib/filetype.h 85b8216cbbc74b5e8e7a777c9aeca84f00f35c59632618f25bca930d9aa0c53da765af16e730e2a1a453da429106aee64f923d984756ef34595fb33d5735a55f
+@@ -0,0 +1,11 @@
++/* Written by Paul Eggert and Jim Meyering.  */
++
++#ifndef FILE_TYPE_H
++#define FILE_TYPE_H 1
++
++#include <sys/types.h>
++#include <sys/stat.h>
++
++char const *file_type(struct stat const *);
++
++#endif
+diff -uNr a/vtools/lib/hash.c b/vtools/lib/hash.c
+--- a/vtools/lib/hash.c false
++++ b/vtools/lib/hash.c b6fc0ddff6df2676f29e1474fccd221f7b66a1cca633ddb93a0da834d20ad3201f4bac4c748d8beb4b0c7c88c98c4a093916a8bdd699f733708afc8db0f84214
+@@ -0,0 +1,1152 @@
++/* A generic hash table package.  */
++
++/* Define |USE_OBSTACK| to 1 if you want the allocator to use obstacks
++   instead of |malloc|.  If you change |USE_OBSTACK|, you have to
++   recompile!  */
++
++#include "hash.h"
++#include "system.h"
++
++#include <stdlib.h>
++#include <limits.h>
++
++#if USE_OBSTACK
++# include "obstack.h"
++# ifndef obstack_chunk_alloc
++#  define obstack_chunk_alloc malloc
++# endif
++# ifndef obstack_chunk_free
++#  define obstack_chunk_free free
++# endif
++#endif
++
++struct hash_entry {
++    void *data;
++    struct hash_entry *next;
++};
++
++struct hash_table {
++    /* The array of buckets starts at |bucket| and extends to
++       |bucket_limit-1|, for a possibility of |n_buckets|.  Among
++       those, |n_buckets_used| buckets are not empty, there are
++       |n_entries| active entries in the table.  */
++    struct hash_entry *bucket;
++    struct hash_entry const *bucket_limit;
++    size_t n_buckets;
++    size_t n_buckets_used;
++    size_t n_entries;
++
++    /* Tuning arguments, kept in a physically separate structure.  */
++    const Hash_tuning *tuning;
++
++    /* Three functions are given to |hash_initialize|, see the
++       documentation block for this function.  In a word, |hasher|
++       randomizes a user entry into a number up from 0 up to some
++       maximum minus 1; |comparator| returns true if two user entries
++       compare equally; and |data_freer| is the cleanup function for a
++       user entry.  */
++    Hash_hasher hasher;
++    Hash_comparator comparator;
++    Hash_data_freer data_freer;
++
++    /* A linked list of freed struct |hash_entry| structs.  */
++    struct hash_entry *free_entry_list;
++
++#if USE_OBSTACK
++    /* Whenever obstacks are used, it is possible to allocate all
++       overflowed entries into a single stack, so they all can be
++       freed in a single operation.  It is not clear if the speedup is
++       worth the trouble.  */
++    struct obstack entry_stack;
++#endif
++};
++
++/* A hash table contains many internal entries, each holding a pointer
++   to some user-provided data (also called a user entry).  An entry
++   indistinctly refers to both the internal entry and its associated
++   user entry.  A user entry contents may be hashed by a randomization
++   function (the hashing function, or just "hasher" for short) into a
++   number (or "slot") between 0 and the current table size.  At each
++   slot position in the hash table, starts a linked chain of entries
++   for which the user data all hash to this slot.  A bucket is the
++   collection of all entries hashing to the same slot.
++
++   A good "hasher" function will distribute entries rather evenly in
++   buckets.  In the ideal case, the length of each bucket is roughly
++   the number of entries divided by the table size.  Finding the slot
++   for a data is usually done in constant time by the "hasher", and
++   the later finding of a precise entry is linear in time with the
++   size of the bucket.  Consequently, a larger hash table size (that
++   is, a larger number of buckets) is prone to yielding shorter
++   chains, {\bf given} the "hasher" function behaves properly.
++
++   Long buckets slow down the lookup algorithm.  One might use big
++   hash table sizes in hope to reduce the average length of buckets,
++   but this might become inordinate, as unused slots in the hash table
++   take some space.  The best bet is to make sure you are using a good
++   "hasher" function (beware that those are not that easy to write!
++   :-), and to use a table size larger than the actual number of
++   entries.  */
++
++/* If an insertion makes the ratio of nonempty buckets to table size
++   larger than the growth threshold (a number between 0.0 and 1.0),
++   then increase the table size by multiplying by the growth factor (a
++   number greater than 1.0).  The growth threshold defaults to 0.8,
++   and the growth factor defaults to 1.414, meaning that the table
++   will have doubled its size every second time 80\% of the buckets
++   get used.  */
++#define DEFAULT_GROWTH_THRESHOLD 0.8f
++#define DEFAULT_GROWTH_FACTOR 1.414f
++
++/* If a deletion empties a bucket and causes the ratio of used buckets
++   to table size to become smaller than the shrink threshold (a number
++   between 0.0 and 1.0), then shrink the table by multiplying by the
++   shrink factor (a number greater than the shrink threshold but
++   smaller than 1.0).  The shrink threshold and factor default to 0.0
++   and 1.0, meaning that the table never shrinks.  */
++#define DEFAULT_SHRINK_THRESHOLD 0.0f
++#define DEFAULT_SHRINK_FACTOR 1.0f
++
++/* Use this to initialize or reset a |tuning| structure to some
++   sensible values. */
++static const Hash_tuning default_tuning =
++        {
++                DEFAULT_SHRINK_THRESHOLD,
++                DEFAULT_SHRINK_FACTOR,
++                DEFAULT_GROWTH_THRESHOLD,
++                DEFAULT_GROWTH_FACTOR,
++                false
++        };
++
++/* Information and lookup.  */
++
++/* The following few functions provide information about the overall
++   hash table organization: the number of entries, number of buckets
++   and maximum length of buckets.  */
++
++/* Return the number of buckets in the hash table.  The table size,
++   the total number of buckets (used plus unused), or the maximum
++   number of slots, are the same quantity.  */
++
++size_t
++hash_get_n_buckets(const Hash_table *table) {
++    return table->n_buckets;
++}
++
++/* Return the number of slots in use (non-empty buckets).  */
++
++size_t
++hash_get_n_buckets_used(const Hash_table *table) {
++    return table->n_buckets_used;
++}
++
++/* Return the number of active entries.  */
++
++size_t
++hash_get_n_entries(const Hash_table *table) {
++    return table->n_entries;
++}
++
++/* Return the length of the longest chain (bucket).  */
++
++size_t
++hash_get_max_bucket_length(const Hash_table *table) {
++    struct hash_entry const *bucket;
++    size_t max_bucket_length = 0;
++
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        if (bucket->data) {
++            struct hash_entry const *cursor = bucket;
++            size_t bucket_length = 1;
++
++            while (cursor = cursor->next, cursor)
++                bucket_length++;
++
++            if (bucket_length > max_bucket_length)
++                max_bucket_length = bucket_length;
++        }
++    }
++
++    return max_bucket_length;
++}
++
++/* Do a mild validation of a hash table, by traversing it and checking
++   two statistics.  */
++
++bool
++hash_table_ok(const Hash_table *table) {
++    struct hash_entry const *bucket;
++    size_t n_buckets_used = 0;
++    size_t n_entries = 0;
++
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        if (bucket->data) {
++            struct hash_entry const *cursor = bucket;
++
++            /* Count bucket head.  */
++            n_buckets_used++;
++            n_entries++;
++
++            /* Count bucket overflow.  */
++            while (cursor = cursor->next, cursor)
++                n_entries++;
++        }
++    }
++
++    if (n_buckets_used == table->n_buckets_used && n_entries == table->n_entries)
++        return true;
++
++    return false;
++}
++
++void
++hash_print_statistics(const Hash_table *table, FILE *stream) {
++    size_t n_entries = hash_get_n_entries(table);
++    size_t n_buckets = hash_get_n_buckets(table);
++    size_t n_buckets_used = hash_get_n_buckets_used(table);
++    size_t max_bucket_length = hash_get_max_bucket_length(table);
++
++    fprintf(stream, "# entries:         %lu\n", (unsigned long int) n_entries);
++    fprintf(stream, "# buckets:         %lu\n", (unsigned long int) n_buckets);
++    fprintf(stream, "# buckets used:    %lu (%.2f%%)\n",
++            (unsigned long int) n_buckets_used,
++            (100.0 * n_buckets_used) / n_buckets);
++    fprintf(stream, "max bucket length: %lu\n",
++            (unsigned long int) max_bucket_length);
++}
++
++/* Hash |key| and return a pointer to the selected bucket.  If
++   |table->hasher| misbehaves, abort.  */
++static struct hash_entry *
++safe_hasher(const Hash_table *table, const void *key) {
++    size_t n = table->hasher(key, table->n_buckets);
++    if (!(n < table->n_buckets))
++        abort();
++    return table->bucket + n;
++}
++
++/* If |entry| matches an entry already in the hash table, return the
++   entry from the table.  Otherwise, return |NULL|.  */
++
++void *
++hash_lookup(const Hash_table *table, const void *entry) {
++    struct hash_entry const *bucket = safe_hasher(table, entry);
++    struct hash_entry const *cursor;
++
++    if (bucket->data == NULL)
++        return NULL;
++
++    for (cursor = bucket; cursor; cursor = cursor->next)
++        if (entry == cursor->data || table->comparator(entry, cursor->data))
++            return cursor->data;
++
++    return NULL;
++}
++
++/* Walking.  */
++
++/* The functions in this page traverse the hash table and process the
++   contained entries.  For the traversal to work properly, the hash
++   table should not be resized nor modified while any particular entry
++   is being processed.  In particular, entries should not be added,
++   and an entry may be removed only if there is no shrink threshold
++   and the entry being removed has already been passed to
++   |hash_get_next|.  */
++
++/* Return the first data in the table, or |NULL| if the table is
++   empty.  */
++
++void *
++hash_get_first(const Hash_table *table) {
++    struct hash_entry const *bucket;
++
++    if (table->n_entries == 0)
++        return NULL;
++
++    for (bucket = table->bucket;; bucket++)
++        if (!(bucket < table->bucket_limit))
++            abort();
++        else if (bucket->data)
++            return bucket->data;
++}
++
++/* Return the user data for the entry following |entry|, where |entry|
++   has been returned by a previous call to either |hash_get_first| or
++   |hash_get_next|.  Return |NULL| if there are no more entries.  */
++
++void *
++hash_get_next(const Hash_table *table, const void *entry) {
++    struct hash_entry const *bucket = safe_hasher(table, entry);
++    struct hash_entry const *cursor;
++
++    /* Find next entry in the same bucket.  */
++    cursor = bucket;
++    do {
++        if (cursor->data == entry && cursor->next)
++            return cursor->next->data;
++        cursor = cursor->next;
++    } while (cursor != NULL);
++
++    /* Find first entry in any subsequent bucket.  */
++    while (++bucket < table->bucket_limit)
++        if (bucket->data)
++            return bucket->data;
++
++    /* None found.  */
++    return NULL;
++}
++
++/* Fill |buffer| with pointers to active user entries in the hash
++   table, then return the number of pointers copied.  Do not copy more
++   than |buffer_size| pointers.  */
++
++size_t
++hash_get_entries(const Hash_table *table, void **buffer,
++                 size_t buffer_size) {
++    size_t counter = 0;
++    struct hash_entry const *bucket;
++    struct hash_entry const *cursor;
++
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        if (bucket->data) {
++            for (cursor = bucket; cursor; cursor = cursor->next) {
++                if (counter >= buffer_size)
++                    return counter;
++                buffer[counter++] = cursor->data;
++            }
++        }
++    }
++
++    return counter;
++}
++
++/* Call a |processor| function for each entry of a hash table, and
++   return the number of entries for which the processor function
++   returned success.  A pointer to some |processor_data| which will be
++   made available to each call to the processor function.  The
++   |processor| accepts two arguments: the first is the user entry
++   being walked into, the second is the value of |processor_data| as
++   received.  The walking continue for as long as the |processor|
++   function returns nonzero.  When it returns zero, the walking is
++   interrupted.  */
++
++size_t
++hash_do_for_each(const Hash_table *table, Hash_processor processor,
++                 void *processor_data) {
++    size_t counter = 0;
++    struct hash_entry const *bucket;
++    struct hash_entry const *cursor;
++
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        if (bucket->data) {
++            for (cursor = bucket; cursor; cursor = cursor->next) {
++                if (!processor(cursor->data, processor_data))
++                    return counter;
++                counter++;
++            }
++        }
++    }
++
++    return counter;
++}
++
++/* Allocation and clean-up.  */
++
++/* Return a hash index for a |NULL|-terminated |string| between |0| and
++   |n_buckets-1|.  This is a convenience routine for constructing
++   other hashing functions.  */
++
++#if USE_DIFF_HASH
++
++/* About hashings, Paul Eggert writes to me (FP), on 1994-01-01:
++   ``Please see B. J. McKenzie, R. Harries \& T. Bell, Selecting a
++   hashing algorithm, Software--practice \& experience 20, 2 (Feb
++   1990), 209-224.  Good hash algorithms tend to be domain-specific,
++   so what's good for [diffutils'] |io.c| may not be good for your
++   application.''  */
++
++size_t
++hash_string (const char *string, size_t n_buckets)
++{
++# define HASH_ONE_CHAR(Value, Byte) \
++  ((Byte) + rotl_sz (Value, 7))
++
++  size_t value = 0;
++  unsigned char ch;
++
++  for (; (ch = *string); string++)
++    value = HASH_ONE_CHAR (value, ch);
++  return value % n_buckets;
++
++# undef HASH_ONE_CHAR
++}
++
++#else
++
++/* This one comes from |recode|, and performs a bit better than the
++   above as per a few experiments.  It is inspired from a hashing
++   routine found in the very old Cyber `snoop', itself written in
++   typical Greg Mansfield style.  (By the way, what happened to this
++   excellent man?  Is he still alive?)  */
++
++size_t
++hash_string(const char *string, size_t n_buckets) {
++    size_t value = 0;
++    unsigned char ch;
++
++    for (; (ch = *string); string++)
++        value = (value * 31 + ch) % n_buckets;
++    return value;
++}
++
++#endif
++
++/* Return true if |candidate| is a prime number.  |candidate| should
++   be an odd number at least equal to 11.  */
++
++static bool
++is_prime(size_t candidate) {
++    size_t divisor = 3;
++    size_t square = divisor * divisor;
++
++    while (square < candidate && (candidate % divisor)) {
++        divisor++;
++        square += 4 * divisor;
++        divisor++;
++    }
++
++    return (candidate % divisor ? true : false);
++}
++
++/* Round a given |candidate| number up to the nearest prime, and
++   return that prime.  Primes lower than 10 are merely skipped.  */
++
++static size_t
++next_prime(size_t candidate) {
++    /* Skip small primes.  */
++    if (candidate < 10)
++        candidate = 10;
++
++    /* Make it definitely odd.  */
++    candidate |= 1;
++
++    while (SIZE_MAX != candidate && !is_prime(candidate))
++        candidate += 2;
++
++    return candidate;
++}
++
++void
++hash_reset_tuning(Hash_tuning *tuning) {
++    *tuning = default_tuning;
++}
++
++/* Given a |size_t| argument |x|, return the value corresponding to
++   rotating the bits |n| steps to the right.  |n| must be between 1 to
++   |(CHAR_BIT * sizeof (size_t) - 1)| inclusive.  */
++static inline size_t
++rotr_sz(size_t x, int n) {
++    return ((x >> n) | (x << ((CHAR_BIT * sizeof x) - n))) & SIZE_MAX;
++}
++
++/* If the user passes a |NULL| hasher, we hash the raw pointer.  */
++static size_t
++raw_hasher(const void *data, size_t n) {
++    /* When hashing unique pointers, it is often the case that they
++       were generated by malloc and thus have the property that the
++       low-order bits are 0.  As this tends to give poorer performance
++       with small tables, we rotate the pointer value before
++       performing division, in an attempt to improve hash quality.  */
++    size_t val = rotr_sz((size_t) data, 3);
++    return val % n;
++}
++
++/* If the user passes a |NULL| comparator, we use pointer
++   comparison.  */
++static bool
++raw_comparator(const void *a, const void *b) {
++    return a == b;
++}
++
++
++/* For the given hash |table|, check the user supplied tuning
++   structure for reasonable values, and return true if there is no
++   gross error with it.  Otherwise, definitively reset the |tuning|
++   field to some acceptable default in the hash table (that is, the
++   user loses the right of further modifying tuning arguments), and
++   return false.  */
++
++static bool
++check_tuning(Hash_table *table) {
++    const Hash_tuning *tuning = table->tuning;
++    float epsilon;
++    if (tuning == &default_tuning)
++        return true;
++
++    /* Be a bit stricter than mathematics would require, so that
++       rounding errors in size calculations do not cause allocations
++       to fail to grow or shrink as they should.  The smallest
++       allocation is 11 (due to |next_prime|'s algorithm), so an
++       epsilon of 0.1 should be good enough.  */
++    epsilon = 0.1f;
++
++    if (epsilon < tuning->growth_threshold
++        && tuning->growth_threshold < 1 - epsilon
++        && 1 + epsilon < tuning->growth_factor
++        && 0 <= tuning->shrink_threshold
++        && tuning->shrink_threshold + epsilon < tuning->shrink_factor
++        && tuning->shrink_factor <= 1
++        && tuning->shrink_threshold + epsilon < tuning->growth_threshold)
++        return true;
++
++    table->tuning = &default_tuning;
++    return false;
++}
++
++/* Compute the size of the bucket array for the given |candidate| and
++   |tuning|, or return 0 if there is no possible way to allocate that
++   many entries.  */
++
++static size_t
++compute_bucket_size(size_t candidate, const Hash_tuning *tuning) {
++    if (!tuning->is_n_buckets) {
++        float new_candidate = candidate / tuning->growth_threshold;
++        if (SIZE_MAX <= new_candidate)
++            return 0;
++        candidate = new_candidate;
++    }
++    candidate = next_prime(candidate);
++    if (xalloc_oversized (candidate, sizeof(struct hash_entry *)))
++        return 0;
++    return candidate;
++}
++
++/* Allocate and return a new hash table, or |NULL| upon failure.  The
++   initial number of buckets is automatically selected so as to {\it
++   guarantee} that you may insert at least |candidate| different user
++   entries before any growth of the hash table size occurs.  So, if
++   have a reasonably tight a-priori upper bound on the number of
++   entries you intend to insert in the hash table, you may save some
++   table memory and insertion time, by specifying it here.  If the
++   |is_n_buckets| field of the |tuning| structure is true, the
++   |candidate| argument has its meaning changed to the wanted number
++   of buckets.
++
++   |tuning| points to a structure of user-supplied values, in case
++   some fine tuning is wanted over the default behavior of the hasher.
++   If |tuning| is |NULL|, the default tuning parameters are used
++   instead.  If |tuning| is provided but the values requested are out
++   of bounds or might cause rounding errors, return |NULL|.
++
++   The user-supplied |hasher| function, when not |NULL|, accepts two
++   arguments |entry| and |table_size|.  It computes, by hashing
++   |entry| contents, a slot number for that entry which should be in
++   the range |0..table_size-1|.  This slot number is then returned.
++
++   The user-supplied |comparator| function, when not |NULL|, accepts
++   two arguments pointing to user data, it then returns true for a
++   pair of entries that compare equal, or false otherwise.  This
++   function is internally called on entries which are already known to
++   hash to the same bucket index, but which are distinct pointers.
++
++   The user-supplied |data_freer| function, when not |NULL|, may be
++   later called with the user data as an argument, just before the
++   entry containing the data gets freed.  This happens from within
++   |hash_free| or |hash_clear|.  You should specify this function only
++   if you want these functions to free all of your |data| data.  This
++   is typically the case when your data is simply an auxiliary struct
++   that you have |malloc|'d to aggregate several values.  */
++
++Hash_table *
++hash_initialize(size_t candidate, const Hash_tuning *tuning,
++                Hash_hasher hasher, Hash_comparator comparator,
++                Hash_data_freer data_freer) {
++    Hash_table *table;
++
++    if (hasher == NULL)
++        hasher = raw_hasher;
++    if (comparator == NULL)
++        comparator = raw_comparator;
++
++    table = malloc(sizeof *table);
++    if (table == NULL)
++        return NULL;
++
++    if (!tuning)
++        tuning = &default_tuning;
++    table->tuning = tuning;
++    if (!check_tuning(table)) {
++        /* Fail if the tuning options are invalid.  This is the only
++           occasion when the user gets some feedback about it.  Once
++           the table is created, if the user provides invalid tuning
++           options, we silently revert to using the defaults, and
++           ignore further request to change the tuning options.  */
++        goto fail;
++    }
++
++    table->n_buckets = compute_bucket_size(candidate, tuning);
++    if (!table->n_buckets)
++        goto fail;
++
++    table->bucket = calloc(table->n_buckets, sizeof *table->bucket);
++    if (table->bucket == NULL)
++        goto fail;
++    table->bucket_limit = table->bucket + table->n_buckets;
++    table->n_buckets_used = 0;
++    table->n_entries = 0;
++
++    table->hasher = hasher;
++    table->comparator = comparator;
++    table->data_freer = data_freer;
++
++    table->free_entry_list = NULL;
++#if USE_OBSTACK
++    obstack_init (&table->entry_stack);
++#endif
++    return table;
++
++    fail:
++    free(table);
++    return NULL;
++}
++
++/* Make all buckets empty, placing any chained entries on the free
++   list.  Apply the user-specified function |data_freer| (if any) to
++   the datas of any affected entries.  */
++
++void
++hash_clear(Hash_table *table) {
++    struct hash_entry *bucket;
++
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        if (bucket->data) {
++            struct hash_entry *cursor;
++            struct hash_entry *next;
++
++            /* Free the bucket overflow.  */
++            for (cursor = bucket->next; cursor; cursor = next) {
++                if (table->data_freer)
++                    table->data_freer(cursor->data);
++                cursor->data = NULL;
++
++                next = cursor->next;
++                /* Relinking is done one entry at a time, as it is to
++                   be expected that overflows are either rare or
++                   short.  */
++                cursor->next = table->free_entry_list;
++                table->free_entry_list = cursor;
++            }
++
++            /* Free the bucket head.  */
++            if (table->data_freer)
++                table->data_freer(bucket->data);
++            bucket->data = NULL;
++            bucket->next = NULL;
++        }
++    }
++
++    table->n_buckets_used = 0;
++    table->n_entries = 0;
++}
++
++/* Reclaim all storage associated with a hash table.  If a
++   |data_freer| function has been supplied by the user when the hash
++   table was created, this function applies it to the data of each
++   entry before freeing that entry.  */
++
++void
++hash_free(Hash_table *table) {
++    struct hash_entry *bucket;
++    struct hash_entry *cursor;
++    struct hash_entry *next;
++
++    /* Call the user |data_freer| function.  */
++    if (table->data_freer && table->n_entries) {
++        for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++            if (bucket->data) {
++                for (cursor = bucket; cursor; cursor = cursor->next)
++                    table->data_freer(cursor->data);
++            }
++        }
++    }
++
++#if USE_OBSTACK
++
++    obstack_free (&table->entry_stack, NULL);
++
++#else
++
++    /* Free all bucket overflowed entries.  */
++    for (bucket = table->bucket; bucket < table->bucket_limit; bucket++) {
++        for (cursor = bucket->next; cursor; cursor = next) {
++            next = cursor->next;
++            free(cursor);
++        }
++    }
++
++    /* Also reclaim the internal list of previously freed entries.  */
++    for (cursor = table->free_entry_list; cursor; cursor = next) {
++        next = cursor->next;
++        free(cursor);
++    }
++
++#endif
++
++    /* Free the remainder of the hash table structure.  */
++    free(table->bucket);
++    free(table);
++}
++
++/* Insertion and deletion.  */
++
++/* Get a new hash entry for a bucket overflow, possibly by recycling a
++   previously freed one.  If this is not possible, allocate a new
++   one.  */
++
++static struct hash_entry *
++allocate_entry(Hash_table *table) {
++    struct hash_entry *new;
++
++    if (table->free_entry_list) {
++        new = table->free_entry_list;
++        table->free_entry_list = new->next;
++    } else {
++#if USE_OBSTACK
++        new = obstack_alloc (&table->entry_stack, sizeof *new);
++#else
++        new = malloc(sizeof *new);
++#endif
++    }
++
++    return new;
++}
++
++/* Free a hash entry which was part of some bucket overflow, saving it
++   for later recycling.  */
++
++static void
++free_entry(Hash_table *table, struct hash_entry *entry) {
++    entry->data = NULL;
++    entry->next = table->free_entry_list;
++    table->free_entry_list = entry;
++}
++
++/* This private function is used to help with insertion and deletion.
++   When |entry| matches an entry in the table, return a pointer to the
++   corresponding user data and set |*bucket_head| to the head of the
++   selected bucket.  Otherwise, return |NULL|.  When |delete| is true
++   and |entry| matches an entry in the table, unlink the matching
++   entry.  */
++
++static void *
++hash_find_entry(Hash_table *table, const void *entry,
++                struct hash_entry **bucket_head, bool delete) {
++    struct hash_entry *bucket = safe_hasher(table, entry);
++    struct hash_entry *cursor;
++
++    *bucket_head = bucket;
++
++    /* Test for empty bucket.  */
++    if (bucket->data == NULL)
++        return NULL;
++
++    /* See if the entry is the first in the bucket.  */
++    if (entry == bucket->data || table->comparator(entry, bucket->data)) {
++        void *data = bucket->data;
++
++        if (delete) {
++            if (bucket->next) {
++                struct hash_entry *next = bucket->next;
++
++                /* Bump the first overflow entry into the bucket head, then save
++                   the previous first overflow entry for later recycling.  */
++                *bucket = *next;
++                free_entry(table, next);
++            } else {
++                bucket->data = NULL;
++            }
++        }
++
++        return data;
++    }
++
++    /* Scan the bucket overflow.  */
++    for (cursor = bucket; cursor->next; cursor = cursor->next) {
++        if (entry == cursor->next->data
++            || table->comparator(entry, cursor->next->data)) {
++            void *data = cursor->next->data;
++
++            if (delete) {
++                struct hash_entry *next = cursor->next;
++
++                /* Unlink the entry to delete, then save the freed entry for later
++                   recycling.  */
++                cursor->next = next->next;
++                free_entry(table, next);
++            }
++
++            return data;
++        }
++    }
++
++    /* No entry found.  */
++    return NULL;
++}
++
++/* Internal helper, to move entries from |src| to |dst|.  Both tables
++   must share the same free entry list.  If |safe|, only move overflow
++   entries, saving bucket heads for later, so that no allocations will
++   occur.  Return false if the free entry list is exhausted and an
++   allocation fails.  */
++
++static bool
++transfer_entries(Hash_table *dst, Hash_table *src, bool safe) {
++    struct hash_entry *bucket;
++    struct hash_entry *cursor;
++    struct hash_entry *next;
++    for (bucket = src->bucket; bucket < src->bucket_limit; bucket++)
++        if (bucket->data) {
++            void *data;
++            struct hash_entry *new_bucket;
++
++            /* Within each bucket, transfer overflow entries first and
++               then the bucket head, to minimize memory pressure.
++               After all, the only time we might allocate is when
++               moving the bucket head, but moving overflow entries
++               first may create free entries that can be recycled by
++               the time we finally get to the bucket head.  */
++            for (cursor = bucket->next; cursor; cursor = next) {
++                data = cursor->data;
++                new_bucket = safe_hasher(dst, data);
++
++                next = cursor->next;
++
++                if (new_bucket->data) {
++                    /* Merely relink an existing entry, when moving
++                       from a bucket overflow into a bucket
++                       overflow.  */
++                    cursor->next = new_bucket->next;
++                    new_bucket->next = cursor;
++                } else {
++                    /* Free an existing entry, when moving from a
++                       bucket overflow into a bucket header.  */
++                    new_bucket->data = data;
++                    dst->n_buckets_used++;
++                    free_entry(dst, cursor);
++                }
++            }
++            /* Now move the bucket head.  Be sure that if we fail due
++               to allocation failure that the src table is in a
++               consistent state.  */
++            data = bucket->data;
++            bucket->next = NULL;
++            if (safe)
++                continue;
++            new_bucket = safe_hasher(dst, data);
++
++            if (new_bucket->data) {
++                /* Allocate or recycle an entry, when moving from a
++                   bucket header into a bucket overflow.  */
++                struct hash_entry *new_entry = allocate_entry(dst);
++
++                if (new_entry == NULL)
++                    return false;
++
++                new_entry->data = data;
++                new_entry->next = new_bucket->next;
++                new_bucket->next = new_entry;
++            } else {
++                /* Move from one bucket header to another.  */
++                new_bucket->data = data;
++                dst->n_buckets_used++;
++            }
++            bucket->data = NULL;
++            src->n_buckets_used--;
++        }
++    return true;
++}
++
++/* For an already existing hash table, change the number of buckets
++   through specifying |candidate|.  The contents of the hash table are
++   preserved.  The new number of buckets is automatically selected so
++   as to {\it guarantee} that the table may receive at least
++   |candidate| different user entries, including those already in the
++   table, before any other growth of the hash table size occurs.  If
++   |tuning->is_n_buckets| is true, then |candidate| specifies the
++   exact number of buckets desired.  Return true iff the rehash
++   succeeded.  */
++
++bool
++hash_rehash(Hash_table *table, size_t candidate) {
++    Hash_table storage;
++    Hash_table *new_table;
++    size_t new_size = compute_bucket_size(candidate, table->tuning);
++
++    if (!new_size)
++        return false;
++    if (new_size == table->n_buckets)
++        return true;
++    new_table = &storage;
++    new_table->bucket = calloc(new_size, sizeof *new_table->bucket);
++    if (new_table->bucket == NULL)
++        return false;
++    new_table->n_buckets = new_size;
++    new_table->bucket_limit = new_table->bucket + new_size;
++    new_table->n_buckets_used = 0;
++    new_table->n_entries = 0;
++    new_table->tuning = table->tuning;
++    new_table->hasher = table->hasher;
++    new_table->comparator = table->comparator;
++    new_table->data_freer = table->data_freer;
++
++    /* In order for the transfer to successfully complete, we need
++       additional overflow entries when distinct buckets in the old
++       table collide into a common bucket in the new table.  The worst
++       case possible is a hasher that gives a good spread with the old
++       size, but returns a constant with the new size; if we were to
++       guarantee |table->n_buckets_used-1| free entries in advance, then
++       the transfer would be guaranteed to not allocate memory.
++       However, for large tables, a guarantee of no further allocation
++       introduces a lot of extra memory pressure, all for an unlikely
++       corner case (most rehashes reduce, rather than increase, the
++       number of overflow entries needed).  So, we instead ensure that
++       the transfer process can be reversed if we hit a memory
++       allocation failure mid-transfer.  */
++
++    /* Merely reuse the extra old space into the new table.  */
++#if USE_OBSTACK
++    new_table->entry_stack = table->entry_stack;
++#endif
++    new_table->free_entry_list = table->free_entry_list;
++
++    if (transfer_entries(new_table, table, false)) {
++        /* Entries transferred successfully; tie up the loose ends.  */
++        free(table->bucket);
++        table->bucket = new_table->bucket;
++        table->bucket_limit = new_table->bucket_limit;
++        table->n_buckets = new_table->n_buckets;
++        table->n_buckets_used = new_table->n_buckets_used;
++        table->free_entry_list = new_table->free_entry_list;
++        /* |table->n_entries| and |table->entry_stack| already hold their value.  */
++        return true;
++    }
++
++    /* We've allocated |new_table->bucket| (and possibly some
++       entries), exhausted the free list, and moved some but not all
++       entries into |new_table|.  We must undo the partial move before
++       returning failure.  The only way to get into this situation is
++       if |new_table| uses fewer buckets than the old table, so we
++       will reclaim some free entries as overflows in the new table
++       are put back into distinct buckets in the old table.
++
++       There are some pathological cases where a single pass through
++       the table requires more intermediate overflow entries than
++       using two passes.  Two passes give worse cache performance and
++       takes longer, but at this point, we're already out of memory,
++       so slow and safe is better than failure.  */
++    table->free_entry_list = new_table->free_entry_list;
++    if (!(transfer_entries(table, new_table, true)
++          && transfer_entries(table, new_table, false)))
++        abort();
++    /* |table->n_entries| already holds its value.  */
++    free(new_table->bucket);
++    return false;
++}
++
++/* Insert |entry| into hash |table| if there is not already a matching
++   entry.
++
++   Return -1 upon memory allocation failure.
++   Return 1 if insertion succeeded.
++   Return 0 if there is already a matching entry in the table, and in
++   that case, if |matched_ent| is non-|NULL|, set |*matched_ent| to
++   that entry.
++
++   This interface is easier to use than |hash_insert| when you must
++   distinguish between the latter two cases.  More importantly,
++   |hash_insert| is unusable for some types of |entry| values.  When
++   using |hash_insert|, the only way to distinguish those cases is to
++   compare the return value and |entry|.  That works only when you can
++   have two different |entry| values that point to data that compares
++   "equal".  Thus, when the |entry| value is a simple scalar, you must
++   use |hash_insert_if_absent|.  |entry| must not be |NULL|.  */
++int
++hash_insert_if_absent(Hash_table *table, void const *entry,
++                      void const **matched_ent) {
++    void *data;
++    struct hash_entry *bucket;
++
++    /* The caller cannot insert a |NULL| entry, since |hash_lookup|
++       returns |NULL| to indicate "not found", and |hash_find_entry|
++       uses |bucket->data == NULL| to indicate an empty bucket.  */
++    if (!entry)
++        abort();
++
++    /* If there's a matching entry already in the table, return that.  */
++    if ((data = hash_find_entry(table, entry, &bucket, false)) != NULL) {
++        if (matched_ent)
++            *matched_ent = data;
++        return 0;
++    }
++
++    /* If the growth threshold of the buckets in use has been reached,
++       increase the table size and rehash.  There's no point in
++       checking the number of entries: if the hashing function is
++       ill-conditioned, rehashing is not likely to improve it.  */
++
++    if (table->n_buckets_used
++        > table->tuning->growth_threshold * table->n_buckets) {
++        /* Check more fully, before starting real work.  If tuning
++           arguments became invalid, the second check will rely on
++           proper defaults.  */
++        check_tuning(table);
++        if (table->n_buckets_used
++            > table->tuning->growth_threshold * table->n_buckets) {
++            const Hash_tuning *tuning = table->tuning;
++            float candidate =
++                    (tuning->is_n_buckets
++                     ? (table->n_buckets * tuning->growth_factor)
++                     : (table->n_buckets * tuning->growth_factor
++                        * tuning->growth_threshold));
++
++            if (SIZE_MAX <= candidate)
++                return -1;
++
++            /* If the rehash fails, arrange to return |NULL|.  */
++            if (!hash_rehash(table, candidate))
++                return -1;
++
++            /* Update the bucket we are interested in.  */
++            if (hash_find_entry(table, entry, &bucket, false) != NULL)
++                abort();
++        }
++    }
++
++    /* |entry| is not matched, it should be inserted.  */
++
++    if (bucket->data) {
++        struct hash_entry *new_entry = allocate_entry(table);
++
++        if (new_entry == NULL)
++            return -1;
++
++        /* Add |entry| in the overflow of the bucket.  */
++
++        new_entry->data = (void *) entry;
++        new_entry->next = bucket->next;
++        bucket->next = new_entry;
++        table->n_entries++;
++        return 1;
++    }
++
++    /* Add |entry| right in the bucket head.  */
++
++    bucket->data = (void *) entry;
++    table->n_entries++;
++    table->n_buckets_used++;
++
++    return 1;
++}
++
++/* If |entry| matches an entry already in the hash table, return the
++   pointer to the entry from the table.  Otherwise, insert |entry| and
++   return |entry|.  Return |NULL| if the storage required for
++   insertion cannot be allocated.  This implementation does not
++   support duplicate entries or insertion of |NULL|.  */
++
++void *
++hash_insert(Hash_table *table, void const *entry) {
++    void const *matched_ent;
++    int err = hash_insert_if_absent(table, entry, &matched_ent);
++    return (err == -1
++            ? NULL
++            : (void *) (err == 0 ? matched_ent : entry));
++}
++
++/* If |entry| is already in the table, remove it and return the
++   just-deleted data (the user may want to deallocate its storage).
++   If |entry| is not in the table, don't modify the table and return
++   |NULL|.  */
++
++void *
++hash_delete(Hash_table *table, const void *entry) {
++    void *data;
++    struct hash_entry *bucket;
++
++    data = hash_find_entry(table, entry, &bucket, true);
++    if (!data)
++        return NULL;
++
++    table->n_entries--;
++    if (!bucket->data) {
++        table->n_buckets_used--;
++
++        /* If the shrink threshold of the buckets in use has been
++           reached, rehash into a smaller table.  */
++
++        if (table->n_buckets_used
++            < table->tuning->shrink_threshold * table->n_buckets) {
++            /* Check more fully, before starting real work.  If tuning
++               arguments became invalid, the second check will rely on
++               proper defaults.  */
++            check_tuning(table);
++            if (table->n_buckets_used
++                < table->tuning->shrink_threshold * table->n_buckets) {
++                const Hash_tuning *tuning = table->tuning;
++                size_t candidate =
++                        (tuning->is_n_buckets
++                         ? table->n_buckets * tuning->shrink_factor
++                         : (table->n_buckets * tuning->shrink_factor
++                            * tuning->growth_threshold));
++
++                if (!hash_rehash(table, candidate)) {
++                    /* Failure to allocate memory in an attempt to
++                       shrink the table is not fatal.  But since
++                       memory is low, we can at least be kind and free
++                       any spare entries, rather than keeping them
++                       tied up in the free entry list.  */
++#if !USE_OBSTACK
++                    struct hash_entry *cursor = table->free_entry_list;
++                    struct hash_entry *next;
++                    while (cursor) {
++                        next = cursor->next;
++                        free(cursor);
++                        cursor = next;
++                    }
++                    table->free_entry_list = NULL;
++#endif
++                }
++            }
++        }
++    }
++
++    return data;
++}
++
++/* Testing.  */
++
++#if 0
++
++void
++hash_print (const Hash_table *table)
++{
++  struct hash_entry *bucket = (struct hash_entry *) table->bucket;
++
++  for ( ; bucket < table->bucket_limit; bucket++)
++    {
++      struct hash_entry *cursor;
++
++      if (bucket)
++        printf ("%lu:\n", (unsigned long int) (bucket - table->bucket));
++
++      for (cursor = bucket; cursor; cursor = cursor->next)
++        {
++          char const *s = cursor->data;
++          /* FIXME */
++          if (s)
++            printf ("  %s\n", s);
++        }
++    }
++}
++
++#endif
+diff -uNr a/vtools/lib/hash.h b/vtools/lib/hash.h
+--- a/vtools/lib/hash.h false
++++ b/vtools/lib/hash.h 3f9b1e916181cf97228c674716a7270f8d9617aef7380f80a1c71e45f8af70e3bcdbcc8e99a3f5995da20748ce0909486d706edaeb9fdd2332da7c747d211495
+@@ -0,0 +1,87 @@
++
++/* A generic hash table package.  */
++
++/* Make sure |use_obstack| is defined to 1 if you want the allocator
++   to use obstacks instead of malloc, and recompile |hash.c| with same
++   setting.  */
++
++#ifndef HASH_H_
++# define HASH_H_
++
++# include <stdio.h>
++# include <stdbool.h>
++
++typedef size_t (*Hash_hasher)(const void *, size_t);
++
++typedef bool (*Hash_comparator)(const void *, const void *);
++
++typedef void (*Hash_data_freer)(void *);
++
++typedef bool (*Hash_processor)(void *, void *);
++
++struct hash_tuning {
++    /* This structure is mainly used for |hash_initialize|, see the
++       block documentation of |hash_reset_tuning| for more complete
++       comments.  */
++
++    float shrink_threshold;     /* ratio of used buckets to trigger a shrink */
++    float shrink_factor;        /* ratio of new smaller size to original size */
++    float growth_threshold;     /* ratio of used buckets to trigger a growth */
++    float growth_factor;        /* ratio of new bigger size to original size */
++    bool is_n_buckets;          /* if |candidate| really means table size */
++};
++
++typedef struct hash_tuning Hash_tuning;
++
++struct hash_table;
++
++typedef struct hash_table Hash_table;
++
++/* Information and lookup.  */
++size_t hash_get_n_buckets(const Hash_table *);
++
++size_t hash_get_n_buckets_used(const Hash_table *);
++
++size_t hash_get_n_entries(const Hash_table *);
++
++size_t hash_get_max_bucket_length(const Hash_table *);
++
++bool hash_table_ok(const Hash_table *);
++
++void hash_print_statistics(const Hash_table *, FILE *);
++
++void *hash_lookup(const Hash_table *, const void *);
++
++/* Walking.  */
++void *hash_get_first(const Hash_table *);
++
++void *hash_get_next(const Hash_table *, const void *);
++
++size_t hash_get_entries(const Hash_table *, void **, size_t);
++
++size_t hash_do_for_each(const Hash_table *, Hash_processor, void *);
++
++/* Allocation and clean-up.  */
++size_t hash_string(const char *, size_t);
++
++void hash_reset_tuning(Hash_tuning *);
++
++Hash_table *hash_initialize(size_t, const Hash_tuning *,
++                            Hash_hasher, Hash_comparator,
++                            Hash_data_freer);
++
++void hash_clear(Hash_table *);
++
++void hash_free(Hash_table *);
++
++/* Insertion and deletion.  */
++bool hash_rehash(Hash_table *, size_t);
++
++void *hash_insert(Hash_table *, const void *);
++
++int hash_insert_if_absent(Hash_table *table, const void *entry,
++                          const void **matched_ent);
++
++void *hash_delete(Hash_table *, const void *);
++
++#endif
+diff -uNr a/vtools/lib/progname.c b/vtools/lib/progname.c
+--- a/vtools/lib/progname.c false
++++ b/vtools/lib/progname.c 0c59d6aa316297bbf78319ed32a5b89a4c90256af600d6e7751e0a342ef3c0f33fa40dde4674c07446d17a9d041dff895e546dd0da8a29b426731010783418ef
+@@ -0,0 +1,79 @@
++
++/* Specification.  */
++#include "progname.h"
++
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++
++
++/* String containing name the program is called with.  To be
++   initialized by |main()|.  */
++const char *program_name = NULL;
++
++/* Set |program_name|, based on |argv[0]|.  |argv0| must be a string
++   allocated with indefinite extent, and must not be modified after
++   this call.  */
++void
++set_program_name(const char *argv0) {
++    /* libtool creates a temporary executable whose name is sometimes
++       prefixed with "lt-" (depends on the platform).  It also makes
++       |argv[0]| absolute.  But the name of the temporary executable
++       is a detail that should not be visible to the end user and to
++       the test suite.  Remove this |"<dirname>/.libs/"| or
++       |"<dirname>/.libs/lt-"| prefix here.  */
++    const char *slash;
++    const char *base;
++
++    /* Sanity check.  POSIX requires the invoking process to pass a
++       non-|NULL| |argv[0]|.  */
++    if (argv0 == NULL) {
++        /* It's a bug in the invoking program.  Help diagnosing
++           it.  */
++        fputs("A NULL argv[0] was passed through an exec system call.\n",
++              stderr);
++        abort();
++    }
++
++    slash = strrchr(argv0, '/');
++    base = (slash != NULL ? slash + 1 : argv0);
++    if (base - argv0 >= 7 && strncmp(base - 7, "/.libs/", 7) == 0) {
++        argv0 = base;
++        if (strncmp(base, "lt-", 3) == 0) {
++            argv0 = base + 3;
++            /* On glibc systems, remove the "lt-" prefix from the
++               variable |program_invocation_short_name|.  */
++#if HAVE_DECL_PROGRAM_INVOCATION_SHORT_NAME
++            program_invocation_short_name = (char *) argv0;
++#endif
++        }
++    }
++
++    /* But don't strip off a leading |<dirname>/| in general, because
++       when the user runs
++
++           |/some/hidden/place/bin/cp foo foo|
++
++       he should get the error message
++
++           |/some/hidden/place/bin/cp: `foo' and `foo' are the same file|
++
++       not
++
++          | cp: `foo' and `foo' are the same file|
++     */
++
++    program_name = argv0;
++
++    /* On glibc systems, the |error()| function comes from libc and
++       uses the variable |program_invocation_name|, not
++       |program_name|.  So set this variable as well.  */
++#if HAVE_DECL_PROGRAM_INVOCATION_NAME
++    program_invocation_name = (char *) argv0;
++#endif
++}
++
++const char *
++get_program_name(void) {
++    return program_name;
++}
+diff -uNr a/vtools/lib/progname.h b/vtools/lib/progname.h
+--- a/vtools/lib/progname.h false
++++ b/vtools/lib/progname.h 06386eadc00c2bdfaeab30017307bff7f2f78e415563b71ad310e60e4eb53ec6adba3ca2dec17481d394c836e54058a56066992e6a0c72c536ec455e472b2250
+@@ -0,0 +1,20 @@
++
++#ifndef _PROGNAME_H
++#define _PROGNAME_H
++
++/* Programs using this file should do the following in |main()|:
++     |set_program_name (argv[0]);| */
++
++/* String containing name the program is called with.  */
++extern const char *program_name;
++
++/* Set |program_name|, based on |argv[0]|.  |argv0| must be a string
++   allocated with indefinite extent, and must not be modified after
++   this call.  */
++extern void set_program_name(const char *argv0);
++
++/* Return |program_name|. This is similar to getprogname for systems
++   that don't support it. */
++extern const char *get_program_name(void);
++
++#endif
+diff -uNr a/vtools/lib/xalloc.c b/vtools/lib/xalloc.c
+--- a/vtools/lib/xalloc.c false
++++ b/vtools/lib/xalloc.c 34398b33ffbff3e8b38e19f600ac9b56c4526c6d4cd56573477f5fe55a664202dbccecc4135ad0d7b6c7426e8c10f62e3b90bae4038e8db2b001b4fdb68a2248
+@@ -0,0 +1,107 @@
++#include <stdlib.h>
++#include <string.h>
++#include "xalloc.h"
++#include "error.h"
++
++/* 1 if |calloc| is known to be compatible with GNU |calloc|.  This
++   matters if we are not also using the |calloc| module, which defines
++   |HAVE_CALLOC_GNU| and supports the GNU API even on non-GNU
++   platforms.  */
++#if defined HAVE_CALLOC_GNU || (defined __GLIBC__ && !defined __UCLIBC__)
++enum { HAVE_GNU_CALLOC = 1 };
++#else
++enum { HAVE_GNU_CALLOC = 0 };
++#endif
++
++void
++xalloc_die(void) {
++    error(2, 0, "%s", "memory exhausted");
++
++    /* |_Noreturn| cannot be given to error, since it may return if
++       its first argument is 0.  To help compilers understand the
++       |xalloc_die| does not return, call abort.  Also, the abort is a
++       safety feature if |exit_failure| is 0 (which shouldn't
++       happen).  */
++    abort();
++}
++
++/* Allocate |n| bytes of memory dynamically, with error checking.  */
++
++void *
++xmalloc(size_t n) {
++    void *p = malloc(n);
++    if (!p && n != 0)
++        xalloc_die();
++    return p;
++}
++
++/* Change the size of an allocated block of memory |p| to |n| bytes,
++   with error checking.  */
++
++void *
++xrealloc(void *p, size_t n) {
++    if (!n && p) {
++        /* The GNU and C99 realloc behaviors disagree here.  Act like
++           GNU, even if the underlying realloc is C99.  */
++        free(p);
++        return NULL;
++    }
++
++    p = realloc(p, n);
++    if (!p && n)
++        xalloc_die();
++    return p;
++}
++
++/* If |p| is null, allocate a block of at least |*pn| bytes;
++   otherwise, reallocate |p| so that it contains more than |*pn|
++   bytes.  |*PN| must be nonzero unless |p| is |NULL|.  Set |*pn| to
++   the new block's size, and return the pointer to the new block.
++   |*pn| is never set to zero, and the returned pointer is never
++   |NULL|.  */
++
++void *
++x2realloc(void *p, size_t *pn) {
++    return x2nrealloc(p, pn, 1);
++}
++
++/* Allocate |s| bytes of zeroed memory dynamically, with error
++   checking.  There's no need for |xnzalloc (n, s)|, since it would be
++   equivalent to |xcalloc (n, s)|.  */
++
++void *
++xzalloc(size_t s) {
++    return memset (xmalloc(s), 0, s);
++}
++
++/* Allocate zeroed memory for |n| elements of |s| bytes, with error
++   checking.  |s| must be nonzero.  */
++
++void *
++xcalloc(size_t n, size_t s) {
++    void *p;
++    /* Test for overflow, since objects with size greater than
++       |PTRDIFF_MAX| cause pointer subtraction to go awry.  Omit
++       size-zero tests if |HAVE_GNU_CALLOC|, since GNU calloc never
++       returns |NULL| if successful.  */
++    if (xalloc_oversized (n, s)
++        || (!(p = calloc(n, s)) && (HAVE_GNU_CALLOC || n != 0)))
++        xalloc_die();
++    return p;
++}
++
++/* Clone an object |p| of size |s|, with error checking.  There's no
++   need for |xnmemdup (p, n, s)|, since |xmemdup (p, n * s)| works
++   without any need for an arithmetic overflow check.  */
++
++void *
++xmemdup(void const *p, size_t s) {
++    return memcpy (xmalloc(s), p, s);
++}
++
++/* Clone |string|.  */
++
++char *
++xstrdup(char const *string) {
++    return xmemdup(string, strlen(string) + 1);
++}
+diff -uNr a/vtools/lib/xalloc.h b/vtools/lib/xalloc.h
+--- a/vtools/lib/xalloc.h false
++++ b/vtools/lib/xalloc.h c89b884326f0533d71f7c6bd7e6cb09ec4447612e00143494542d5f677c8d7493afebb6c4c5ff539334152647f5b055d0e1591c4f7920c3698aeb8a31df210bf
+@@ -0,0 +1,170 @@
++#ifndef XALLOC_H_
++#define XALLOC_H_
++
++#include <stddef.h>
++#include <stdint.h>
++#include "system.h"
++
++/* This function is always triggered when memory is exhausted.  It
++   must be defined by the application, either explicitly or by using
++   gnulib's xalloc-die module.  This is the function to call when one
++   wants the program to die because of a memory allocation
++   failure.  */
++extern _Noreturn void xalloc_die(void);
++
++void *xmalloc(size_t s);
++void *xzalloc(size_t s);
++void *xcalloc(size_t n, size_t s);
++void *xrealloc(void *p, size_t s);
++void *x2realloc(void *p, size_t *pn);
++void *xmemdup(void const *p, size_t s);
++char *xstrdup(char const *str);
++
++/* In the following macros, |t| must be an elementary or
++   structure/union or typedef'ed type, or a pointer to such a type.
++   To apply one of the following macros to a function pointer or array
++   type, you need to typedef it first and use the typedef name.  */
++
++/* Allocate an object of type |t| dynamically, with error checking. */
++#define XMALLOC(t) ((t *) xmalloc (sizeof (t)))
++
++/* Allocate memory for |n| elements of type |t|, with error
++   checking. */
++#define XNMALLOC(n, t) \
++   ((t *) (sizeof (t) == 1 ? xmalloc (n) : xnmalloc (n, sizeof (t))))
++
++/* Allocate an object of type |t| dynamically, with error checking,
++   and zero it.  */
++#define XZALLOC(t) ((t *) xzalloc (sizeof (t)))
++
++/* Allocate memory for |n| elements of type |t|, with error checking,
++   and zero it.  */
++#define XCALLOC(n, t) \
++   ((t *) (sizeof (t) == 1 ? xzalloc (n) : xcalloc (n, sizeof (t))))
++
++
++/* Allocate an array of |n| objects, each with |s| bytes of memory,
++   dynamically, with error checking.  |s| must be nonzero.  */
++
++inline void *xnmalloc(size_t n, size_t s);
++
++inline void *
++xnmalloc(size_t n, size_t s) {
++    if (xalloc_oversized (n, s))
++        xalloc_die();
++    return xmalloc(n * s);
++}
++
++/* Change the size of an allocated block of memory |p| to an array of
++   |n| objects each of |s| bytes, with error checking.  |s| must be
++   nonzero.  */
++
++inline void *xnrealloc(void *p, size_t n, size_t s);
++
++inline void *
++xnrealloc(void *p, size_t n, size_t s) {
++    if (xalloc_oversized (n, s))
++        xalloc_die();
++    return xrealloc(p, n * s);
++}
++
++/* If |p| is |NULL|, allocate a block of at least |*pn| such objects;
++   otherwise, reallocate |p| so that it contains more than |*pn|
++   objects each of |s| bytes.  |s| must be nonzero.  Set |*pn| to the
++   new number of objects, and return the pointer to the new block.
++   |*PN| is never set to zero, and the returned pointer is never |NULL|.
++
++   Repeated reallocations are guaranteed to make progress, either by
++   allocating an initial block with a nonzero size, or by allocating a
++   larger block.
++
++   In the following implementation, nonzero sizes are increased by a
++   factor of approximately 1.5 so that repeated reallocations have
++   $O(N)$ overall cost rather than $O(N^2)$ cost, but the
++   specification for this function does not guarantee that rate.
++
++   Here is an example of use:
++
++     |int *p = NULL;
++     size_t used = 0;
++     size_t allocated = 0;
++
++     void
++     append_int (int value)
++       {
++         if (used == allocated)
++           p = x2nrealloc (p, &allocated, sizeof *p);
++         p[used++] = value;
++       }|
++
++   This causes |x2nrealloc| to allocate a block of some nonzero size
++   the first time it is called.
++
++   To have finer-grained control over the initial size, set |*pn| to a
++   nonzero value before calling this function with |p == NULL|.  For
++   example:
++
++     |int *p = NULL;
++     size_t used = 0;
++     size_t allocated = 0;
++     size_t allocated1 = 1000;
++
++     void
++     append_int (int value)
++       {
++         if (used == allocated)
++           {
++             p = x2nrealloc (p, &allocated1, sizeof *p);
++             allocated = allocated1;
++           }
++         p[used++] = value;
++       }|
++
++   */
++
++static inline void *
++x2nrealloc(void *p, size_t *pn, size_t s) {
++    size_t n = *pn;
++
++    if (!p) {
++        if (!n) {
++            /* The approximate size to use for initial small
++               allocation requests, when the invoking code specifies
++               an old size of zero.  This is the largest "small"
++               request for the GNU C library malloc.  */
++            enum {
++                DEFAULT_MXFAST = 64 * sizeof(size_t) / 4
++            };
++
++            n = DEFAULT_MXFAST / s;
++            n += !n;
++        }
++        if (xalloc_oversized (n, s))
++            xalloc_die();
++    } else {
++        /* Set $n = \lfloor 1.5 * n \rfloor + 1$ so that progress is
++           made even if $n = 0$.  Check for overflow, so that $n * s$
++           stays in both |ptrdiff_t| and |size_t| range.  The check
++           may be slightly conservative, but an exact check isn't
++           worth the trouble.  */
++        if ((PTRDIFF_MAX < SIZE_MAX ? PTRDIFF_MAX : SIZE_MAX) / 3 * 2 / s
++            <= n)
++            xalloc_die();
++        n += n / 2 + 1;
++    }
++
++    *pn = n;
++    return xrealloc(p, n * s);
++}
++
++/* Return a pointer to a new buffer of |n| bytes.  This is like
++   xmalloc, except it returns |char *|.  */
++
++static inline char *xcharalloc(size_t n);
++
++static inline char *
++xcharalloc(size_t n) {
++    return XNMALLOC (n, char);
++}
++
++#endif
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest false
++++ b/vtools/manifest d3639727eb8df2071b6d94764c053944846a7f1eb0d0acebc11e78a66d747227c4c16e80a8bd97e9deaab1ee267a733058735a6371732044243579b3273e8a18
+@@ -0,0 +1,2 @@
++2018-02-21 phf
++Initial release of vtools. Genesis contains stripped down version of diffutils 3.6, with most of functionality not relevant to vpatch removed.
+diff -uNr a/vtools/src/analyze.c b/vtools/src/analyze.c
+--- a/vtools/src/analyze.c false
++++ b/vtools/src/analyze.c 9987a76b5935de34d172591ec469e716c37add21c783e02310147e18e30ee6e891328181c8799caa01ee586277894f4d44d90b2633b8f9ec0b0fffd477a2986d
+@@ -0,0 +1,597 @@
++
++#include "diff.h"
++#include <cmpbuf.h>
++#include <error.h>
++#include <xalloc.h>
++#include <stdlib.h>
++
++/* The core of the Diff algorithm.  */
++#define ELEMENT lin
++#define EQUAL(x, y) ((x) == (y))
++#define OFFSET lin
++#define EXTRA_CONTEXT_FIELDS /* none */
++#define NOTE_DELETE(c, xoff) (files[0].changed[files[0].realindexes[xoff]] = 1)
++#define NOTE_INSERT(c, yoff) (files[1].changed[files[1].realindexes[yoff]] = 1)
++#define USE_HEURISTIC 1
++#include <limits.h>
++#include <diffseq.h>
++#include <sys/stat.h>
++
++/* Discard lines from one file that have no matches in the other file.
++
++   A line which is discarded will not be considered by the actual
++   comparison algorithm; it will be as if that line were not in the
++   file.  The file's |realindexes| table maps virtual line numbers
++   (which don't count the discarded lines) into real line numbers;
++   this is how the actual comparison algorithm produces results that
++   are comprehensible when the discarded lines are counted.
++
++   When we discard a line, we also mark it as a deletion or insertion
++   so that it will be printed in the output.  */
++
++static void
++discard_confusing_lines(struct file_data filevec[]) {
++    int f;
++    lin i;
++    char *discarded[2];
++    lin *equiv_count[2];
++    lin *p;
++
++    /* Allocate our results.  */
++    p = xmalloc((filevec[0].buffered_lines + filevec[1].buffered_lines)
++                * (2 * sizeof *p));
++    for (f = 0; f < 2; f++) {
++        filevec[f].undiscarded = p;
++        p += filevec[f].buffered_lines;
++        filevec[f].realindexes = p;
++        p += filevec[f].buffered_lines;
++    }
++
++    /* Set up |equiv_count[f][i]| as the number of lines in file |f|
++       that fall in equivalence class |i|.  */
++
++    p = zalloc(filevec[0].equiv_max * (2 * sizeof *p));
++    equiv_count[0] = p;
++    equiv_count[1] = p + filevec[0].equiv_max;
++
++    for (i = 0; i < filevec[0].buffered_lines; ++i)
++        ++equiv_count[0][filevec[0].equivs[i]];
++    for (i = 0; i < filevec[1].buffered_lines; ++i)
++        ++equiv_count[1][filevec[1].equivs[i]];
++
++    /* Set up tables of which lines are going to be discarded.  */
++
++    discarded[0] = zalloc(filevec[0].buffered_lines
++                          + filevec[1].buffered_lines);
++    discarded[1] = discarded[0] + filevec[0].buffered_lines;
++
++    /* Mark to be discarded each line that matches no line of the
++       other file.  If a line matches many lines, mark it as
++       provisionally discardable.  */
++
++    for (f = 0; f < 2; f++) {
++        size_t end = filevec[f].buffered_lines;
++        char *discards = discarded[f];
++        lin *counts = equiv_count[1 - f];
++        lin *equivs = filevec[f].equivs;
++        size_t many = 5;
++        size_t tem = end / 64;
++
++        /* Multiply |many| by approximate square root of number of
++       lines.  That is the threshold for provisionally discardable
++       lines.  */
++        while ((tem = tem >> 2) > 0)
++            many *= 2;
++
++        for (i = 0; i < end; i++) {
++            lin nmatch;
++            if (equivs[i] == 0)
++                continue;
++            nmatch = counts[equivs[i]];
++            if (nmatch == 0)
++                discards[i] = 1;
++            else if (nmatch > many)
++                discards[i] = 2;
++        }
++    }
++
++    /* Don't really discard the provisional lines except when they
++       occur in a run of discardables, with nonprovisionals at the
++       beginning and end.  */
++
++    for (f = 0; f < 2; f++) {
++        lin end = filevec[f].buffered_lines;
++        register char *discards = discarded[f];
++
++        for (i = 0; i < end; i++) {
++            /* Cancel provisional discards not in middle of run of
++               discards.  */
++            if (discards[i] == 2)
++                discards[i] = 0;
++            else if (discards[i] != 0) {
++                /* We have found a nonprovisional discard.  */
++                register lin j;
++                lin length;
++                lin provisional = 0;
++
++                /* Find end of this run of discardable lines.  Count
++                   how many are provisionally discardable.  */
++                for (j = i; j < end; j++) {
++                    if (discards[j] == 0)
++                        break;
++                    if (discards[j] == 2)
++                        ++provisional;
++                }
++
++                /* Cancel provisional discards at end, and shrink the
++                   run.  */
++                while (j > i && discards[j - 1] == 2)
++                    discards[--j] = 0, --provisional;
++
++                /* Now we have the length of a run of discardable
++                   lines whose first and last are not provisional.  */
++                length = j - i;
++
++                /* If $1/4$ of the lines in the run are provisional,
++                   cancel discarding of all provisional lines in the
++                   run.  */
++                if (provisional * 4 > length) {
++                    while (j > i)
++                        if (discards[--j] == 2)
++                            discards[j] = 0;
++                } else {
++                    register lin consec;
++                    lin minimum = 1;
++                    lin tem = length >> 2;
++
++                    /* |minimum| is approximate square root of
++                       |length/4|.  A subrun of two or more
++                       provisionals can stand when |length| is at
++                       least 16.  A subrun of 4 or more can stand when
++                       |LENGTH >= 64|.  */
++                    while (0 < (tem >>= 2))
++                        minimum <<= 1;
++                    minimum++;
++
++                    /* Cancel any subrun of |minimum| or more
++                       provisionals within the larger run.  */
++                    for (j = 0, consec = 0; j < length; j++)
++                        if (discards[i + j] != 2)
++                            consec = 0;
++                        else if (minimum == ++consec)
++                            /* Back up to start of subrun, to cancel
++                               it all.  */
++                            j -= consec;
++                        else if (minimum < consec)
++                            discards[i + j] = 0;
++
++                    /* Scan from beginning of run until we find 3 or
++                       more nonprovisionals in a row or until the
++                       first nonprovisional at least 8 lines in.
++                       Until that point, cancel any provisionals.  */
++                    for (j = 0, consec = 0; j < length; j++) {
++                        if (j >= 8 && discards[i + j] == 1)
++                            break;
++                        if (discards[i + j] == 2)
++                            consec = 0, discards[i + j] = 0;
++                        else if (discards[i + j] == 0)
++                            consec = 0;
++                        else
++                            consec++;
++                        if (consec == 3)
++                            break;
++                    }
++
++                    /* I advances to the last line of the run.  */
++                    i += length - 1;
++
++                    /* Same thing, from end.  */
++                    for (j = 0, consec = 0; j < length; j++) {
++                        if (j >= 8 && discards[i - j] == 1)
++                            break;
++                        if (discards[i - j] == 2)
++                            consec = 0, discards[i - j] = 0;
++                        else if (discards[i - j] == 0)
++                            consec = 0;
++                        else
++                            consec++;
++                        if (consec == 3)
++                            break;
++                    }
++                }
++            }
++        }
++    }
++
++    /* Actually discard the lines. */
++    for (f = 0; f < 2; f++) {
++        char *discards = discarded[f];
++        lin end = filevec[f].buffered_lines;
++        lin j = 0;
++        for (i = 0; i < end; ++i)
++            if (minimal || discards[i] == 0) {
++                filevec[f].undiscarded[j] = filevec[f].equivs[i];
++                filevec[f].realindexes[j++] = i;
++            } else
++                filevec[f].changed[i] = 1;
++        filevec[f].nondiscarded_lines = j;
++    }
++
++    free(discarded[0]);
++    free(equiv_count[0]);
++}
++
++/* Adjust inserts/deletes of identical lines to join changes as much
++   as possible.
++
++   We do something when a run of changed lines include a line at one
++   end and have an excluded, identical line at the other.  We are free
++   to choose which identical line is included.  |compareseq| usually
++   chooses the one at the beginning, but usually it is cleaner to
++   consider the following identical line to be the "change".  */
++
++static void
++shift_boundaries(struct file_data filevec[]) {
++    int f;
++
++    for (f = 0; f < 2; f++) {
++        char *changed = filevec[f].changed;
++        char *other_changed = filevec[1 - f].changed;
++        lin const *equivs = filevec[f].equivs;
++        lin i = 0;
++        lin j = 0;
++        lin i_end = filevec[f].buffered_lines;
++
++        while (1) {
++            lin runlength, start, corresponding;
++
++            /* Scan forwards to find beginning of another run of
++               changes.  Also keep track of the corresponding point in
++               the other file.  */
++
++            while (i < i_end && !changed[i]) {
++                while (other_changed[j++])
++                    continue;
++                i++;
++            }
++
++            if (i == i_end)
++                break;
++
++            start = i;
++
++            /* Find the end of this run of changes.  */
++
++            while (changed[++i])
++                continue;
++            while (other_changed[j])
++                j++;
++
++            do {
++                /* Record the length of this run of changes, so that
++               we can later determine whether the run has grown.  */
++                runlength = i - start;
++
++                /* Move the changed region back, so long as the
++               previous unchanged line matches the last changed one.
++               This merges with previous changed regions.  */
++
++                while (start && equivs[start - 1] == equivs[i - 1]) {
++                    changed[--start] = 1;
++                    changed[--i] = 0;
++                    while (changed[start - 1])
++                        start--;
++                    while (other_changed[--j])
++                        continue;
++                }
++
++                /* Set |corresponding| to the end of the changed run,
++               at the last point where it corresponds to a changed run
++               in the other file.  |corresponding == i_end| means no
++               such point has been found.  */
++                corresponding = other_changed[j - 1] ? i : i_end;
++
++                /* Move the changed region forward, so long as the
++               first changed line matches the following unchanged one.
++               This merges with following changed regions.  Do this
++               second, so that if there are no merges, the changed
++               region is moved forward as far as possible.  */
++
++                while (i != i_end && equivs[start] == equivs[i]) {
++                    changed[start++] = 0;
++                    changed[i++] = 1;
++                    while (changed[i])
++                        i++;
++                    while (other_changed[++j])
++                        corresponding = i;
++                }
++            } while (runlength != i - start);
++
++            /* If possible, move the fully-merged run of changes back
++               to a corresponding run in the other file.  */
++
++            while (corresponding < i) {
++                changed[--start] = 1;
++                changed[--i] = 0;
++                while (other_changed[--j])
++                    continue;
++            }
++        }
++    }
++}
++
++/* Cons an additional entry onto the front of an edit script |old|.
++   |line0| and |line1| are the first affected lines in the two files
++   (origin 0).  |deleted| is the number of lines deleted here from
++   file 0.  |inserted| is the number of lines inserted here in file 1.
++
++   If |deleted| is 0 then |line0| is the number of the line before
++   which the insertion was done; vice versa for |inserted| and
++   |line1|.  */
++
++static struct change *
++add_change(lin line0, lin line1, lin deleted, lin inserted,
++           struct change *old) {
++    struct change *new = xmalloc(sizeof *new);
++
++    new->line0 = line0;
++    new->line1 = line1;
++    new->inserted = inserted;
++    new->deleted = deleted;
++    new->link = old;
++    return new;
++}
++
++/* Scan the tables of which lines are inserted and deleted, producing
++   an edit script in reverse order.  */
++
++static struct change *
++build_reverse_script(struct file_data const filevec[]) {
++    struct change *script = 0;
++    char *changed0 = filevec[0].changed;
++    char *changed1 = filevec[1].changed;
++    lin len0 = filevec[0].buffered_lines;
++    lin len1 = filevec[1].buffered_lines;
++
++    /* Note that |changedN[lenN]| does exist, and is 0.  */
++
++    lin i0 = 0, i1 = 0;
++
++    while (i0 < len0 || i1 < len1) {
++        if (changed0[i0] | changed1[i1]) {
++            lin line0 = i0, line1 = i1;
++
++            /* Find \# lines changed here in each file.  */
++            while (changed0[i0]) ++i0;
++            while (changed1[i1]) ++i1;
++
++            /* Record this change.  */
++            script = add_change(line0, line1, i0 - line0, i1 - line1, script);
++        }
++
++        /* We have reached lines in the two files that match each
++           other.  */
++        i0++, i1++;
++    }
++
++    return script;
++}
++
++/* Scan the tables of which lines are inserted and deleted, producing
++   an edit script in forward order.  */
++
++static struct change *
++build_script(struct file_data const filevec[]) {
++    struct change *script = 0;
++    char *changed0 = filevec[0].changed;
++    char *changed1 = filevec[1].changed;
++    lin i0 = filevec[0].buffered_lines, i1 = filevec[1].buffered_lines;
++
++    /* Note that |changedN[-1]| does exist, and is 0.  */
++
++    while (i0 >= 0 || i1 >= 0) {
++        if (changed0[i0 - 1] | changed1[i1 - 1]) {
++            lin line0 = i0, line1 = i1;
++
++            /* Find \# lines changed here in each file.  */
++            while (changed0[i0 - 1]) --i0;
++            while (changed1[i1 - 1]) --i1;
++
++            /* Record this change.  */
++            script = add_change(i0, i1, line0 - i0, line1 - i1, script);
++        }
++
++        /* We have reached lines in the two files that match each
++           other.  */
++        i0--, i1--;
++    }
++
++    return script;
++}
++
++/* If |changes|, briefly report that two files differed.  */
++static void
++briefly_report(int changes, struct file_data const filevec[]) {
++    if (changes)
++        message((brief
++                 ? "Files %s and %s differ\n"
++                 : "Binary files %s and %s differ\n"),
++                file_label[0] ? file_label[0] : filevec[0].name,
++                file_label[1] ? file_label[1] : filevec[1].name);
++}
++
++/* Report the differences of two files.  */
++int
++diff_2_files(struct comparison *cmp) {
++    int f;
++    struct change *e, *p;
++    struct change *script;
++    int changes;
++
++
++    /* If we have detected that either file is binary, compare the two
++       files as binary.  This can happen only when the first chunk is
++       read. */
++
++    if (read_files(cmp->file, files_can_be_treated_as_binary)) {
++        /* Files with different lengths must be different.  */
++        if (cmp->file[0].stat.st_size != cmp->file[1].stat.st_size
++            && 0 < cmp->file[0].stat.st_size
++            && 0 < cmp->file[1].stat.st_size
++            && (cmp->file[0].desc < 0 || S_ISREG (cmp->file[0].stat.st_mode))
++            && (cmp->file[1].desc < 0 || S_ISREG (cmp->file[1].stat.st_mode)))
++            changes = 1;
++
++            /* Standard input equals itself.  */
++        else if (cmp->file[0].desc == cmp->file[1].desc)
++            changes = 0;
++
++        else
++            /* Scan both files, a buffer at a time, looking for a
++               difference.  */
++        {
++            /* Allocate same-sized buffers for both files.  */
++            size_t lcm_max = PTRDIFF_MAX - 1;
++            size_t buffer_size =
++                    buffer_lcm(sizeof(word),
++                               buffer_lcm(STAT_BLOCKSIZE (cmp->file[0].stat),
++                                          STAT_BLOCKSIZE (cmp->file[1].stat),
++                                          lcm_max),
++                               lcm_max);
++            for (f = 0; f < 2; f++)
++                cmp->file[f].buffer = xrealloc(cmp->file[f].buffer, buffer_size);
++
++            for (;; cmp->file[0].buffered = cmp->file[1].buffered = 0) {
++                /* Read a buffer's worth from both files.  */
++                for (f = 0; f < 2; f++)
++                    if (0 <= cmp->file[f].desc)
++                        file_block_read(&cmp->file[f],
++                                        buffer_size - cmp->file[f].buffered);
++
++                /* If the buffers differ, the files differ.  */
++                if (cmp->file[0].buffered != cmp->file[1].buffered
++                    || memcmp(cmp->file[0].buffer,
++                              cmp->file[1].buffer,
++                              cmp->file[0].buffered)) {
++                    changes = 1;
++                    break;
++                }
++
++                /* If we reach end of file, the files are the
++                   same.  */
++                if (cmp->file[0].buffered != buffer_size) {
++                    changes = 0;
++                    break;
++                }
++            }
++        }
++
++        briefly_report(changes, cmp->file);
++    } else {
++        struct context ctxt;
++        lin diags;
++        lin too_expensive;
++
++        /* Allocate vectors for the results of comparison: a flag for
++       each line of each file, saying whether that line is an
++       insertion or deletion.  Allocate an extra element, always 0, at
++       each end of each vector.  */
++
++        size_t s = cmp->file[0].buffered_lines + cmp->file[1].buffered_lines + 4;
++        char *flag_space = zalloc(s);
++        cmp->file[0].changed = flag_space + 1;
++        cmp->file[1].changed = flag_space + cmp->file[0].buffered_lines + 3;
++
++        /* Some lines are obviously insertions or deletions because
++       they don't match anything.  Detect them now, and avoid even
++       thinking about them in the main comparison algorithm.  */
++
++        discard_confusing_lines(cmp->file);
++
++        /* Now do the main comparison algorithm, considering just the
++       undiscarded lines.  */
++
++        ctxt.xvec = cmp->file[0].undiscarded;
++        ctxt.yvec = cmp->file[1].undiscarded;
++        diags = (cmp->file[0].nondiscarded_lines
++                 + cmp->file[1].nondiscarded_lines + 3);
++        ctxt.fdiag = xmalloc(diags * (2 * sizeof *ctxt.fdiag));
++        ctxt.bdiag = ctxt.fdiag + diags;
++        ctxt.fdiag += cmp->file[1].nondiscarded_lines + 1;
++        ctxt.bdiag += cmp->file[1].nondiscarded_lines + 1;
++
++        ctxt.heuristic = speed_large_files;
++
++        /* Set |too_expensive| to be the approximate square root of
++       the input size, bounded below by 4096.  4096 seems to be good
++       for circa-2016 CPUs; see |Bug#16848| and |Bug#24715|.  */
++        too_expensive = 1;
++        for (; diags != 0; diags >>= 2)
++            too_expensive <<= 1;
++        ctxt.too_expensive = MAX (4096, too_expensive);
++
++        files[0] = cmp->file[0];
++        files[1] = cmp->file[1];
++
++        compareseq(0, cmp->file[0].nondiscarded_lines,
++                   0, cmp->file[1].nondiscarded_lines, minimal, &ctxt);
++
++        free(ctxt.fdiag - (cmp->file[1].nondiscarded_lines + 1));
++
++        /* Modify the results slightly to make them prettier in cases
++       where that can validly be done.  */
++
++        shift_boundaries(cmp->file);
++
++        /* Get the results of comparison in the form of a chain of
++       |struct change|s -- an edit script.  */
++
++        script = build_script(cmp->file);
++
++        /* Set |changes| if we had any diffs.  If some changes are
++       ignored, we must scan the script to decide.  */
++        changes = (script != 0);
++
++        if (brief)
++            briefly_report(changes, cmp->file);
++        else {
++            if (changes) {
++                /* Record info for starting up output, to be used if
++               and when we have some output to print.  */
++                setup_output(file_label[0] ? file_label[0] : cmp->file[0].name,
++                             file_label[1] ? file_label[1] : cmp->file[1].name,
++                             cmp->parent != 0);
++                print_context_script(script);
++                finish_output();
++            }
++        }
++
++        free(cmp->file[0].undiscarded);
++
++        free(flag_space);
++
++        for (f = 0; f < 2; f++) {
++            free(cmp->file[f].equivs);
++            free(cmp->file[f].linbuf + cmp->file[f].linbuf_base);
++        }
++
++        for (e = script; e; e = p) {
++            p = e->link;
++            free(e);
++        }
++
++        for (f = 0; f < 2; ++f)
++            if (cmp->file[f].missing_newline) {
++                error(0, 0, "%s: %s\n",
++                      file_label[f] ? file_label[f] : cmp->file[f].name,
++                      "No newline at end of file");
++                changes = 2;
++            }
++    }
++
++    if (cmp->file[0].buffer != cmp->file[1].buffer)
++        free(cmp->file[0].buffer);
++    free(cmp->file[1].buffer);
++
++    return changes;
++}
+diff -uNr a/vtools/src/context.c b/vtools/src/context.c
+--- a/vtools/src/context.c false
++++ b/vtools/src/context.c 4fe094b9672618f716926dcf213e5cb364d5a98252cdf1665a1b5daf04bc7d6a33a824ed6570fb62c17702a33e20d7192c0906d6cc0e36f7454a54ad42d9882d
+@@ -0,0 +1,211 @@
++
++#include <stdlib.h>
++#include "diff.h"
++
++/* Print a label for a context diff, with a file name and date or a
++   label.  */
++
++static void
++print_context_label(char const *mark,
++                    struct file_data *inf,
++                    char const *name,
++                    char const *label) {
++    if (label)
++        fprintf(outfile, "%s %s\n", mark, label);
++    else {
++        fprintf(outfile, "%s %s false\n", mark, name);
++    }
++}
++
++/* Print a header for a context diff, with the file names and dates.  */
++
++void
++print_context_header(struct file_data inf[], char const *const *names) {
++    print_context_label("---", &inf[0], names[0], file_label[0]);
++    print_context_label("+++", &inf[1], names[1], file_label[1]);
++}
++
++/* Print an edit script in context format.  */
++
++void
++print_context_script(struct change *script) {
++    struct change *e;
++    for (e = script; e; e = e->link)
++        e->ignore = false;
++
++    print_script(script);
++}
++
++/* Print a pair of line numbers with a comma, translated for file
++   |file|.  If the second number is smaller, use the first in place of
++   it.  If the numbers are equal, print just one number.
++
++   Args |a| and |b| are internal line numbers.  We print the
++   translated (real) line numbers.  */
++
++static void
++print_unidiff_number_range(struct file_data const *file, lin a, lin b) {
++    printint trans_a, trans_b;
++    translate_range(file, a, b, &trans_a, &trans_b);
++
++    /* We can have |b < a| in the case of a range of no lines.  In
++       this case, we print the line number before the range, which is
++       |b|.  It would be more logical to print |a|, but `patch'
++       expects |b| in order to detect diffs against empty files.  */
++    if (trans_b <= trans_a)
++        fprintf(outfile, trans_b < trans_a ? "%"pI"d,0" : "%"pI"d", trans_b);
++    else
++        fprintf(outfile, "%"pI"d,%"pI"d", trans_a, trans_b - trans_a + 1);
++}
++
++/* Print a portion of an edit script in unidiff format.  |hunk| is the
++   beginning of the portion to be printed.  The end is marked by a
++   |link| that has been nulled out.
++
++   Prints out lines from both files, and precedes each line with the
++   appropriate flag-character.  */
++
++void
++pr_unidiff_hunk(struct change *hunk) {
++    lin first0, last0, first1, last1;
++    lin i, j, k;
++    struct change *next;
++    FILE *out;
++
++    /* Determine range of line numbers involved in each file.  */
++
++    if (!analyze_hunk(hunk, &first0, &last0, &first1, &last1))
++        return;
++
++    /* Include a context's width before and after.  */
++
++    i = -files[0].prefix_lines;
++    first0 = MAX (first0 - context, i);
++    first1 = MAX (first1 - context, i);
++    if (last0 < files[0].valid_lines - context)
++        last0 += context;
++    else
++        last0 = files[0].valid_lines - 1;
++    if (last1 < files[1].valid_lines - context)
++        last1 += context;
++    else
++        last1 = files[1].valid_lines - 1;
++
++    begin_output();
++    out = outfile;
++
++    fputs("@@ -", out);
++    print_unidiff_number_range(&files[0], first0, last0);
++    fputs(" +", out);
++    print_unidiff_number_range(&files[1], first1, last1);
++    fputs(" @@", out);
++
++    putc('\n', out);
++
++    next = hunk;
++    i = first0;
++    j = first1;
++
++    while (i <= last0 || j <= last1) {
++
++        /* If the line isn't a difference, output the context from
++           file 0. */
++
++        if (!next || i < next->line0) {
++            char const *const *line = &files[0].linbuf[i++];
++            if (!(suppress_blank_empty && **line == '\n'))
++                putc(' ', out);
++            print_1_line(NULL, line);
++            j++;
++        } else {
++            /* For each difference, first output the deleted part. */
++
++            k = next->deleted;
++            while (k--) {
++                char const *const *line = &files[0].linbuf[i++];
++                putc('-', out);
++                print_1_line_nl(NULL, line, true);
++                if (line[1][-1] == '\n')
++                    putc('\n', out);
++            }
++
++            /* Then output the inserted part. */
++
++            k = next->inserted;
++            while (k--) {
++                char const *const *line = &files[1].linbuf[j++];
++                putc('+', out);
++                print_1_line_nl(NULL, line, true);
++                if (line[1][-1] == '\n')
++                    putc('\n', out);
++            }
++
++            /* We're done with this hunk, so on to the next! */
++
++            next = next->link;
++        }
++    }
++}
++
++/* Scan a (forward-ordered) edit script for the first place that more
++   than |2*context| unchanged lines appear, and return a pointer to
++   the |struct change| for the last change before those lines.  */
++
++struct change *
++find_hunk(struct change *start) {
++    struct change *prev;
++    lin top0, top1;
++    lin thresh;
++
++    /* Threshold distance is |context| if the second change is
++       ignorable, |2 * context + 1| otherwise.  Integer overflow can't
++       happen, due to |CONTEXT_LIM|.  */
++    lin ignorable_threshold = context;
++    lin non_ignorable_threshold = 2 * context + 1;
++
++    do {
++        /* Compute number of first line in each file beyond this changed.  */
++        top0 = start->line0 + start->deleted;
++        top1 = start->line1 + start->inserted;
++        prev = start;
++        start = start->link;
++        thresh = (start && start->ignore
++                  ? ignorable_threshold
++                  : non_ignorable_threshold);
++        /* It is not supposed to matter which file we check in the
++       end-test.  If it would matter, crash.  */
++        if (start && start->line0 - top0 != start->line1 - top1)
++            abort();
++    } while (start
++             /* Keep going if less than |thresh| lines elapse before
++            the affected line.  */
++             && start->line0 - top0 < thresh);
++
++    return prev;
++}
++
++/* Set the |ignore| flag properly in each change in script.  It should
++   be 1 if all the lines inserted or deleted in that change are
++   ignorable lines.  */
++
++static void
++mark_ignorable(struct change *script) {
++    while (script) {
++        struct change *next = script->link;
++        lin first0, last0, first1, last1;
++
++        /* Turn this change into a hunk: detach it from the others.  */
++        script->link = NULL;
++
++        /* Determine whether this change is ignorable.  */
++        script->ignore = !analyze_hunk(script,
++                                       &first0, &last0, &first1, &last1);
++
++        /* Reconnect the chain as before.  */
++        script->link = next;
++
++        /* Advance to the following change.  */
++        script = next;
++    }
++}
++
+diff -uNr a/vtools/src/diff.c b/vtools/src/diff.c
+--- a/vtools/src/diff.c false
++++ b/vtools/src/diff.c d60f42e8f904c77382b29af85601c6ddd207cc4db89668ab811abb9271edd76a5c59838a0e00ab7bce576d095da181c7bedb2008e1d59537f508d23bd4a039c4
+@@ -0,0 +1,454 @@
++#define GDIFF_MAIN
++
++#include "diff.h"
++#include <dirname.h>
++#include <error.h>
++#include <filenamecat.h>
++#include <progname.h>
++#include <xalloc.h>
++#include <getopt.h>
++#include <fcntl.h>
++#include <stdlib.h>
++#include <inttypes.h>
++#include <filetype.h>
++
++#define STREQ(a, b) (strcmp (a, b) == 0)
++#define ISDIGIT(c) ((unsigned int) (c) - '0' <= 9)
++
++static int compare_files(struct comparison const *, char const *, char const *);
++
++static void try_help(char const *, char const *);
++
++static void check_stdout(void);
++
++static char const shortopts[] = "0123456789aU:dHL:qurN";
++
++/* Return a string containing the command options with which diff was
++   invoked.  Spaces appear between what were separate |argv|-elements.
++   There is a space at the beginning but none at the end.  If there
++   were no options, the result is an empty string.
++
++   Arguments: |optionvec|, a vector containing separate
++   |argv|-elements, and |count|, the length of that vector.
++
++   todo phf: Implicitly add the -uNr since that's the defaults, and
++   this combination of flags is what the original vdiff has.*/
++
++static char *
++option_list(char **optionvec, int count) {
++    char prefix[] = " -uNr";
++    int i;
++    size_t size = 1 + sizeof prefix;
++    char *result;
++    char *p;
++
++    for (i = 0; i < count; i++)
++        size += strlen(optionvec[i]);
++
++    p = result = xmalloc(size);
++    p = stpncpy(p, prefix, sizeof prefix - 1);
++
++    for (i = 0; i < count; i++) {
++        *p++ = ' ';
++        p = stpncpy(p, optionvec[i], strlen(optionvec[i])-1);
++    }
++
++    *p = '\0';
++    return result;
++}
++
++int
++main(int argc, char **argv) {
++    int exit_status = EXIT_SUCCESS;
++    int c;
++    int prev = -1;
++    lin ocontext = -1;
++    bool explicit_context = false;
++    char const *from_file = NULL;
++    char const *to_file = NULL;
++    uintmax_t numval;
++    char *numend;
++    set_program_name(argv[0]);
++
++    /* Decode the options.  */
++
++    while ((c = getopt(argc, argv, shortopts)) != -1) {
++        switch (c) {
++            case 0:
++                break;
++
++            case '0':
++            case '1':
++            case '2':
++            case '3':
++            case '4':
++            case '5':
++            case '6':
++            case '7':
++            case '8':
++            case '9':
++                ocontext = (!ISDIGIT (prev)
++                            ? c - '0'
++                            : (ocontext - (c - '0' <= CONTEXT_MAX % 10)
++                               < CONTEXT_MAX / 10)
++                              ? 10 * ocontext + (c - '0')
++                              : CONTEXT_MAX);
++                break;
++
++            case 'a':
++                text = true;
++                break;
++
++            case 'U': {
++                if (optarg) {
++                    numval = strtoumax(optarg, &numend, 10);
++                    if (*numend)
++                        try_help("invalid context length '%s'", optarg);
++                    if (CONTEXT_MAX < numval)
++                        numval = CONTEXT_MAX;
++                } else
++                    numval = 3;
++
++                if (context < numval)
++                    context = numval;
++                explicit_context = true;
++            }
++                break;
++
++            case 'd':
++                minimal = true;
++                break;
++
++            case 'H':
++                speed_large_files = true;
++                break;
++
++            case 'L':
++                if (!file_label[0])
++                    file_label[0] = optarg;
++                else if (!file_label[1])
++                    file_label[1] = optarg;
++                else
++                    fatal("too many file label options");
++                break;
++
++            case 'q':
++                brief = true;
++                break;
++
++            case 'u':
++            case 'r':
++            case 'N':
++                /* compat */
++                break;
++
++            default:
++                try_help(NULL, NULL);
++        }
++        prev = c;
++    }
++
++    if (context < 3)
++        context = 3;
++    suppress_blank_empty = false;
++
++    if (0 <= ocontext
++        && (context < ocontext
++            || (ocontext < context && !explicit_context)))
++        context = ocontext;
++
++    /* Make the horizon at least as large as the context, so that
++       |shift_boundaries| has more freedom to shift the first and last
++       hunks.  */
++    if (horizon_lines < context)
++        horizon_lines = context;
++
++    files_can_be_treated_as_binary = false;
++
++    switch_string = option_list(argv + 1, optind - 1);
++
++    if (from_file) {
++        if (to_file)
++            fatal("--from-file and --to-file both specified");
++        else
++            for (; optind < argc; optind++) {
++                int status = compare_files(NULL, from_file, argv[optind]);
++                if (exit_status < status)
++                    exit_status = status;
++            }
++    } else {
++        if (to_file)
++            for (; optind < argc; optind++) {
++                int status = compare_files(NULL, argv[optind], to_file);
++                if (exit_status < status)
++                    exit_status = status;
++            }
++        else {
++            if (argc - optind != 2) {
++                if (argc - optind < 2)
++                    try_help("missing operand after '%s'", argv[argc - 1]);
++                else
++                    try_help("extra operand '%s'", argv[optind + 2]);
++            }
++
++            exit_status = compare_files(NULL, argv[optind], argv[optind + 1]);
++        }
++    }
++
++    check_stdout();
++    exit(exit_status);
++    return exit_status;
++}
++
++static void
++try_help(char const *reason_msgid, char const *operand) {
++    if (reason_msgid)
++        error(0, 0, reason_msgid, operand);
++    exit(EXIT_TROUBLE);
++}
++
++static void
++check_stdout(void) {
++    if (ferror(stdout))
++        fatal("write failed");
++    else if (fclose(stdout) != 0)
++        pfatal_with_name("standard output");
++}
++
++/* Compare two files (or dirs) with parent comparison |parent| and
++   names |name0| and |name1|.  (If |parent| is null, then the first
++   name is just |name0|, etc.)  This is self-contained; it opens the
++   files and closes them.
++
++   Value is |EXIT_SUCCESS| if files are the same, |EXIT_FAILURE| if
++   different, |EXIT_TROUBLE| if there is a problem opening them.  */
++
++static int
++compare_files(struct comparison const *parent,
++              char const *name0,
++              char const *name1) {
++    struct comparison cmp;
++#define DIR_P(f) (S_ISDIR (cmp.file[f].stat.st_mode) != 0)
++    register int f;
++    int status = EXIT_SUCCESS;
++    bool same_files;
++    char *free0;
++    char *free1;
++
++    memset (cmp.file, 0, sizeof cmp.file);
++    cmp.parent = parent;
++
++    /* |cmp.file[f].desc| markers */
++#define NONEXISTENT (-1) /* nonexistent file */
++#define UNOPENED (-2) /* unopened file (e.g. directory) */
++#define ERRNO_ENCODE(errno) (-3 - (errno)) /* encoded |errno| value */
++#define ERRNO_DECODE(desc) (-3 - (desc)) /* inverse of |ERRNO_ENCODE| */
++
++    cmp.file[0].desc = name0 ? UNOPENED : NONEXISTENT;
++    cmp.file[1].desc = name1 ? UNOPENED : NONEXISTENT;
++
++    /* Now record the full name of each file, including nonexistent ones.  */
++
++    if (!name0)
++        name0 = name1;
++    if (!name1)
++        name1 = name0;
++
++    if (!parent) {
++        free0 = NULL;
++        free1 = NULL;
++        cmp.file[0].name = name0;
++        cmp.file[1].name = name1;
++    } else {
++        cmp.file[0].name = free0
++                = file_name_concat(parent->file[0].name, name0, NULL);
++        cmp.file[1].name = free1
++                = file_name_concat(parent->file[1].name, name1, NULL);
++    }
++
++    /* Stat the files.  */
++
++    for (f = 0; f < 2; f++) {
++        if (cmp.file[f].desc != NONEXISTENT) {
++            if (f && file_name_cmp(cmp.file[f].name, cmp.file[0].name) == 0) {
++                cmp.file[f].desc = cmp.file[0].desc;
++                cmp.file[f].stat = cmp.file[0].stat;
++            } else if (STREQ (cmp.file[f].name, "-")) {
++                cmp.file[f].desc = STDIN_FILENO;
++                if (fstat(STDIN_FILENO, &cmp.file[f].stat) != 0)
++                    cmp.file[f].desc = ERRNO_ENCODE (errno);
++                else {
++                    if (S_ISREG (cmp.file[f].stat.st_mode)) {
++                        off_t pos = lseek(STDIN_FILENO, 0, SEEK_CUR);
++                        if (pos < 0)
++                            cmp.file[f].desc = ERRNO_ENCODE (errno);
++                        else
++                            cmp.file[f].stat.st_size =
++                                    MAX (0, cmp.file[f].stat.st_size - pos);
++                    }
++                }
++            } else if (stat(cmp.file[f].name, &cmp.file[f].stat) != 0)
++                cmp.file[f].desc = ERRNO_ENCODE (errno);
++        }
++    }
++
++    /* Mark files as nonexistent as needed for |-N| and |-P|, if they
++       are inaccessible empty regular files (the kind of files that
++       |patch| creates to indicate nonexistent backups), or if they
++       are top-level files that do not exist but their counterparts do
++       exist.  */
++    for (f = 0; f < 2; f++)
++        if (cmp.file[f].desc == UNOPENED
++            ? (S_ISREG (cmp.file[f].stat.st_mode)
++               && !(cmp.file[f].stat.st_mode & (S_IRWXU | S_IRWXG | S_IRWXO))
++               && cmp.file[f].stat.st_size == 0)
++            : ((cmp.file[f].desc == ERRNO_ENCODE (ENOENT)
++                || cmp.file[f].desc == ERRNO_ENCODE (EBADF))
++               && !parent
++               && (cmp.file[1 - f].desc == UNOPENED
++                   || cmp.file[1 - f].desc == STDIN_FILENO)))
++            cmp.file[f].desc = NONEXISTENT;
++
++    for (f = 0; f < 2; f++)
++        if (cmp.file[f].desc == NONEXISTENT) {
++            memset (&cmp.file[f].stat, 0, sizeof cmp.file[f].stat);
++            cmp.file[f].stat.st_mode = cmp.file[1 - f].stat.st_mode;
++        }
++
++    for (f = 0; f < 2; f++) {
++        int e = ERRNO_DECODE (cmp.file[f].desc);
++        if (0 <= e) {
++            errno = e;
++            perror_with_name(cmp.file[f].name);
++            status = EXIT_TROUBLE;
++        }
++    }
++
++    if (status == EXIT_SUCCESS && !parent && DIR_P (0) != DIR_P (1)) {
++        /* If one is a directory, and it was specified in the command
++       line, use the file in that dir with the other file's
++       basename.  */
++
++        int fnm_arg = DIR_P (0);
++        int dir_arg = 1 - fnm_arg;
++        char const *fnm = cmp.file[fnm_arg].name;
++        char const *dir = cmp.file[dir_arg].name;
++        char const *filename = cmp.file[dir_arg].name = free0
++                = find_dir_file_pathname(dir, last_component(fnm));
++
++        if (STREQ (fnm, "-"))
++            fatal("cannot compare '-' to a directory");
++
++        if (stat(filename, &cmp.file[dir_arg].stat)
++            != 0) {
++            perror_with_name(filename);
++            status = EXIT_TROUBLE;
++        }
++    }
++
++    if (status != EXIT_SUCCESS) {
++        /* One of the files should exist but does not.  */
++    } else if (cmp.file[0].desc == NONEXISTENT
++               && cmp.file[1].desc == NONEXISTENT) {
++        /* Neither file "exists", so there's nothing to compare.  */
++   } else if ((same_files
++                       = (cmp.file[0].desc != NONEXISTENT
++                          && cmp.file[1].desc != NONEXISTENT
++                          && 0 < same_file (&cmp.file[0].stat, &cmp.file[1].stat)
++                          && same_file_attributes (&cmp.file[0].stat,
++                                                   &cmp.file[1].stat)))) {
++      /* The two named files are actually the same physical file.  We
++         know they are identical without actually reading them.  */
++    } else if (DIR_P (0) & DIR_P (1)) {
++        /* If both are directories, compare the files in them.  */
++
++        status = diff_dirs(&cmp, compare_files);
++    } else if ((DIR_P (0) | DIR_P (1))
++               || (parent
++                   && !((S_ISREG (cmp.file[0].stat.st_mode)
++                         || S_ISLNK (cmp.file[0].stat.st_mode))
++                        && (S_ISREG (cmp.file[1].stat.st_mode)
++                            || S_ISLNK  (cmp.file[1].stat.st_mode))))) {
++        if (cmp.file[0].desc == NONEXISTENT || cmp.file[1].desc == NONEXISTENT) {
++            /* We have a subdirectory that exists only in one directory.  */
++
++            status = diff_dirs(&cmp, compare_files);
++        } else {
++            /* We have two files that are not to be compared.  */
++
++            message5("File %s is a %s while file %s is a %s\n",
++                     file_label[0] ? file_label[0] : cmp.file[0].name,
++                     file_type(&cmp.file[0].stat),
++                     file_label[1] ? file_label[1] : cmp.file[1].name,
++                     file_type(&cmp.file[1].stat));
++
++            /* This is a difference.  */
++            status = EXIT_FAILURE;
++        }
++    } else if (S_ISLNK (cmp.file[0].stat.st_mode)
++               || S_ISLNK (cmp.file[1].stat.st_mode)) {
++        /* We get here only if we use |lstat()|, not |stat()|.  */
++        status = EXIT_FAILURE;
++    } else if (files_can_be_treated_as_binary
++               && S_ISREG (cmp.file[0].stat.st_mode)
++               && S_ISREG (cmp.file[1].stat.st_mode)
++               && cmp.file[0].stat.st_size != cmp.file[1].stat.st_size
++               && 0 < cmp.file[0].stat.st_size
++               && 0 < cmp.file[1].stat.st_size) {
++        message("Files %s and %s differ\n",
++                file_label[0] ? file_label[0] : cmp.file[0].name,
++                file_label[1] ? file_label[1] : cmp.file[1].name);
++        status = EXIT_FAILURE;
++    } else {
++        /* Both exist and neither is a directory.  */
++
++        /* Open the files and record their descriptors.  */
++
++        if (cmp.file[0].desc == UNOPENED)
++            if ((cmp.file[0].desc = open(cmp.file[0].name, O_RDONLY, 0)) < 0) {
++                perror_with_name(cmp.file[0].name);
++                status = EXIT_TROUBLE;
++            }
++        if (cmp.file[1].desc == UNOPENED) {
++            if (same_files)
++                cmp.file[1].desc = cmp.file[0].desc;
++            else if ((cmp.file[1].desc = open(cmp.file[1].name, O_RDONLY, 0)) < 0) {
++                perror_with_name(cmp.file[1].name);
++                status = EXIT_TROUBLE;
++            }
++        }
++
++        /* Compare the files, if no error was found.  */
++
++        if (status == EXIT_SUCCESS) {
++            status = diff_2_files(&cmp);
++        }
++
++        /* Close the file descriptors.  */
++
++        if (0 <= cmp.file[0].desc && close(cmp.file[0].desc) != 0) {
++            perror_with_name(cmp.file[0].name);
++            status = EXIT_TROUBLE;
++        }
++        if (0 <= cmp.file[1].desc && cmp.file[0].desc != cmp.file[1].desc
++            && close(cmp.file[1].desc) != 0) {
++            perror_with_name(cmp.file[1].name);
++            status = EXIT_TROUBLE;
++        }
++    }
++
++    /* Now the comparison has been done, if no error prevented it, and
++       |status| is the value this function will return.  */
++
++    if (status != EXIT_SUCCESS) {
++        /* Flush stdout so that the user sees differences immediately.
++       This can hurt performance, unfortunately.  */
++        if (fflush(stdout) != 0)
++            pfatal_with_name("standard output");
++    }
++
++    free(free0);
++    free(free1);
++
++    return status;
++}
+diff -uNr a/vtools/src/diff.h b/vtools/src/diff.h
+--- a/vtools/src/diff.h false
++++ b/vtools/src/diff.h be00aeed54b353a67ce8fd301d8cac16d854d1c0c2efc7fb037e7adb683db684f1eaf9af64e40c65d7d0b33d24bf6e807f066e064ad4bb85c6b715f457a356da
+@@ -0,0 +1,249 @@
++#include "system.h"
++#include <stdio.h>
++#include <string.h>
++#include <sys/stat.h>
++
++/* What kind of changes a hunk contains.  */
++enum changes {
++    /* No changes: lines common to both files.  */
++            UNCHANGED,
++
++    /* Deletes only: lines taken from just the first file.  */
++            OLD,
++
++    /* Inserts only: lines taken from just the second file.  */
++            NEW,
++
++    /* Both deletes and inserts: a hunk containing both old and new lines.  */
++            CHANGED
++};
++
++/* Variables for command line options */
++
++#ifndef GDIFF_MAIN
++# define XTERN extern
++#else
++# define XTERN
++#endif
++
++/* Number of lines of context to show in each set of diffs.  This is
++   zero when context is not to be shown.  */
++XTERN lin context;
++
++/* Consider all files as text files (-a).  Don't interpret codes over
++   0177 as implying a "binary file".  */
++XTERN bool text;
++
++/* Number of lines to keep in identical prefix and suffix.  */
++XTERN lin horizon_lines;
++
++/* Files can be compared byte-by-byte, as if they were binary.  This
++   depends on various options.  */
++XTERN bool files_can_be_treated_as_binary;
++
++/* File labels for |-c| output headers (|--label|).  */
++XTERN char *file_label[2];
++
++/* Say only whether files differ, not how (|-q|).  */
++XTERN bool brief;
++
++/* Do not output an initial space or tab before the text of an empty line.  */
++XTERN bool suppress_blank_empty;
++
++/* In directory comparison, specify file to start with (|-S|).  This
++   is used for resuming an aborted comparison.  All file names less
++   than this name are ignored.  */
++XTERN char const *starting_file;
++
++/* String containing all the command options diff received, with
++   spaces between and at the beginning but none at the end.  If there
++   were no options given, this string is empty.  */
++XTERN char *switch_string;
++
++/* Use heuristics for better speed with large files with a small
++   density of changes.  */
++XTERN bool speed_large_files;
++
++/* Don't discard lines.  This makes things slower (sometimes much
++   slower) but will find a guaranteed minimal set of changes.  */
++XTERN bool minimal;
++
++/* The result of comparison is an ``edit script'': a chain of |struct
++   change|.  Each |struct change| represents one place where some
++   lines are deleted and some are inserted.
++
++   |line0| and |line1| are the first affected lines in the two files
++   (origin 0).  |deleted| is the number of lines deleted here from file
++   0.  |inserted| is the number of lines inserted here in file 1.
++
++   If |deleted| is 0 then |line0| is the number of the line before
++   which the insertion was done; vice versa for |inserted| and
++   |line1|.  */
++
++struct change {
++    struct change *link;        /* Previous or next edit command  */
++    lin inserted;            /* \# lines of file 1 changed here.  */
++    lin deleted;            /* \# lines of file 0 changed here.  */
++    lin line0;            /* Line number of 1st deleted line.  */
++    lin line1;            /* Line number of 1st inserted line.  */
++    bool ignore;            /* Flag used in |context.c|.  */
++};
++
++/* Structures that describe the input files.  */
++
++/* Data on one input file being compared.  */
++
++struct file_data {
++    int desc;    /* File descriptor  */
++    char const *name;    /* File name  */
++    struct stat stat;    /* File status */
++
++    /* Buffer in which text of file is read.  */
++    word *buffer;
++
++    /* Allocated size of buffer, in bytes.  Always a multiple of
++       sizeof |*buffer|.  */
++    size_t bufsize;
++
++    /* Number of valid bytes now in the buffer.  */
++    size_t buffered;
++
++    /* Array of pointers to lines in the file.  */
++    char const **linbuf;
++
++    /* |linbuf_base <= buffered_lines <= valid_lines <= alloc_lines|.
++       |linebuf[linbuf_base ... buffered_lines - 1]| are possibly differing.
++       |linebuf[linbuf_base ... valid_lines - 1]| contain valid data.
++       |linebuf[linbuf_base ... alloc_lines - 1]| are allocated.  */
++    lin linbuf_base, buffered_lines, valid_lines, alloc_lines;
++
++    /* Pointer to end of prefix of this file to ignore when hashing.  */
++    char const *prefix_end;
++
++    /* Count of lines in the prefix.  There are this many lines in the
++       file before |linbuf[0]|.  */
++    lin prefix_lines;
++
++    /* Pointer to start of suffix of this file to ignore when hashing.  */
++    char const *suffix_begin;
++
++    /* Vector, indexed by line number, containing an equivalence code
++       for each line.  It is this vector that is actually compared
++       with that of another file to generate differences.  */
++    lin *equivs;
++
++    /* Vector, like the previous one except that the elements for
++       discarded lines have been squeezed out.  */
++    lin *undiscarded;
++
++    /* Vector mapping virtual line numbers (not counting discarded
++       lines) to real ones (counting those lines).  Both are
++       $origin-0$.  */
++    lin *realindexes;
++
++    /* Total number of nondiscarded lines.  */
++    lin nondiscarded_lines;
++
++    /* Vector, indexed by real $origin-0$ line number, containing 1
++       for a line that is an insertion or a deletion.  The results of
++       comparison are stored here.  */
++    char *changed;
++
++    /* 1 if file ends in a line with no final newline.  */
++    bool missing_newline;
++
++    /* 1 if at end of file.  */
++    bool eof;
++
++    /* 1 more than the maximum equivalence value used for this or its
++       sibling file.  */
++    lin equiv_max;
++};
++
++/* The file buffer, considered as an array of bytes rather than as an
++   array of words.  */
++#define FILE_BUFFER(f) ((char *) (f)->buffer)
++
++/* Data on two input files being compared.  */
++
++struct comparison {
++    struct file_data file[2];
++    struct comparison const *parent;  /* parent, if a recursive comparison */
++};
++
++/* Describe the two files currently being compared.  */
++
++XTERN struct file_data files[2];
++
++/* Stdio stream to output diffs to.  */
++
++XTERN FILE *outfile;
++
++/* Declare various functions.  */
++
++/* analyze.c */
++extern int diff_2_files(struct comparison *);
++
++/* context.c */
++extern void print_context_header(struct file_data[], char const *const *);
++
++extern void print_context_script(struct change *);
++
++/* dir.c */
++extern int diff_dirs(struct comparison const *,
++                     int (*)(struct comparison const *,
++                             char const *, char const *));
++
++extern char *find_dir_file_pathname(char const *, char const *);
++
++/* diff.h */
++extern struct change *find_hunk(struct change *);
++
++extern void pr_unidiff_hunk(struct change *);
++
++/* io.c */
++extern void file_block_read(struct file_data *, size_t);
++
++extern bool read_files(struct file_data[], bool);
++
++/* util.c */
++
++extern bool lines_differ(char const *, char const *);
++
++extern lin translate_line_number(struct file_data const *, lin);
++
++extern struct change *find_change(struct change *);
++
++extern void *zalloc(size_t);
++
++extern enum changes analyze_hunk(struct change *, lin *, lin *, lin *, lin *);
++
++extern void begin_output(void);
++
++extern void debug_script(struct change *);
++
++extern void fatal(char const *) __attribute__((noreturn));
++
++extern void finish_output(void);
++
++extern void message(char const *, char const *, char const *);
++
++extern void message5(char const *, char const *, char const *,
++                     char const *, char const *);
++
++extern void output_1_line(char const *, char const *);
++
++extern void perror_with_name(char const *);
++
++extern void pfatal_with_name(char const *) __attribute__((noreturn));
++
++extern void print_1_line(char const *, char const *const *);
++
++extern void print_1_line_nl(char const *, char const *const *, bool);
++
++extern void print_script(struct change *);
++
++extern void setup_output(char const *, char const *, bool);
++
++extern void translate_range(struct file_data const *, lin, lin,
++                            printint *, printint *);
+diff -uNr a/vtools/src/dir.c b/vtools/src/dir.c
+--- a/vtools/src/dir.c false
++++ b/vtools/src/dir.c e0b77e9d54692dffe3936c51b1a810f868737f2ec857ea8b75befbae44da1c29437311b60f1264b4d032387ad68aa5e3abb5aef28bf930fd086f8037954a9b96
+@@ -0,0 +1,218 @@
++
++#include "diff.h"
++#include <error.h>
++#include <filenamecat.h>
++#include <setjmp.h>
++#include <xalloc.h>
++#include <dirent.h>
++#include <stdlib.h>
++
++/* Read the directory named by |dir| and store into |dirdata| a sorted
++   vector of filenames for its contents.  |dir->desc == -1| means this
++   directory is known to be nonexistent, so set |dirdata| to an empty
++   vector.  Return -1 (setting |errno|) if error, 0 otherwise.  */
++
++struct dirdata {
++    size_t nnames;    /* Number of names.  */
++    char const **names;    /* Sorted names of files in dir, followed by 0.  */
++    char *data;    /* Allocated storage for file names.  */
++};
++
++static bool dir_loop(struct comparison const *, int);
++
++
++/* Read a directory and get its vector of names.  */
++
++static bool
++dir_read(struct file_data const *dir, struct dirdata *dirdata) {
++    register struct dirent *next;
++    register size_t i;
++
++    /* Address of block containing the files that are described.  */
++    char const **names;
++
++    /* Number of files in directory.  */
++    size_t nnames;
++
++    /* Allocated and used storage for file name data.  */
++    char *data;
++    size_t data_alloc, data_used;
++
++    dirdata->names = 0;
++    dirdata->data = 0;
++    nnames = 0;
++    data = 0;
++
++    if (dir->desc != -1) {
++        /* Open the directory and check for errors.  */
++        register DIR *reading = opendir(dir->name);
++        if (!reading)
++            return false;
++
++        /* Initialize the table of filenames.  */
++
++        data_alloc = 512;
++        data_used = 0;
++        dirdata->data = data = xmalloc(data_alloc);
++
++        /* Read the directory entries, and insert the subfiles
++       into the |data| table.  */
++
++        while ((errno = 0, (next = readdir(reading)) != 0)) {
++            char *d_name = next->d_name;
++            size_t d_size = strlen (next->d_name) + 1;
++
++            /* Ignore "." and "..".  */
++            if (d_name[0] == '.'
++                && (d_name[1] == 0 || (d_name[1] == '.' && d_name[2] == 0)))
++                continue;
++
++            while (data_alloc < data_used + d_size) {
++                if (PTRDIFF_MAX / 2 <= data_alloc)
++                    xalloc_die();
++                dirdata->data = data = xrealloc(data, data_alloc *= 2);
++            }
++
++            memcpy (data + data_used, d_name, d_size);
++            data_used += d_size;
++            nnames++;
++        }
++        if (errno) {
++            int e = errno;
++            closedir(reading);
++            errno = e;
++            return false;
++        }
++        if (closedir(reading) != 0)
++            return false;
++    }
++
++    /* Create the |names| table from the |data| table.  */
++    if (PTRDIFF_MAX / sizeof *names - 1 <= nnames)
++        xalloc_die();
++    dirdata->names = names = xmalloc((nnames + 1) * sizeof *names);
++    dirdata->nnames = nnames;
++    for (i = 0; i < nnames; i++) {
++        names[i] = data;
++        data += strlen(data) + 1;
++    }
++    names[nnames] = 0;
++    return true;
++}
++
++/* Compare file names, returning a value compatible with strcmp.  */
++
++#define compare_names strcmp
++
++/* Compare names FILE1 and FILE2 when sorting a directory.  */
++
++static int
++compare_names_for_qsort(void const *file1, void const *file2) {
++    char const *const *f1 = file1;
++    char const *const *f2 = file2;
++    char const *name1 = *f1;
++    char const *name2 = *f2;
++    return compare_names(name1, name2);
++}
++
++/* Compare the contents of two directories named in |cmp|.  This is a
++   top-level routine; it does everything necessary for diff on two
++   directories.
++
++   |cmp->file[0].desc == -1| says directory |cmp->file[0]| doesn't
++   exist, but pretend it is empty.  Likewise for |cmp->file[1]|.
++
++   |handle_file| is a caller-provided subroutine called to handle each file.
++   It gets three operands: |cmp|, name of file in dir 0, name of file in dir 1.
++   These names are relative to the original working directory.
++
++   For a file that appears in only one of the dirs, one of the name-args
++   to |handle_file| is zero.
++
++   Returns the maximum of all the values returned by |handle_file|,
++   or |exit_trouble| if trouble is encountered in opening files.  */
++
++int
++diff_dirs(struct comparison const *cmp,
++          int (*handle_file)(struct comparison const *,
++                             char const *, char const *)) {
++    struct dirdata dirdata[2];
++    int volatile val = EXIT_SUCCESS;
++    int i;
++
++    if ((cmp->file[0].desc == -1 || dir_loop(cmp, 0))
++        && (cmp->file[1].desc == -1 || dir_loop(cmp, 1))) {
++        error(0, 0, "%s: recursive directory loop",
++              cmp->file[cmp->file[0].desc == -1].name);
++        return EXIT_TROUBLE;
++    }
++
++    /* Get contents of both dirs.  */
++    for (i = 0; i < 2; i++)
++        if (!dir_read(&cmp->file[i], &dirdata[i])) {
++            perror_with_name(cmp->file[i].name);
++            val = EXIT_TROUBLE;
++        }
++
++    if (val == EXIT_SUCCESS) {
++        char const **volatile names[2];
++        names[0] = dirdata[0].names;
++        names[1] = dirdata[1].names;
++
++        /* Sort the directories.  */
++        for (i = 0; i < 2; i++)
++            qsort(names[i], dirdata[i].nnames, sizeof *dirdata[i].names,
++                  compare_names_for_qsort);
++
++        /* If |-S name| was given, and this is the topmost level of
++       comparison, ignore all file names less than the specified
++       starting name.  */
++
++        if (starting_file && !cmp->parent) {
++            while (*names[0] && compare_names(*names[0], starting_file) < 0)
++                names[0]++;
++            while (*names[1] && compare_names(*names[1], starting_file) < 0)
++                names[1]++;
++        }
++
++        /* Loop while files remain in one or both dirs.  */
++        while (*names[0] || *names[1]) {
++            /* Compare next name in dir 0 with next name in dir 1.  At
++               the end of a dir, pretend the "next name" in that dir
++               is very large.  */
++            int nameorder = (!*names[0] ? 1 : !*names[1] ? -1
++                                                         : compare_names(*names[0], *names[1]));
++            int v1 = (*handle_file)(cmp,
++                                    0 < nameorder ? 0 : *names[0]++,
++                                    nameorder < 0 ? 0 : *names[1]++);
++            if (val < v1)
++                val = v1;
++        }
++    }
++
++    for (i = 0; i < 2; i++) {
++        free(dirdata[i].names);
++        free(dirdata[i].data);
++    }
++
++    return val;
++}
++
++/* Return nonzero if $cmp$ is looping recursively in argument $i$.  */
++
++static bool
++dir_loop(struct comparison const *cmp, int i) {
++    struct comparison const *p = cmp;
++    while ((p = p->parent))
++        if (0 < same_file (&p->file[i].stat, &cmp->file[i].stat))
++            return true;
++    return false;
++}
++
++/* Find a matching filename in a directory.  */
++
++char *
++find_dir_file_pathname(char const *dir, char const *file) {
++    const char *match = file;
++    return file_name_concat(dir, match, NULL);
++}
+diff -uNr a/vtools/src/io.c b/vtools/src/io.c
+--- a/vtools/src/io.c false
++++ b/vtools/src/io.c 95c84e641e6f1d92d0a44d0a7e0cf978fc2f7f258109fc537beb38bf8d1fc03683984d14cae421de94349fc95a7126a9b905f7d9f3bd38c8916dc6714f4f6e8c
+@@ -0,0 +1,596 @@
++
++#include "diff.h"
++#include <cmpbuf.h>
++#include <xalloc.h>
++#include <string.h>
++#include <limits.h>
++#include <stdlib.h>
++
++/* Rotate an unsigned value to the left.  */
++#define ROL(v, n) ((v) << (n) | (v) >> (sizeof (v) * CHAR_BIT - (n)))
++
++/* Given a hash value and a new character, return a new hash
++   value.  */
++#define HASH(h, c) ((c) + ROL (h, 7))
++
++/* The type of a hash value.  */
++typedef size_t hash_value;
++
++/* Lines are put into equivalence classes of lines that match in
++   |lines_differ|.  Each equivalence class is represented by one of
++   these structures, but only while the classes are being computed.
++   Afterward, each class is represented by a number.  */
++struct equivclass {
++    lin next;        /* Next item in this bucket.  */
++    hash_value hash;    /* Hash of lines in this class.  */
++    char const *line;    /* A line that fits this class.  */
++    size_t length;    /* That line's length, not counting its newline.  */
++};
++
++/* Hash-table: array of buckets, each being a chain of equivalence
++   classes.  |buckets[-1]| is reserved for incomplete lines.  */
++static lin *buckets;
++
++/* Number of buckets in the hash table array, not counting
++   |buckets[-1]|.  */
++static size_t nbuckets;
++
++/* Array in which the equivalence classes are allocated.  The
++   bucket-chains go through the elements in this array.  The number of
++   an equivalence class is its index in this array.  */
++static struct equivclass *equivs;
++
++/* Index of first free element in the array |equivs|.  */
++static lin equivs_index;
++
++/* Number of elements allocated in the array |equivs|.  */
++static lin equivs_alloc;
++
++/* Read a block of data into a file buffer, checking for EOF and
++   error.  */
++
++void
++file_block_read(struct file_data *current, size_t size) {
++    if (size && !current->eof) {
++        size_t s = block_read(current->desc,
++                              FILE_BUFFER (current) + current->buffered, size);
++        if (s == SIZE_MAX)
++            pfatal_with_name(current->name);
++
++        current->buffered += s;
++        current->eof = s < size;
++    }
++}
++
++/* Check for binary files and compare them for exact identity.  */
++
++/* Return 1 if |buf| contains a non text character.  |size| is the
++   number of characters in |buf|.  */
++
++#define binary_file_p(buf, size) (memchr (buf, 0, size) != 0)
++
++/* Get ready to read the current file.  Return nonzero if |skip_test|
++   is zero, and if it appears to be a binary file.  */
++
++static bool
++sip(struct file_data *current, bool skip_test) {
++    /* If we have a nonexistent file at this stage, treat it as
++       empty.  */
++    if (current->desc < 0) {
++        /* Leave room for a sentinel.  */
++        current->bufsize = sizeof(word);
++        current->buffer = xmalloc(current->bufsize);
++    } else {
++        current->bufsize = buffer_lcm(sizeof(word),
++                                      STAT_BLOCKSIZE (current->stat),
++                                      PTRDIFF_MAX - 2 * sizeof(word));
++        current->buffer = xmalloc(current->bufsize);
++
++        if (!skip_test) {
++            /* Check first part of file to see if it's a binary file.  */
++
++            off_t buffered;
++            file_block_read(current, current->bufsize);
++            buffered = current->buffered;
++            return binary_file_p (current->buffer, buffered);
++        }
++    }
++
++    current->buffered = 0;
++    current->eof = false;
++    return false;
++}
++
++/* Slurp the rest of the current file completely into memory.  */
++
++static void
++slurp(struct file_data *current) {
++    size_t cc;
++
++    if (current->desc < 0) {
++        /* The file is nonexistent.  */
++        return;
++    }
++
++    if (S_ISREG (current->stat.st_mode)) {
++        /* It's a regular file; slurp in the rest all at once.  */
++
++        /* Get the size out of the stat block.  Allocate just enough
++       room for appended newline plus word sentinel, plus
++       word-alignment since we want the buffer word-aligned.  */
++        size_t file_size = current->stat.st_size;
++        cc = file_size + 2 * sizeof(word) - file_size % sizeof(word);
++        if (file_size != current->stat.st_size || cc < file_size
++            || PTRDIFF_MAX <= cc)
++            xalloc_die();
++
++        if (current->bufsize < cc) {
++            current->bufsize = cc;
++            current->buffer = xrealloc(current->buffer, cc);
++        }
++
++        /* Try to read at least 1 more byte than the size indicates,
++       to detect whether the file is growing.  This is a nicety for
++       users who run 'diff' on files while they are changing.  */
++
++        if (current->buffered <= file_size) {
++            file_block_read(current, file_size + 1 - current->buffered);
++            if (current->buffered <= file_size)
++                return;
++        }
++    }
++
++    /* It's not a regular file, or it's a growing regular file; read
++       it, growing the buffer as needed.  */
++
++    file_block_read(current, current->bufsize - current->buffered);
++
++    if (current->buffered) {
++        while (current->buffered == current->bufsize) {
++            if (PTRDIFF_MAX / 2 - sizeof(word) < current->bufsize)
++                xalloc_die();
++            current->bufsize *= 2;
++            current->buffer = xrealloc(current->buffer, current->bufsize);
++            file_block_read(current, current->bufsize - current->buffered);
++        }
++
++        /* Allocate just enough room for appended newline plus word
++       sentinel, plus word-alignment.  */
++        cc = current->buffered + 2 * sizeof(word);
++        current->bufsize = cc - cc % sizeof(word);
++        current->buffer = xrealloc(current->buffer, current->bufsize);
++    }
++}
++
++/* Split the file into lines, simultaneously computing the equivalence
++   class for each line.  */
++
++static void
++find_and_hash_each_line(struct file_data *current) {
++    char const *p = current->prefix_end;
++    lin i, *bucket;
++    size_t length;
++
++    /* Cache often-used quantities in local variables to help the compiler.  */
++    char const **linbuf = current->linbuf;
++    lin alloc_lines = current->alloc_lines;
++    lin line = 0;
++    lin linbuf_base = current->linbuf_base;
++    lin *cureqs = xmalloc(alloc_lines * sizeof *cureqs);
++    struct equivclass *eqs = equivs;
++    lin eqs_index = equivs_index;
++    lin eqs_alloc = equivs_alloc;
++    char const *suffix_begin = current->suffix_begin;
++    char const *bufend = FILE_BUFFER (current) + current->buffered;
++
++
++    while (p < suffix_begin) {
++        char const *ip = p;
++        hash_value h = 0;
++        unsigned char c;
++
++        /* Hash this line until we find a newline.  */
++        while ((c = *p++) != '\n')
++            h = HASH (h, c);
++
++        bucket = &buckets[h % nbuckets];
++        length = p - ip - 1;
++
++        for (i = *bucket;; i = eqs[i].next)
++            if (!i) {
++                /* Create a new equivalence class in this bucket.  */
++                i = eqs_index++;
++                if (i == eqs_alloc) {
++                    if (PTRDIFF_MAX / (2 * sizeof *eqs) <= eqs_alloc)
++                        xalloc_die();
++                    eqs_alloc *= 2;
++                    eqs = xrealloc(eqs, eqs_alloc * sizeof *eqs);
++                }
++                eqs[i].next = *bucket;
++                eqs[i].hash = h;
++                eqs[i].line = ip;
++                eqs[i].length = length;
++                *bucket = i;
++                break;
++            } else if (eqs[i].hash == h) {
++                char const *eqline = eqs[i].line;
++
++                /* Reuse existing class if |lines_differ| reports the
++                   lines equal.  */
++                if (eqs[i].length == length) {
++                    /* Reuse existing equivalence class if the lines
++                       are identical.  This detects the common case of
++                       exact identity faster than |lines_differ|
++                       would.  */
++                    if (memcmp(eqline, ip, length) == 0)
++                        break;
++                    continue;
++                } else
++                    continue;
++            }
++
++        /* Maybe increase the size of the line table.  */
++        if (line == alloc_lines) {
++            /* Double |(alloc_lines - linbuf_base)| by adding to
++               |alloc_lines|.  */
++            if (PTRDIFF_MAX / 3 <= alloc_lines
++                || PTRDIFF_MAX / sizeof *cureqs <= 2 * alloc_lines - linbuf_base
++                || PTRDIFF_MAX / sizeof *linbuf <= alloc_lines - linbuf_base)
++                xalloc_die();
++            alloc_lines = 2 * alloc_lines - linbuf_base;
++            cureqs = xrealloc(cureqs, alloc_lines * sizeof *cureqs);
++            linbuf += linbuf_base;
++            linbuf = xrealloc(linbuf,
++                              (alloc_lines - linbuf_base) * sizeof *linbuf);
++            linbuf -= linbuf_base;
++        }
++        linbuf[line] = ip;
++        cureqs[line] = i;
++        ++line;
++    }
++
++    current->buffered_lines = line;
++
++    for (i = 0;; i++) {
++        /* Record the line start for lines in the suffix that we care
++       about.  Record one more line start than lines, so that we can
++       compute the length of any buffered line.  */
++        if (line == alloc_lines) {
++            /* Double |(alloc_lines - linbuf_base)| by adding to
++               |alloc_lines|.  */
++            if (PTRDIFF_MAX / 3 <= alloc_lines
++                || PTRDIFF_MAX / sizeof *cureqs <= 2 * alloc_lines - linbuf_base
++                || PTRDIFF_MAX / sizeof *linbuf <= alloc_lines - linbuf_base)
++                xalloc_die();
++            alloc_lines = 2 * alloc_lines - linbuf_base;
++            linbuf += linbuf_base;
++            linbuf = xrealloc(linbuf,
++                              (alloc_lines - linbuf_base) * sizeof *linbuf);
++            linbuf -= linbuf_base;
++        }
++        linbuf[line] = p;
++
++        if (p == bufend) {
++            /* If the last line is incomplete and we do not silently
++               complete lines, don't count its appended newline.  */
++            if (current->missing_newline && false) /* our output style not robust */
++                linbuf[line]--;
++            break;
++        }
++
++        line++;
++
++        while (*p++ != '\n')
++            continue;
++    }
++
++    /* Done with cache in local variables.  */
++    current->linbuf = linbuf;
++    current->valid_lines = line;
++    current->alloc_lines = alloc_lines;
++    current->equivs = cureqs;
++    equivs = eqs;
++    equivs_alloc = eqs_alloc;
++    equivs_index = eqs_index;
++}
++
++/* Prepare the text.  Make sure the text end is initialized.  Make
++   sure text ends in a newline, but remember that we had to add one.
++   Strip trailing CRs, if that was requested.  */
++
++static void
++prepare_text(struct file_data *current) {
++    size_t buffered = current->buffered;
++    char *p = FILE_BUFFER (current);
++
++    if (buffered == 0 || p[buffered - 1] == '\n')
++        current->missing_newline = false;
++    else {
++        p[buffered++] = '\n';
++        current->missing_newline = true;
++    }
++
++    if (!p)
++        return;
++
++    /* Don't use uninitialized storage when planting or using sentinels.  */
++    memset (p + buffered, 0, sizeof(word));
++
++    current->buffered = buffered;
++}
++
++/* We have found |n| lines in a buffer of size |s|; guess the
++   proportionate number of lines that will be found in a buffer of
++   size |t|.  However, do not guess a number of lines so large that
++   the resulting line table might cause overflow in size
++   calculations.  */
++static lin
++guess_lines(lin n, size_t s, size_t t) {
++    size_t guessed_bytes_per_line = n < 10 ? 32 : s / (n - 1);
++    lin guessed_lines = MAX (1, t / guessed_bytes_per_line);
++    return MIN (guessed_lines, PTRDIFF_MAX / (2 * sizeof(char *) + 1) - 5) + 5;
++}
++
++/* Given a vector of two |file_data| objects, find the identical
++   prefixes and suffixes of each object.  */
++
++static void
++find_identical_ends(struct file_data filevec[]) {
++    word *w0, *w1;
++    char *p0, *p1, *buffer0, *buffer1;
++    char const *end0, *beg0;
++    char const **linbuf0, **linbuf1;
++    lin i, lines;
++    size_t n0, n1;
++    lin alloc_lines0, alloc_lines1;
++    lin buffered_prefix, prefix_count, prefix_mask;
++    lin middle_guess, suffix_guess;
++
++    slurp(&filevec[0]);
++    prepare_text(&filevec[0]);
++    if (filevec[0].desc != filevec[1].desc) {
++        slurp(&filevec[1]);
++        prepare_text(&filevec[1]);
++    } else {
++        filevec[1].buffer = filevec[0].buffer;
++        filevec[1].bufsize = filevec[0].bufsize;
++        filevec[1].buffered = filevec[0].buffered;
++        filevec[1].missing_newline = filevec[0].missing_newline;
++    }
++
++    /* Find identical prefix.  */
++
++    w0 = filevec[0].buffer;
++    w1 = filevec[1].buffer;
++    p0 = buffer0 = (char *) w0;
++    p1 = buffer1 = (char *) w1;
++    n0 = filevec[0].buffered;
++    n1 = filevec[1].buffered;
++
++    if (p0 == p1)
++        /* The buffers are the same; sentinels won't work.  */
++        p0 = p1 += n1;
++    else {
++        /* Insert end sentinels, in this case characters that are
++       guaranteed to make the equality test false, and thus terminate
++       the loop.  */
++
++        if (n0 < n1)
++            p0[n0] = ~p1[n0];
++        else
++            p1[n1] = ~p0[n1];
++
++        /* Loop until first mismatch, or to the sentinel
++           characters.  */
++
++        /* Compare a word at a time for speed.  */
++        while (*w0 == *w1)
++            w0++, w1++;
++
++        /* Do the last few bytes of comparison a byte at a time.  */
++        p0 = (char *) w0;
++        p1 = (char *) w1;
++        while (*p0 == *p1)
++            p0++, p1++;
++
++        /* Don't mistakenly count missing newline as part of
++           prefix.  */
++        if (false
++            && ((buffer0 + n0 - filevec[0].missing_newline < p0)
++                !=
++                (buffer1 + n1 - filevec[1].missing_newline < p1)))
++            p0--, p1--;
++    }
++
++    /* Now |p0| and |p1| point at the first nonmatching
++       characters.  */
++
++    /* Skip back to last line-beginning in the prefix, and then
++       discard up to |horizon_lines| lines from the prefix.  */
++    i = horizon_lines;
++    while (p0 != buffer0 && (p0[-1] != '\n' || i--))
++        p0--, p1--;
++
++    /* Record the prefix.  */
++    filevec[0].prefix_end = p0;
++    filevec[1].prefix_end = p1;
++
++    /* Find identical suffix.  */
++
++    /* |p0| and |p1| point beyond the last chars not yet compared.  */
++    p0 = buffer0 + n0;
++    p1 = buffer1 + n1;
++
++    if (filevec[0].missing_newline == filevec[1].missing_newline) {
++        end0 = p0;    /* Addr of last char in file 0.  */
++
++        /* Get value of |p0| at which we should stop scanning
++       backward: this is when either |p0| or |p1| points just past the
++       last char of the identical prefix.  */
++        beg0 = filevec[0].prefix_end + (n0 < n1 ? 0 : n0 - n1);
++
++        /* Scan back until chars don't match or we reach that point.  */
++        while (p0 != beg0)
++            if (*--p0 != *--p1) {
++                /* Point at the first char of the matching suffix.  */
++                ++p0, ++p1;
++                beg0 = p0;
++                break;
++            }
++
++        /* Are we at a line-beginning in both files?  If not, add the
++       rest of this line to the main body.  Discard up to
++       |horizon_lines| lines from the identical suffix.  Also, discard
++       one extra line, because |shift_boundaries| may need it.  */
++        i = horizon_lines + !((buffer0 == p0 || p0[-1] == '\n')
++                              &&
++                              (buffer1 == p1 || p1[-1] == '\n'));
++        while (i-- && p0 != end0)
++            while (*p0++ != '\n')
++                continue;
++
++        p1 += p0 - beg0;
++    }
++
++    /* Record the suffix.  */
++    filevec[0].suffix_begin = p0;
++    filevec[1].suffix_begin = p1;
++
++    /* Calculate number of lines of prefix to save.
++
++       |prefix_count == 0| means save the whole prefix; we need this
++       for options like |-D| that output the whole file, or for
++       enormous contexts (to avoid worrying about arithmetic
++       overflow).  We also need it for options like |-F| that output
++       some preceding line; at least we will need to find the last few
++       lines, but since we don't know how many, it's easiest to find
++       them all.
++
++       Otherwise, |prefix_count != 0|.  Save just |prefix_count| lines
++       at start of the line buffer; they'll be moved to the proper
++       location later.  Handle 1 more line than the context says
++       (because we count 1 too many), rounded up to the next power of
++       2 to speed index computation.  */
++
++    prefix_count = 0;
++    alloc_lines0 = guess_lines(0, 0, n0);
++    prefix_mask = prefix_count - 1;
++    lines = 0;
++    linbuf0 = xmalloc(alloc_lines0 * sizeof *linbuf0);
++    p0 = buffer0;
++
++    /* If the prefix is needed, find the prefix lines.  */
++    end0 = filevec[0].prefix_end;
++    while (p0 != end0) {
++        lin l = lines++ & prefix_mask;
++        if (l == alloc_lines0) {
++            if (PTRDIFF_MAX / (2 * sizeof *linbuf0) <= alloc_lines0)
++                xalloc_die();
++            alloc_lines0 *= 2;
++            linbuf0 = xrealloc(linbuf0, alloc_lines0 * sizeof *linbuf0);
++        }
++        linbuf0[l] = p0;
++        while (*p0++ != '\n')
++            continue;
++    }
++    buffered_prefix = prefix_count && context < lines ? context : lines;
++
++    /* Allocate line buffer 1.  */
++
++    middle_guess = guess_lines(lines, p0 - buffer0, p1 - filevec[1].prefix_end);
++    suffix_guess = guess_lines(lines, p0 - buffer0, buffer1 + n1 - p1);
++    alloc_lines1 = buffered_prefix + middle_guess + MIN (context, suffix_guess);
++    if (alloc_lines1 < buffered_prefix
++        || PTRDIFF_MAX / sizeof *linbuf1 <= alloc_lines1)
++        xalloc_die();
++    linbuf1 = xmalloc(alloc_lines1 * sizeof *linbuf1);
++
++    if (buffered_prefix != lines) {
++        /* Rotate prefix lines to proper location.  */
++        for (i = 0; i < buffered_prefix; i++)
++            linbuf1[i] = linbuf0[(lines - context + i) & prefix_mask];
++        for (i = 0; i < buffered_prefix; i++)
++            linbuf0[i] = linbuf1[i];
++    }
++
++    /* Initialize line buffer 1 from line buffer 0.  */
++    for (i = 0; i < buffered_prefix; i++)
++        linbuf1[i] = linbuf0[i] - buffer0 + buffer1;
++
++    /* Record the line buffer, adjusted so that
++       |linbuf[0]| points at the first differing line.  */
++    filevec[0].linbuf = linbuf0 + buffered_prefix;
++    filevec[1].linbuf = linbuf1 + buffered_prefix;
++    filevec[0].linbuf_base = filevec[1].linbuf_base = -buffered_prefix;
++    filevec[0].alloc_lines = alloc_lines0 - buffered_prefix;
++    filevec[1].alloc_lines = alloc_lines1 - buffered_prefix;
++    filevec[0].prefix_lines = filevec[1].prefix_lines = lines;
++}
++
++/* If $1 < k$, then $(2^k - {\rm prime\_offset}_k)$ is the largest
++   prime less than $2^k$.  This table is derived from
++   Chris~K.~Caldwell's list
++   \url{http://www.utm.edu/research/primes/lists/2small/}.  */
++
++static unsigned char const prime_offset[] =
++        {
++                0, 0, 1, 1, 3, 1, 3, 1, 5, 3, 3, 9, 3, 1, 3, 19, 15, 1, 5, 1, 3, 9, 3,
++                15, 3, 39, 5, 39, 57, 3, 35, 1, 5, 9, 41, 31, 5, 25, 45, 7, 87, 21,
++                11, 57, 17, 55, 21, 115, 59, 81, 27, 129, 47, 111, 33, 55, 5, 13, 27,
++                55, 93, 1, 57, 25
++        };
++
++/* Given a vector of two |file_data| objects, read the file associated
++   with each one, and build the table of equivalence classes.  Return
++   nonzero if either file appears to be a binary file.  If
++   |pretend_binary| is nonzero, pretend they are binary
++   regardless.  */
++
++bool
++read_files(struct file_data filevec[], bool pretend_binary) {
++    int i;
++    bool skip_test = text | pretend_binary;
++    bool appears_binary = pretend_binary | sip(&filevec[0], skip_test);
++
++    if (filevec[0].desc != filevec[1].desc)
++        appears_binary |= sip(&filevec[1], skip_test | appears_binary);
++    else {
++        filevec[1].buffer = filevec[0].buffer;
++        filevec[1].bufsize = filevec[0].bufsize;
++        filevec[1].buffered = filevec[0].buffered;
++    }
++    if (appears_binary) {
++        return true;
++    }
++
++    find_identical_ends(filevec);
++
++    equivs_alloc = filevec[0].alloc_lines + filevec[1].alloc_lines + 1;
++    if (PTRDIFF_MAX / sizeof *equivs <= equivs_alloc)
++        xalloc_die();
++    equivs = xmalloc(equivs_alloc * sizeof *equivs);
++    /* Equivalence class 0 is permanently safe for lines that were not
++       hashed.  Real equivalence classes start at 1.  */
++    equivs_index = 1;
++
++    /* Allocate (one plus) a prime number of hash buckets.  Use a
++       prime number between $1/3$ and $2/3$ of the value of
++       |equiv_allocs|, approximately.  */
++    for (i = 9; (size_t) 1 << i < equivs_alloc / 3; i++)
++        continue;
++    nbuckets = ((size_t) 1 << i) - prime_offset[i];
++    if (PTRDIFF_MAX / sizeof *buckets <= nbuckets)
++        xalloc_die();
++    buckets = zalloc((nbuckets + 1) * sizeof *buckets);
++    buckets++;
++
++    for (i = 0; i < 2; i++)
++        find_and_hash_each_line(&filevec[i]);
++
++    filevec[0].equiv_max = filevec[1].equiv_max = equivs_index;
++
++    free(equivs);
++    free(buckets - 1);
++
++    return false;
++}
+diff -uNr a/vtools/src/system.h b/vtools/src/system.h
+--- a/vtools/src/system.h false
++++ b/vtools/src/system.h a409714e54084bda8cbf8cce9e504a6b703dcf3f034dbaec1bcf1f40a139b5e722d9619b1e8f1aa61c6531b4ef751db39691a24238a9d786b9c84902f1a8cd08
+@@ -0,0 +1,156 @@
++#ifndef SYSTEM_H
++#define SYSTEM_H
++
++#define _GNU_SOURCE
++
++#include <stddef.h>
++/* freebsd */
++#include <stdint.h>
++#include <unistd.h>
++/* linux */
++#include <inttypes.h>
++#include <sys/types.h>
++
++#define STAT_BLOCKSIZE(s) ((s).st_blksize)
++
++#define EXIT_TROUBLE 2
++
++#include <errno.h>
++
++#define MIN(a, b) ((a) <= (b) ? (a) : (b))
++#define MAX(a, b) ((a) >= (b) ? (a) : /**/(b))
++
++/* Return 1 if an array of |n| objects, each of size |s|, cannot exist
++   reliably due to size or |ptrdiff_t| arithmetic overflow.  |s| must
++   be positive and N must be nonnegative.  This is a macro, not a
++   function, so that it works correctly even when |SIZE_MAX < n|.
++
++   True if |n * s| would overflow in a |size_t| calculation, or would
++   generate a value larger than |PTRDIFF_MAX|.  This expands to a
++   constant expression if |n| and |s| are both constants.  By gnulib
++   convention, |SIZE_MAX| represents overflow in size calculations, so
++   the conservative |size_t|-based dividend to use here is |SIZE_MAX -
++   1|.  */
++
++#define xalloc_oversized(n, s) \
++    ((size_t) (PTRDIFF_MAX < SIZE_MAX ? PTRDIFF_MAX : SIZE_MAX - 1) / (s) < (n))
++
++#include <stdbool.h>
++
++/* Type used for fast comparison of several bytes at a time. This used
++   to be |uintmax_t|, but changing it to |size_t| made plain 'cmp' 90\%
++   faster (|GCC 4.8.1|, |x86|).  */
++
++#ifndef word
++# define word size_t
++#endif
++
++#include <signal.h> /* SA_RESTART */
++
++#include <limits.h>
++#ifndef SSIZE_MAX
++# define SSIZE_MAX ((ssize_t) (SIZE_MAX / 2))
++#endif
++
++/* The signed integer type of a line number.  Since files are read
++   into main memory, |ptrdiff_t| should be wide enough.  */
++
++typedef ptrdiff_t lin;
++#define LIN_MAX PTRDIFF_MAX
++
++/* The signed integer type for printing line numbers, and its printf
++   length modifier.  This is not simply |ptrdiff_t|, to cater to older
++   and/or nonstandard C libraries where |"l"| works but |"ll"| and
++   |"t"| do not, or where |long| is too narrow and |"ll"| works but
++   |"t"| does not.  */
++
++#if LIN_MAX <= LONG_MAX
++typedef long int printint;
++# define pI "l"
++#elif LIN_MAX <= LLONG_MAX
++typedef long long int printint;
++# define pI "ll"
++#else
++typedef ptrdiff_t printint;
++# define pI "t"
++#endif
++
++/* Limit so that |2 * context + 1| does not overflow.  */
++
++#define CONTEXT_MAX ((LIN_MAX - 1) / 2)
++
++
++#define file_name_cmp strcmp
++
++/* Do struct stat |*s|, |*t| describe the same special file?  */
++#ifndef same_special_file
++# if HAVE_STRUCT_STAT_ST_RDEV && defined S_ISBLK && defined S_ISCHR
++#  define same_special_file(s, t) \
++     (((S_ISBLK ((s)->st_mode) && S_ISBLK ((t)->st_mode)) \
++       || (S_ISCHR ((s)->st_mode) && S_ISCHR ((t)->st_mode))) \
++      && (s)->st_rdev == (t)->st_rdev)
++# else
++#  define same_special_file(s, t) 0
++# endif
++#endif
++
++/* Do |struct stat *s, *t| describe the same file?  Answer -1 if
++   unknown.  */
++#ifndef same_file
++# define same_file(s, t) \
++    ((((s)->st_ino == (t)->st_ino) && ((s)->st_dev == (t)->st_dev)) \
++     || same_special_file (s, t))
++#endif
++
++/* Do |struct stat *s, *t| have the same file attributes?
++
++   POSIX says that two files are identical if |st_ino| and |st_dev|
++   are the same, but many file systems incorrectly assign the same
++   (device, inode) pair to two distinct files, including:
++
++   - GNU/Linux NFS servers that export all local file systems as a
++     single NFS file system, if a local device number |(st_dev)| exceeds
++     255, or if a local inode number |(st_ino)| exceeds 16777215.
++
++   - Network Appliance NFS servers in snapshot directories; see
++     Network Appliance bug \#195.
++
++   - ClearCase MVFS; see bug id ATRia04618.
++
++   Check whether two files that purport to be the same have the same
++   attributes, to work around instances of this common bug.  Do not
++   inspect all attributes, only attributes useful in checking for this
++   bug.
++
++   It's possible for two distinct files on a buggy file system to have
++   the same attributes, but it's not worth slowing down all
++   implementations (or complicating the configuration) to cater to
++   these rare cases in buggy implementations.  */
++
++#ifndef same_file_attributes
++# define same_file_attributes(s, t) \
++   ((s)->st_mode == (t)->st_mode \
++    && (s)->st_nlink == (t)->st_nlink \
++    && (s)->st_uid == (t)->st_uid \
++    && (s)->st_gid == (t)->st_gid \
++    && (s)->st_size == (t)->st_size \
++    && (s)->st_mtime == (t)->st_mtime \
++    && (s)->st_ctime == (t)->st_ctime)
++#endif
++
++#define ARRAY_SIZE(x) ((unsigned)(sizeof(x) / sizeof((x)[0])))
++
++#define BB_LITTLE_ENDIAN 1
++
++#ifdef __APPLE__
++#include <libkern/OSByteOrder.h>
++#define SWAP_BE64(x) OSSwapInt64(x)
++#elif __FreeBSD__
++#include <sys/endian.h>
++#define SWAP_BE64(x) bswap64(x)
++#elif __linux__
++#include <byteswap.h>
++#define SWAP_BE64(x) bswap_64(x)
++#endif
++
++#endif
+diff -uNr a/vtools/src/util.c b/vtools/src/util.c
+--- a/vtools/src/util.c false
++++ b/vtools/src/util.c a0524c127eca0666f952284dd9e586fe99d4ac9694fc8c252b6f90054ef939af85f433ec1d850fae520ec9f4faf94d5522a90c7ef91a1b1aadfef7ac3c4fa9bd
+@@ -0,0 +1,428 @@
++
++#include "diff.h"
++#include <error.h>
++#include <xalloc.h>
++#include <stdlib.h>
++
++/* Use when a system call returns non-zero status.  |name| should
++   normally be the file name.  */
++
++void
++perror_with_name(char const *name) {
++    error(0, errno, "%s", name);
++}
++
++/* Use when a system call returns non-zero status and that is
++   fatal.  */
++
++void
++pfatal_with_name(char const *name) {
++    int e = errno;
++    fprintf(stderr, "%s", name);
++    exit(EXIT_TROUBLE);
++}
++
++/* Print an error message containing |msgid|, then exit.  */
++
++void
++fatal(char const *msgid) {
++    fprintf(stderr, "%s", msgid);
++    exit(EXIT_TROUBLE);
++}
++
++/* Like |printf|, except if -l in effect then save the message and
++   print later.  This is used for things like "Only in ...".  */
++
++void
++message(char const *format_msgid, char const *arg1, char const *arg2) {
++    message5(format_msgid, arg1, arg2, 0, 0);
++}
++
++void
++message5(char const *format_msgid, char const *arg1, char const *arg2,
++         char const *arg3, char const *arg4) {
++    fprintf(stderr, format_msgid, arg1, arg2, arg3, arg4);
++}
++
++static char const *current_name0;
++static char const *current_name1;
++static bool currently_recursive;
++
++/* Call before outputting the results of comparing files |name0| and |name1|
++   to set up |outfile|, the stdio stream for the output to go to.
++
++   Usually, |outfile| is just stdout.  But when -l was specified we
++   fork off a |pr| and make |outfile| a pipe to it.  'pr' then outputs
++   to our stdout.  */
++
++void
++setup_output(char const *name0, char const *name1, bool recursive) {
++    current_name0 = name0;
++    current_name1 = name1;
++    currently_recursive = recursive;
++    outfile = 0;
++}
++
++static char c_escape_char(char c) {
++    switch (c) {
++        case '\a':
++            return 'a';
++        case '\b':
++            return 'b';
++        case '\t':
++            return 't';
++        case '\n':
++            return 'n';
++        case '\v':
++            return 'v';
++        case '\f':
++            return 'f';
++        case '\r':
++            return 'r';
++        case '"':
++            return '"';
++        case '\\':
++            return '\\';
++        default:
++            return c < 32;
++    }
++}
++
++static char *
++c_escape(char const *str) {
++    char const *s;
++    size_t plus = 0;
++    bool must_quote = false;
++
++    for (s = str; *s; s++) {
++        char c = *s;
++
++        if (c == ' ') {
++            must_quote = true;
++            continue;
++        }
++        switch (c_escape_char(*s)) {
++            case 1:
++                plus += 3;
++                /* fall through */
++            case 0:
++                break;
++            default:
++                plus++;
++                break;
++        }
++    }
++
++    if (must_quote || plus) {
++        size_t s_len = s - str;
++        char *buffer = xmalloc(s_len + plus + 3);
++        char *b = buffer;
++
++        *b++ = '"';
++        for (s = str; *s; s++) {
++            char c = *s;
++            char escape = c_escape_char(c);
++
++            switch (escape) {
++                case 0:
++                    *b++ = c;
++                    break;
++                case 1:
++                    *b++ = '\\';
++                    *b++ = ((c >> 6) & 03) + '0';
++                    *b++ = ((c >> 3) & 07) + '0';
++                    *b++ = ((c >> 0) & 07) + '0';
++                    break;
++                default:
++                    *b++ = '\\';
++                    *b++ = escape;
++                    break;
++            }
++        }
++        *b++ = '"';
++        *b = 0;
++        return buffer;
++    }
++
++    return (char *) str;
++}
++
++void
++begin_output(void) {
++    char *names[2];
++    char *name;
++
++    if (outfile != 0)
++        return;
++
++    names[0] = c_escape(current_name0);
++    names[1] = c_escape(current_name1);
++
++    /* Construct the header of this piece of diff.  */
++    if(asprintf(&name, "diff%s %s %s", switch_string, names[0], names[1]) == -1)
++        xalloc_die();
++
++    outfile = stdout;
++
++    /* If handling multiple files (because scanning a directory),
++   print which files the following output is about.  */
++    if (currently_recursive)
++        printf("%s\n", name);
++
++    free(name);
++
++    print_context_header(files, (char const *const *) names);
++
++    if (names[0] != current_name0)
++        free(names[0]);
++    if (names[1] != current_name1)
++        free(names[1]);
++}
++
++void
++finish_output(void) {
++    if (outfile != 0 && outfile != stdout) {
++        if (ferror(outfile))
++            fatal("write failed");
++        if (fclose(outfile) != 0)
++            pfatal_with_name("write failed");
++    }
++
++    outfile = 0;
++}
++
++/* Compare two lines (typically one from each input file) according to
++   the command line options.  For efficiency, this is invoked only
++   when the lines do not match exactly but an option like -i might
++   cause us to ignore the difference.  Return nonzero if the lines
++   differ.  */
++
++bool
++lines_differ(char const *s1, char const *s2) {
++    register char const *t1 = s1;
++    register char const *t2 = s2;
++    size_t column = 0;
++
++    while (1) {
++        register unsigned char c1 = *t1++;
++        register unsigned char c2 = *t2++;
++
++        /* Test for exact char equality first, since it's a common
++           case.  */
++        if (c1 != c2) {
++            break;
++        }
++        if (c1 == '\n')
++            return false;
++
++        column++;
++    }
++
++    return true;
++}
++
++/* Find the consecutive changes at the start of the script START.
++   Return the last link before the first gap.  */
++
++struct change *
++find_change(struct change *start) {
++    return start;
++}
++
++/* Divide |script| into pieces by calling |hunkfun| and print each piece
++   with |printfun|.  Both functions take one arg, an edit script.
++
++   |hunkfun| is called with the tail of the script and returns the
++   last link that belongs together with the start of the tail.
++
++   |printfun| takes a subscript which belongs together (with a null
++   link at the end) and prints it.  */
++
++void
++print_script(struct change *script) {
++    struct change *next = script;
++
++    while (next) {
++        struct change *this, *end;
++
++        /* Find a set of changes that belong together.  */
++        this = next;
++        end = find_hunk(next);
++
++        /* Disconnect them from the rest of the changes, making them a
++       hunk, and remember the rest for next iteration.  */
++        next = end->link;
++        end->link = 0;
++#ifdef DEBUG
++        debug_script (this);
++#endif
++
++        /* Print this hunk.  */
++        pr_unidiff_hunk(this);
++
++        /* Reconnect the script so it will all be freed properly.  */
++        end->link = next;
++    }
++}
++
++/* Print the text of a single line |line|, flagging it with the
++   characters in |line_flag| (which say whether the line is inserted,
++   deleted, changed, etc.).  |line_flag| must not end in a blank,
++   unless it is a single blank.  */
++
++void
++print_1_line(char const *line_flag, char const *const *line) {
++    print_1_line_nl(line_flag, line, false);
++}
++
++/* Print the text of a single line |line|, flagging it with the
++   characters in |line_flag| (which say whether the line is inserted,
++   deleted, changed, etc.).  |line_flag| must not end in a blank,
++   unless it is a single blank.  If |skip_nl| is set, then the final
++   |'\n'| is not printed.  */
++
++void
++print_1_line_nl(char const *line_flag, char const *const *line, bool skip_nl) {
++    char const *base = line[0], *limit = line[1]; /* Help the compiler.  */
++    FILE *out = outfile; /* Help the compiler some more.  */
++    char const *flag_format = 0;
++
++    /* If -T was specified, use a Tab between the line-flag and the
++       text.  Otherwise use a Space (as Unix diff does).  Print
++       neither space nor tab if line-flags are empty.  But omit
++       trailing blanks if requested.  */
++
++    if (line_flag && *line_flag) {
++        char const *flag_format_1 = flag_format = "%s ";
++        char const *line_flag_1 = line_flag;
++
++        if (suppress_blank_empty && **line == '\n') {
++            flag_format_1 = "%s";
++
++            /* This hack to omit trailing blanks takes advantage of
++               the fact that the only way that |line_flag| can end in
++               a blank is when |line_flag| consists of a single
++               blank.  */
++            line_flag_1 += *line_flag_1 == ' ';
++        }
++
++        fprintf(out, flag_format_1, line_flag_1);
++    }
++
++    output_1_line(base, limit - (skip_nl && limit[-1] == '\n'));
++
++    if ((!line_flag || line_flag[0]) && limit[-1] != '\n') {
++        fprintf(out, "\n\\ %s\n", "No newline at end of file");
++    }
++}
++
++/* Output a line from |base| up to |limit|. */
++
++void
++output_1_line(char const *base, char const *limit) {
++    const size_t MAX_CHUNK = 1024;
++    size_t left = limit - base;
++    while (left) {
++        size_t to_write = MIN (left, MAX_CHUNK);
++        size_t written = fwrite(base, sizeof(char), to_write, outfile);
++        if (written < to_write)
++            return;
++        base += written;
++        left -= written;
++    }
++}
++
++/* Translate an internal line number (an index into diff's table of
++   lines) into an actual line number in the input file.  The internal
++   line number is |i|.  |file| points to the data on the file.
++
++   Internal line numbers count from 0 starting after the prefix.
++   Actual line numbers count from 1 within the entire file.  */
++
++lin
++translate_line_number(struct file_data const *file, lin i) {
++    return i + file->prefix_lines + 1;
++}
++
++/* Translate a line number range.  This is always done for printing,
++   so for convenience translate to printint rather than lin, so that
++   the caller can use |printf| with |"%"pI"d"| without casting.  */
++
++void
++translate_range(struct file_data const *file,
++                lin a, lin b,
++                printint *aptr, printint *bptr) {
++    *aptr = translate_line_number(file, a - 1) + 1;
++    *bptr = translate_line_number(file, b + 1) - 1;
++}
++
++/* Look at a hunk of edit script and report the range of lines in each
++   file that it applies to.  |hunk| is the start of the hunk, which is
++   a chain of |struct change|.  The first and last line numbers of
++   file 0 are stored in |*first0| and |*last0|, and likewise for file
++   1 in |*first1| and |*last1|.  Note that these are internal line numbers
++   that count from 0.
++
++   If no lines from file 0 are deleted, then |first0| is |last0+1|.
++
++   Return |UNCHANGED| if only ignorable lines are inserted or deleted,
++   |OLD| if lines of file 0 are deleted,
++   |NEW| if lines of file 1 are inserted,
++   and |CHANGED| if both kinds of changes are found. */
++
++enum changes
++analyze_hunk(struct change *hunk,
++             lin *first0, lin *last0,
++             lin *first1, lin *last1) {
++    struct change *next;
++    lin l0, l1;
++    lin show_from, show_to;
++    /* If 0, ignore zero-length lines;
++       if |SIZE_MAX|, do not ignore lines just because of their length.  */
++
++    char const *const *linbuf0 = files[0].linbuf;  /* Help the compiler.  */
++    char const *const *linbuf1 = files[1].linbuf;
++
++    show_from = show_to = 0;
++
++    *first0 = hunk->line0;
++    *first1 = hunk->line1;
++
++    next = hunk;
++    do {
++        l0 = next->line0 + next->deleted - 1;
++        l1 = next->line1 + next->inserted - 1;
++        show_from += next->deleted;
++        show_to += next->inserted;
++    } while ((next = next->link) != 0);
++
++    *last0 = l0;
++    *last1 = l1;
++
++    return (show_from ? OLD : UNCHANGED) | (show_to ? NEW : UNCHANGED);
++}
++
++/* Yield a new block of |size| bytes, initialized to zero.  */
++
++void *
++zalloc(size_t size) {
++    void *p = xmalloc(size);
++    memset (p, 0, size);
++    return p;
++}
++
++void
++debug_script(struct change *sp) {
++    fflush(stdout);
++
++    for (; sp; sp = sp->link) {
++        printint line0 = sp->line0;
++        printint line1 = sp->line1;
++        printint deleted = sp->deleted;
++        printint inserted = sp->inserted;
++        fprintf(stderr, "%3"pI"d %3"pI"d delete %"pI"d insert %"pI"d\n",
++                line0, line1, deleted, inserted);
++    }
++
++    fflush(stderr);
++}

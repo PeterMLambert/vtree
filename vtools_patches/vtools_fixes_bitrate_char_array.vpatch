@@ -1,0 +1,107 @@
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest 97be043b6a6ea8c27d4877763aacb7fefd2d358f723d9621f6f88bbe83ebd2a1713920b52ecce28c75b0005174b1ed48348bbb720ef13c23835eabc94b7e7042
++++ b/vtools/manifest 6144af85a54f9e62de72d34b9a975036b0250d085c12fc51bdcb831d0957026363e68ca9360d818ae15489b49fb71354d52761ab48ffbe4a156edda28756e28a
+@@ -6,3 +6,5 @@
+ Included diana_coman's keccak implementation.
+ 2018-02-28 phf
+ Vdiff hashing and output using Keccak instead of SHA512.
++2018-03-08 phf
++Fixes for keccak from diana_coman, different approach to C interop.
+diff -uNr a/vtools/src/keccak_c.adb b/vtools/src/keccak_c.adb
+--- a/vtools/src/keccak_c.adb 9cc62485cae00916aae9729b2cb5c767299c08f76de1de250961ca2dd034fcf12d3fc93731f7364cf34f84392f4da2951b92d34c5c7ae88f3aac99e8c60195bf
++++ b/vtools/src/keccak_c.adb 29b834d3fcfa47b6c26b12bab548445dd61c3e184b73e8f85f0a7f47675afd3b748bb08c46931c61a46e89fc8d611c8c087bd973843b1d5175ea24be2bb0731c
+@@ -54,28 +54,41 @@
+    end C_Begin;
+ 
+    procedure C_Hash(Ctx: in C_Context_Access;
+-                    Input: Interfaces.C.Char_Array;
+-                    Len: Interfaces.C.Size_T) is
++                    Input: Char_Star;
++                    Len: Interfaces.C.size_t) is
+       L: Natural := Natural(Len);
+       S: String(1..L);
+       B: Bitstream(1..S'Length*8);
++      Ptr: Char_Star := Input;
+    begin
+-      Interfaces.C.To_Ada(Input, S, L, Trim_Nul => False);
++      if Input = null then
++         raise C.Strings.Dereference_Error;
++      end if;
++      for Chr of S loop
++         Chr := Character(Ptr.all);
++         Char_Ptrs.Increment(Ptr);
++      end loop;
+       ToBitstream(S, B);
+       KeccakHash(Ctx.all, B);
+    end C_Hash;
+ 
+    procedure C_End(Ctx: C_Context_Access;
+-                   Output: out Interfaces.C.Char_Array;
++                   Output: Char_Star;
+                    Len: Interfaces.C.Size_T) is
+       L: Natural := Natural(Len);
+       S: String(1..L);
+       B: Bitstream(1..S'Length*8);
+-      Count: Interfaces.C.Size_T;
++      Ptr: Char_Star := Output;
+    begin
++      if Output = null then
++         raise C.Strings.Dereference_Error;
++      end if;
+       KeccakEnd(Ctx.all, B);
+       ToString(B, S);
+-      Interfaces.C.To_C(S, Output(0..Len), Count, Append_Nul => False);
++      for Chr of S loop
++         Ptr.all := Interfaces.C.char(Chr);
++         Char_Ptrs.Increment(Ptr);
++      end loop;
+       -- Len = Count
+    end C_End;
+ 
+diff -uNr a/vtools/src/keccak_c.ads b/vtools/src/keccak_c.ads
+--- a/vtools/src/keccak_c.ads a351b3b0acf16e101056172a8ba94dcc7759bb2bcf60150ea6cf4200d993135e43c7fa733271174bed00449570ec9417f47c0f8d62abfec95e641e8a11867f1f
++++ b/vtools/src/keccak_c.ads 046c50d67920ee9245a86d127db41c66b4c1cc8998a1f32c2f9f524d072156514f1abcf2f831c5efde31a8b966e80e85da62b89047b3a7659c7291d1de83b7f6
+@@ -1,8 +1,17 @@
+ with Interfaces; use Interfaces;
+ with Interfaces.C; use Interfaces.C;
++with Interfaces.C.Strings;
++with Interfaces.C.Pointers;
+ with Ada.Unchecked_Deallocation;
+ with SMG_Keccak; use SMG_Keccak;
+ package Keccak_C is
++   package Char_Ptrs is
++      new Interfaces.C.Pointers (Index              => size_t,
++                                 Element            => char,
++                                 Element_Array      => char_array,
++                                 Default_Terminator => nul);
++   use type Char_Ptrs.Pointer;
++   subtype Char_Star is Char_Ptrs.Pointer;
+    subtype C_Context is Keccak_Context(Block_Len=>Default_Bitrate);
+    type C_Context_Access is access C_Context;
+    procedure C_Get_Size(Size: out Interfaces.C.size_t);
+@@ -10,11 +19,11 @@
+    function C_Begin return C_Context_Access;
+    pragma Export (C, C_Begin, "keccak_begin");
+    procedure C_Hash(Ctx: C_Context_Access;
+-                    Input: Interfaces.C.Char_Array;
++                    Input: Char_Star;
+                     Len: Interfaces.C.Size_T);
+    pragma Export (C, C_Hash, "keccak_hash");
+    procedure C_End(Ctx: C_Context_Access;
+-                   Output: out Interfaces.C.Char_Array;
++                   Output: Char_Star;
+                    Len: Interfaces.C.Size_T);
+    pragma Export (C, C_End, "keccak_end");
+    procedure C_Deallocate(Ctx: in out C_Context_Access);
+diff -uNr a/vtools/src/smg_keccak.adb b/vtools/src/smg_keccak.adb
+--- a/vtools/src/smg_keccak.adb 2687be567debee1558eef20cf47a120267c8fc75736a4b27771eb796d741d2e2156d9a57856bf3373b658ca26eb5dacd58f7251ebb34f3c1fcec0deae2281e13
++++ b/vtools/src/smg_keccak.adb 08b78b3e388a1027c363c73286fbbe1a6af7a6d5c869c33acf602cf51a91aac9d22245d79e46e18da693441d0b596f6bc0946f38b39274deebf7a2e37ecbfc8f
+@@ -217,7 +217,7 @@
+       ToPos := Block'Last;
+       FromPos := ToPos - SBB + 1;
+       BWord := (others => 0);
+-      BWord(Bitword'First .. Bitword'First + SBB - 1) := Block(ToPos..FromPos);
++      BWord(Bitword'First .. Bitword'First + SBB - 1) := Block(FromPos..ToPos);
+       Word := BitsToWord( BWord );
+       S( X, Y ) := S( X, Y ) xor Word;
+     end if;

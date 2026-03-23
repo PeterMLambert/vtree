@@ -1,0 +1,48 @@
+diff -uNr a/vtools/lib/xalloc.h b/vtools/lib/xalloc.h
+--- a/vtools/lib/xalloc.h 98ba7212fafa4a61f6d6096f1a2953a67a70fcf185965ed7199a223f6897c9b9f2996d391a3f363282236889413973d0beada0e36d57068549bea672fd110d8d
++++ b/vtools/lib/xalloc.h 4c450a83e978c8dc9e31813d8c66b6ad24ef9aa991cbd0430f9b84816c8b926c542c7298c9c476ac48d2776ae3a6cf515f497b80e6b9edb2d58444676ca6673f
+@@ -46,9 +46,9 @@
+ /* Allocate an array of |n| objects, each with |s| bytes of memory,
+    dynamically, with error checking.  |s| must be nonzero.  */
+ 
+-inline void *xnmalloc(size_t n, size_t s);
++static inline void *xnmalloc(size_t n, size_t s);
+ 
+-inline void *
++static inline void *
+ xnmalloc(size_t n, size_t s) {
+     if (xalloc_oversized (n, s))
+         xalloc_die();
+@@ -59,9 +59,9 @@
+    |n| objects each of |s| bytes, with error checking.  |s| must be
+    nonzero.  */
+ 
+-inline void *xnrealloc(void *p, size_t n, size_t s);
++static inline void *xnrealloc(void *p, size_t n, size_t s);
+ 
+-inline void *
++static inline void *
+ xnrealloc(void *p, size_t n, size_t s) {
+     if (xalloc_oversized (n, s))
+         xalloc_die();
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest 7ebff9758ff7653a61266fa97075ad9706e7ab8fa7507242071c6701327387fc81043394159715aae08fc7454539c414268c670604e133a34354db3c9f5d6c12
++++ b/vtools/manifest 154d5f7e9ca4e2a7d9888e83b3887b9c6b27074fda0564c9054d78272728e73143930a538a7e8c8d0a7f3dc5bfe70d915f8366a4559a8510b59045156091268e
+@@ -10,3 +10,5 @@
+ Fixes for keccak from diana_coman, different approach to C interop.
+ 2018-03-22 phf
+ Initial vpatch tool implementation in Ada.
++2018-04-07 phf
++Fixes for xalloc's use of static inline courtesy of spyked, fix broken ToHex implementation
+diff -uNr a/vtools/src/bits.adb b/vtools/src/bits.adb
+--- a/vtools/src/bits.adb 02a00809e5d6234f488f5b02e7302c6bc11ed666e20aba1de109ec0c678bdb6628951405b9c37f89fb8e4060e276eb06bffe899f222679bc0145089060671051
++++ b/vtools/src/bits.adb 13d6224dc206a6c6e26184a5277ab3d59cc929b6be5c36a93e1f245b3cef2d49e6e3fd4517dd25006519be4047af6dd5fc79c94b2a250f2c746583b5d0389a0a
+@@ -48,7 +48,7 @@
+       X: Positive := 1;
+    begin
+       ToString(B, Bytes);
+-      for C of S loop
++      for C of Bytes loop
+          V := Character'Pos(C);
+          S(I) := Hex_Digits(Integer(Shift_Right(V, 4) + 1));
+          I := I + 1;

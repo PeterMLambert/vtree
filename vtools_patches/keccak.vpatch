@@ -1,0 +1,423 @@
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest cd4f264760f48450b1a45df3222e05e5e998f54d3a00844a0502632f233bb65865e074e09e25d9d4f667ea165aecc8477c820237c7fb69d75e97f0b8010d9180
++++ b/vtools/manifest 7f6e9897e64595c8f354cd177645b8a54d04af21d040dae7a958b511648419f1ed8fb199f40693fbe0d382dcdb15b8a014e6c43057e3a69b0cb61031730b52b4
+@@ -2,3 +2,5 @@
+ Initial release of vtools. Genesis contains stripped down version of diffutils 3.6, with most of functionality not relevant to vpatch removed.
+ 2018-02-28 phf
+ Fixes for C99 compatability, support for "No newline at end of file" directive.
++2018-02-28 phf
++Included diana_coman's keccak implementation.
+diff -uNr a/vtools/src/smg_keccak.adb b/vtools/src/smg_keccak.adb
+--- a/vtools/src/smg_keccak.adb false
++++ b/vtools/src/smg_keccak.adb 1836afa660b4c04bb072d4555fe1c77e4b6691e184ffaf09b44cd58ba2cb21ec85dae6eb50f46b0d8858d81129f3dee55edeb36a898dbf93ede6bea93bb4d531
+@@ -0,0 +1,271 @@
++ -- S.MG, 2018
++with System; use System;  -- for Bit_Order
++
++package body SMG_Keccak is
++
++-- public function, sponge
++  procedure Sponge( Input      : in Bitstream;
++                    Output     : out Bitstream;
++                    Block_Len  : in Keccak_Rate := Default_Bitrate ) is
++    Internal  : State := (others => (others => 0));
++  begin
++    --absorb input into sponge in a loop on available blocks, including padding
++    declare
++      -- number of input blocks after padding (between 2 and block_len bits pad)
++      Padded_Blocks : constant Positive := 1 + (Input'Length + 1) / Block_Len;
++      Padded        : Bitstream ( 1 .. Padded_Blocks * Block_Len );
++      Block         : Bitstream ( 1 .. Block_Len );
++    begin
++      -- initialise Padded with 0 everywhere
++      Padded := ( others => 0 );
++      -- copy and pad input with rule 10*1
++      Padded( Padded'First .. Padded'First + Input'Length - 1 ) := Input;
++      Padded( Padded'First + Input'Length )                     := 1;
++      Padded( Padded'Last )                                     := 1;
++
++      -- loop through padded input and absorb block by block into sponge
++      -- padded input IS a multiple of blocks, so no stray bits left
++      for B in 0 .. Padded_Blocks - 1 loop
++        -- first get the current block to absorb
++        Block   := Padded( Padded'First + B * Block_Len .. 
++                           Padded'First + (B+1) * Block_Len - 1 );
++        AbsorbBlock( Block, Internal );
++        -- scramble state with Keccak function
++        Internal := Keccak_Function( Internal );
++
++      end loop; -- end absorb loop for blocks
++    end; -- end absorb stage
++
++    --squeeze required bits from sponge in a loop as needed
++    declare
++      -- full blocks per output
++      BPO     : constant Natural := Output'Length / Block_Len;
++      -- stray bits per output
++      SPO     : constant Natural := Output'Length mod Block_Len;
++      Block   : Bitstream( 1 .. Block_Len );
++    begin
++      -- squeeze block by block (if at least one full block is needed)
++      for I in 0 .. BPO - 1 loop
++        SqueezeBlock( Block, Internal );
++        Output( Output'First + I * Block_Len .. 
++                Output'First + (I + 1) * Block_Len -1) := Block;
++ 
++        -- scramble state
++        Internal := Keccak_Function( Internal );
++      end loop;  -- end squeezing full blocks
++
++      -- squeeze any partial block needed (stray bits)
++      if SPO > 0 then
++        SqueezeBlock( Block, Internal );
++        Output( Output'Last - SPO + 1 .. Output'Last ) := 
++                Block( Block'First .. Block'First + SPO - 1 );
++      end if; -- end squeezing partial last block (stray bits)
++
++    end; -- end squeeze stage
++  end Sponge;
++
++  -- convert from a bitstream of ZWord size to an actual ZWord number
++  function BitsToWord( BWord: in Bitword ) return ZWord is
++    W    : ZWord;
++    Bits: Bitword;
++  begin
++    -- just copy octets if machine is little endian
++    -- flip octets if machine is big endian
++    if Default_Bit_Order = Low_Order_First then
++      Bits := BWord;
++    else
++      Bits := FlipOctets( BWord );
++    end if;
++    -- actual bits to word conversion
++    W := 0;
++    -- LSB bit order (inside octet) as per Keccak spec
++    for I in reverse Bitword'Range loop
++      W := Shift_Left( W, 1 ) + ZWord( Bits( I ) );
++    end loop;
++    return W;
++  end BitsToWord;
++
++  -- convert from a ZWord (lane of state) to a bitstream of ZWord size
++  function WordToBits( Word: in ZWord ) return Bitword is
++    Bits: Bitword := (others => 0);
++    W: ZWord;
++  begin
++    W := Word;
++    for I in Bitword'Range loop
++      Bits( I ) := Bit( W mod 2 );
++      W := Shift_Right( W, 1 );
++    end loop;
++
++    -- flip octets if machine is big endian
++    if Default_Bit_Order = High_Order_First then
++      Bits := FlipOctets( Bits );
++    end if;
++
++    return Bits;
++  end WordToBits;
++
++  -- flip given octets (i.e. groups of 8 bits)
++  function FlipOctets( BWord : in Bitword ) return Bitword is
++    Bits : Bitword;
++  begin
++    -- copy groups of 8 octets changing their order in the array 
++    -- i.e. 1st octet in BWord becomes last octet in Bits and so on
++    for I in 0 .. ( Bitword'Length / 8 - 1 ) loop
++      Bits ( Bits'First  + I * 8     .. Bits'First + I * 8 + 7 ) :=
++      BWord( BWord'Last  - I * 8 - 7 .. BWord'Last - I * 8);
++    end loop;
++    return Bits;
++  end FlipOctets;
++
++-- helper procedures for sponge absorb/squeeze
++
++  -- NO scramble here, this will absorb ALL given block, make sure it fits!
++  procedure AbsorbBlock( Block: in Bitstream; S: in out State ) is
++    WPB: constant Natural := Block'Length / Z_Length;   -- words per block
++    SBB: constant Natural := Block'Length mod Z_Length; -- stray bits
++    FromPos, ToPos        : Natural;
++    X, Y                  : XYCoord;
++    Word                  : ZWord;
++    BWord                 : Bitword;
++  begin
++    -- xor current block into first Block'Length bits of state
++    -- a block can consist in more than one word
++    X := 0;
++    Y := 0;
++    for I in 0..WPB-1 loop
++      FromPos := Block'First + I * Z_Length;
++      ToPos   := FromPos + Z_Length - 1;
++      Word := BitsToWord( Block( FromPos .. ToPos ) );
++      S( X, Y ) := S( X, Y ) xor Word;
++      -- move on to next word in state
++      X := X + 1;
++      if X = 0 then
++        Y := Y + 1;
++      end if;
++    end loop;
++    -- absorb also any remaining bits from block
++    if SBB > 0 then
++      ToPos := Block'Last;
++      FromPos := ToPos - SBB + 1;
++      BWord := (others => 0);
++      BWord(Bitword'First .. Bitword'First + SBB - 1) := Block(ToPos..FromPos);
++      Word := BitsToWord( BWord );
++      S( X, Y ) := S( X, Y ) xor Word;
++    end if;
++  end AbsorbBlock;
++
++  -- NO scramble here, this will squeeze Block'Length bits out of *same* state S
++  procedure SqueezeBlock( Block: out Bitstream; S: in State) is
++    X, Y    : XYCoord;
++    BWord   : Bitword;
++    FromPos : Natural;
++    Len     : Natural;
++  begin
++    X := 0;
++    Y := 0;
++    FromPos := Block'First;
++
++    while FromPos <= Block'Last loop
++      BWord := WordToBits( S(X, Y) );
++
++      X := X + 1;
++      if X = 0 then
++        Y := Y + 1;
++      end if;
++
++      -- copy full word if it fits or
++      --   only as many bits as are still needed to fill the block
++      Len := Block'Last - FromPos + 1;
++      if Len > Z_Length then
++        Len := Z_Length;
++      end if;
++
++      Block(FromPos..FromPos+Len-1) := BWord(BWord'First..BWord'First+Len-1);
++      FromPos := FromPos + Len;
++    end loop;
++  end SqueezeBlock;
++
++
++-- private, internal transformations
++  function Theta(Input : in State) return State is
++    Output : State;
++    C      : Plane;
++    W      : ZWord;
++  begin
++    for X in XYCoord loop
++      C(X) := Input(X, 0);
++      for Y in 1..XYCoord'Last loop
++        C(X) := C(X) xor Input(X, Y);
++      end loop;
++    end loop;
++
++    for X in XYCoord loop
++      W := C(X-1) xor Rotate_Left(C(X+1), 1);
++      for Y in XYCoord loop
++        Output(X,Y) := Input(X,Y) xor W;
++      end loop;
++    end loop;
++
++    return Output;
++  end Theta;
++
++  function Rho(Input : in State) return State is
++    Output      : State;
++    X, Y, Old_Y : XYCoord;
++  begin
++    Output(0,0) := Input(0,0);
++    X           := 1;
++    Y           := 0;
++
++    for T in 0..23 loop
++      Output(X, Y) := Rotate_Left(Input(X,Y), ((T+1)*(T+2)/2) mod Z_Length);
++      Old_Y := Y;
++      Y := 2*X + 3*Y;
++      X := Old_Y;
++    end loop;
++    return Output;
++  end rho;
++
++  function Pi(Input : in State) return State is
++    Output: State;
++  begin
++    for X in XYCoord loop
++      for Y in XYCoord loop
++        Output(Y, 2*X + 3*Y) := Input(X, Y);
++      end loop;
++    end loop;
++    return Output;
++  end pi;
++
++  function Chi(Input : in State) return State is
++    Output: State;
++  begin
++    for Y in XYCoord loop
++      for X in XYCoord loop
++        Output(X, Y) := Input(X, Y) xor 
++                        ( (not Input(X + 1, Y)) and Input(X + 2, Y) );
++      end loop;
++    end loop;
++    return Output;
++  end chi;
++
++  function Iota(Round_Const : in ZWord; Input : in State) return State is
++    Output: State;
++  begin
++    Output := Input;
++    Output(0,0) := Input(0,0) xor Round_Const;
++    return Output;
++  end iota;
++
++  function Keccak_Function(Input: in State) return State is
++    Output: State;
++  begin
++    Output := Input;
++    for I in Round_Index loop
++      Output := Iota(RC(I), Chi(Pi(Rho(Theta(Output)))));
++    end loop;
++
++    return Output;
++  end Keccak_Function;
++
++end SMG_Keccak;
+diff -uNr a/vtools/src/smg_keccak.ads b/vtools/src/smg_keccak.ads
+--- a/vtools/src/smg_keccak.ads false
++++ b/vtools/src/smg_keccak.ads 325dfbb93c6e8b34fa3e44bd7e72253fa3a5da2982d79aeb79338716499cd3f590c0f152dd60fef5fdac97ff0076edef578f3be1611f8964281c7bceaec2567e
+@@ -0,0 +1,135 @@
++ -- S.MG implementation of Keccak-f permutations
++
++ -- (Based on The Keccak Reference, Version 3.0, January 14, 2011, by
++ --   Guido Bertoni, Joan Daemen, Michael Peeters and Gilles Van Assche)
++
++ -- S.MG, 2018
++
++package SMG_Keccak is
++	pragma Pure(SMG_Keccak);  --stateless, no side effects -> can cache calls
++
++  --knobs (can change as per keccak design but fixed here for S.MG purposes)--
++  Keccak_L: constant := 6;  --gives keccak z (word) dimension of 2^6=64 and 
++                            --therefore keccak function 1600 with current 
++                            --constants (5*5*2^6)
++
++  Default_Bitrate: constant := 1344; --max bits the sponge can eat/spit without
++                                     --needing to scramble the state
++
++  --constants: dimensions of keccak state and number of rounds
++  XY_Length: constant := 5;
++  Z_Length: constant := 2**Keccak_L;
++  Width: constant := XY_Length * XY_Length * Z_Length;
++  N_Rounds: constant := 12 + 2*Keccak_L;
++
++  --types
++  type XYCoord is mod XY_Length;
++  type ZCoord is mod Z_Length;
++  type Round_Index is mod N_Rounds;
++
++  type ZWord is mod 2**Z_Length;	--"lane" in keccak ref
++  type Plane is array(XYCoord) of ZWord; --a "horizontal slice" of keccak state
++  type State is array(XYCoord, XYCoord) of ZWord; --the full keccak state
++
++  type Round_Constants is array(Round_Index) of ZWord;  --magic keccak constants
++
++  -- rate can be chosen by caller at each call, between 1 and width of state
++  -- higher rate means sponge "eats" more bits at a time but has fewer bits in 
++  --   the "secret" part of the state (i.e. lower capacity)
++  subtype Keccak_Rate is Positive range 1..Width;  -- capacity = width - rate
++
++  type Bit is mod 2;
++  type Bitstream is array( Natural range <> ) of Bit; -- any length; message
++  subtype Bitword is Bitstream( 0..Z_Length - 1 ); -- bits of one state "word"
++
++  -- type conversions
++  function BitsToWord( BWord : in Bitword ) return ZWord;
++  function WordToBits( Word  : in ZWord ) return Bitword;
++
++  -- flip input octets (i.e. groups of 8 bits)
++  function FlipOctets( BWord : in Bitword ) return Bitword;
++
++  -- public function, the sponge itself
++  -- Keccak sponge structure using Keccak_Function, Pad and a given bitrate;
++  -- Input - the stream of bits to hash (the message)
++  -- Output - a bitstream of desired size for holding output
++  -- Block_Len - the bitrate to use; this is effectively the block length 
++  --             for splitting Input AND squeezing output between scrambles 
++  procedure Sponge(Input      : in Bitstream;
++                   Output     : out Bitstream;
++                   Block_Len  : in Keccak_Rate := Default_Bitrate );
++
++private
++  -- these are internals of the keccak implementation, not meant to be directly 
++  --  accessed/used
++
++  -- this will squeeze Block'Length bits out of state S
++  -- NO scramble of state in here!
++  -- NB: make SURE that Block'Length is the correct bitrate for this sponge
++  -- in particular, Block'Length should be a correct bitrate aka LESS than Width 
++  procedure SqueezeBlock( Block: out Bitstream; S: in State);
++
++  -- This absorbs into sponge the given block, modifying the state accordingly
++  -- NO scramble of state in here so make sure the whole Block fits in state!
++  -- NB: make SURE that Block'Length is *the correct bitrate* for this sponge
++  -- in particular, Block'Length should be a correct bitrate aka LESS than Width 
++  procedure AbsorbBlock( Block: in Bitstream; S: in out State );
++
++  --Keccak magic numbers
++  RC : constant Round_Constants :=
++    (
++     16#0000_0000_0000_0001#,
++     16#0000_0000_0000_8082#,
++     16#8000_0000_0000_808A#,
++     16#8000_0000_8000_8000#,
++     16#0000_0000_0000_808B#,
++     16#0000_0000_8000_0001#,
++     16#8000_0000_8000_8081#,
++     16#8000_0000_0000_8009#,
++     16#0000_0000_0000_008A#,
++     16#0000_0000_0000_0088#,
++     16#0000_0000_8000_8009#,
++     16#0000_0000_8000_000A#,
++     16#0000_0000_8000_808B#,
++     16#8000_0000_0000_008B#,
++     16#8000_0000_0000_8089#,
++     16#8000_0000_0000_8003#,
++     16#8000_0000_0000_8002#,
++     16#8000_0000_0000_0080#,
++     16#0000_0000_0000_800A#,
++     16#8000_0000_8000_000A#,
++     16#8000_0000_8000_8081#,
++     16#8000_0000_0000_8080#,
++     16#0000_0000_8000_0001#,
++     16#8000_0000_8000_8008#
++    );
++
++  --gnat-specific methods to have bit-ops for modular types
++  function Rotate_Left( Value  : ZWord; 
++	                      Amount : Natural) 
++	                      return ZWord;
++	pragma Import(Intrinsic, Rotate_Left); 
++
++	function Shift_Right( Value  : ZWord; 
++                        Amount : Natural) 
++                        return ZWord;
++  pragma Import(Intrinsic, Shift_Right); 
++
++  function Shift_Left( Value  : ZWord;
++                       Amount : Natural)
++                       return ZWord;
++  pragma Import(Intrinsic, Shift_Left);
++
++  --Keccak transformations of the internal state
++  function Theta ( Input       : in State) return State;
++  function Rho   ( Input       : in State) return State;
++  function Pi    ( Input       : in State) return State;
++  function Chi   ( Input       : in State) return State;
++  function Iota  ( Round_Const : in ZWord; Input : in State) return State;
++
++  --Keccak function with block width currently 1600 (Width constant above)
++  --this simply applies *all* keccak transformations in the correct order, using
++  -- the keccak magic numbers (round constants) as per keccak reference
++  function Keccak_Function(Input: in State) return State;
++
++end SMG_Keccak;

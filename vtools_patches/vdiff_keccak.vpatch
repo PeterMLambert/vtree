@@ -1,0 +1,424 @@
+diff -uNr a/vtools/Makefile b/vtools/Makefile
+--- a/vtools/Makefile 959297e64d03622a1b1f78cb67f5412699b143ccf60ba31fa11dcb1482708dc63821cff414f81ac3e14b25d73fc2a3f103336ecb45b7c0bb1aeaf2d92773676d
++++ b/vtools/Makefile 6d17aa7e0eb0f0901f1bef3324b09e14b2afa2c83291b8d732384b7276e3fc8f7ab90f9469005ece8ef9d7fd1e04d2b1636621c5e871131c746dc936835cc3a0
+@@ -1,37 +1,7 @@
+ 
+-CC:=gcc
+-LDFLAGS:=-static
+-
+-SOURCES=lib/cmpbuf.c \
+-	lib/dirname.c \
+-	lib/error.c \
+-	lib/filenamecat.c \
+-	lib/filetype.c \
+-	lib/hash.c \
+-	lib/progname.c \
+-	lib/xalloc.c \
+-	src/analyze.c \
+-	src/context.c \
+-	src/diff.c \
+-	src/dir.c \
+-	src/io.c \
+-	src/util.c
+-HEADERS=lib/cmpbuf.h \
+-	lib/diffseq.h \
+-	lib/dirname.h \
+-	lib/error.h \
+-	lib/filenamecat.h \
+-	lib/filetype.h \
+-	lib/hash.h \
+-	lib/progname.h \
+-	lib/xalloc.h \
+-	src/diff.h \
+-	src/system.h
+-OBJECTS=$(SRCS:.c=.o)
+-
+-vdiff: $(SOURCES) $(HEADERS)
+-	$(CC) $(CPPFLAGS) $(CFLAGS) $(LDFLAGS) -std=c99 -pedantic -Ilib/ -Isrc/ -o $@ $(SOURCES)
++vdiff:
++	gprbuild -Pvdiff.gpr
+ 
+ clean:
+-	@rm -f vdiff
++	gprclean -Pvdiff.gpr
+ 
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest 7f6e9897e64595c8f354cd177645b8a54d04af21d040dae7a958b511648419f1ed8fb199f40693fbe0d382dcdb15b8a014e6c43057e3a69b0cb61031730b52b4
++++ b/vtools/manifest 97be043b6a6ea8c27d4877763aacb7fefd2d358f723d9621f6f88bbe83ebd2a1713920b52ecce28c75b0005174b1ed48348bbb720ef13c23835eabc94b7e7042
+@@ -4,3 +4,5 @@
+ Fixes for C99 compatability, support for "No newline at end of file" directive.
+ 2018-02-28 phf
+ Included diana_coman's keccak implementation.
++2018-02-28 phf
++Vdiff hashing and output using Keccak instead of SHA512.
+diff -uNr a/vtools/obj/readme b/vtools/obj/readme
+--- a/vtools/obj/readme false
++++ b/vtools/obj/readme dff69446b292e010320a5f9415dfe2021737e74b6a7b6a5a012161a1d22e131368ca78d23174f9384806397b98e22eb848e0630e99d270dab54fd34883ad7544
+@@ -0,0 +1 @@
++objs
+diff -uNr a/vtools/src/analyze.c b/vtools/src/analyze.c
+--- a/vtools/src/analyze.c d2d49c127344b2768732c4ccedd75c503459ab2d44efdc9c28c6cd5f4d0570de7517f95fd3eeb7d42ae67c5ae1e7136e79024ae993c23d2a6fb6bf1378349219
++++ b/vtools/src/analyze.c d8ea14cfd0090c08b5b34618a2f0fc0cbc2dd9e56360749d9fd1351ed227e243df35baf0bc39a47a22c0980d28d5beee3b9636385b375656b9bc8bc7a93b0f9d
+@@ -428,6 +428,8 @@
+     struct change *script;
+     int changes;
+ 
++    cmp->file[0].hash_context = keccak_begin();
++    cmp->file[1].hash_context = keccak_begin();
+ 
+     /* If we have detected that either file is binary, compare the two
+        files as binary.  This can happen only when the first chunk is
+diff -uNr a/vtools/src/context.c b/vtools/src/context.c
+--- a/vtools/src/context.c 4fe094b9672618f716926dcf213e5cb364d5a98252cdf1665a1b5daf04bc7d6a33a824ed6570fb62c17702a33e20d7192c0906d6cc0e36f7454a54ad42d9882d
++++ b/vtools/src/context.c afa7c6a010701e538b34565b400c2d153f7bb7583064d93b810ea3c82c67765aa1d2557b0a2dcb216911d590155cf0d5127291ca472a12a73c13818f0a890aef
+@@ -5,6 +5,18 @@
+ /* Print a label for a context diff, with a file name and date or a
+    label.  */
+ 
++const char bb_hexdigits_upcase[] = "0123456789ABCDEF";
++char *bin2hex(char *p, const char *cp, int count) {
++    while (count) {
++        unsigned char c = *cp++;
++        /* put lowercase hex digits */
++        *p++ = 0x20 | bb_hexdigits_upcase[c >> 4];
++        *p++ = 0x20 | bb_hexdigits_upcase[c & 0xf];
++        count--;
++    }
++    return p;
++}
++
+ static void
+ print_context_label(char const *mark,
+                     struct file_data *inf,
+@@ -13,7 +25,13 @@
+     if (label)
+         fprintf(outfile, "%s %s\n", mark, label);
+     else {
+-        fprintf(outfile, "%s %s false\n", mark, name);
++        if (inf->desc >= 0) {
++            char buf[(64 * 2) + 1] = {0};
++            bin2hex(buf, (char*) inf->hash, 64);
++            fprintf(outfile, "%s %s %s\n", mark, name, buf);
++        } else {
++            fprintf(outfile, "%s %s false\n", mark, name); 
++        }
+     }
+ }
+ 
+diff -uNr a/vtools/src/diff.c b/vtools/src/diff.c
+--- a/vtools/src/diff.c d60f42e8f904c77382b29af85601c6ddd207cc4db89668ab811abb9271edd76a5c59838a0e00ab7bce576d095da181c7bedb2008e1d59537f508d23bd4a039c4
++++ b/vtools/src/diff.c c754d6bbede0a92c34c5b8af5496f0205872c4197c05704ac9d58161963d82eb869f78cfe1ad42bef8c839fc0edd8c09be6f098f39fb5aa50ef8845a066dfcb4
+@@ -69,6 +69,7 @@
+     uintmax_t numval;
+     char *numend;
+     set_program_name(argv[0]);
++    adainit();
+ 
+     /* Decode the options.  */
+ 
+@@ -195,6 +196,7 @@
+         }
+     }
+ 
++    adafinal();
+     check_stdout();
+     exit(exit_status);
+     return exit_status;
+diff -uNr a/vtools/src/diff.h b/vtools/src/diff.h
+--- a/vtools/src/diff.h be00aeed54b353a67ce8fd301d8cac16d854d1c0c2efc7fb037e7adb683db684f1eaf9af64e40c65d7d0b33d24bf6e807f066e064ad4bb85c6b715f457a356da
++++ b/vtools/src/diff.h 6fc7269bc5f1f6d06060d3ce49445b24662a6cee3b9a16029b9a1dba1fc0333bb10bf39034390b1e1cce495f728e351cfc33aa54f66c5d43264063ab33b459c6
+@@ -2,6 +2,7 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <sys/stat.h>
++#include "keccak.h"
+ 
+ /* What kind of changes a hunk contains.  */
+ enum changes {
+@@ -158,6 +159,10 @@
+     /* 1 more than the maximum equivalence value used for this or its
+        sibling file.  */
+     lin equiv_max;
++
++    /* keccak context */
++    void *hash_context;
++    uint64_t hash[8];
+ };
+ 
+ /* The file buffer, considered as an array of bytes rather than as an
+diff -uNr a/vtools/src/io.c b/vtools/src/io.c
+--- a/vtools/src/io.c ea3ee84e4afdd0a89a13bab976e035a3d74e6db29f9074b1040014967e0fd812a7a4e55d5959b805fd48670d06229c50021a58fc2f4ad2d92e7695bb7735bbba
++++ b/vtools/src/io.c 5cf793b6ec782dce9a6bc566c7299f7b7da925751503b25c3b15cabba16150da18bb91b1baa543c35e676eb46d0ae0398279e4e210b2d179acc2e0680732e06d
+@@ -57,8 +57,16 @@
+         if (s == SIZE_MAX)
+             pfatal_with_name(current->name);
+ 
++        if (s)
++            keccak_hash(current->hash_context,
++                        FILE_BUFFER(current) + current->buffered, s);
++
+         current->buffered += s;
+         current->eof = s < size;
++        if(current->eof) {
++            keccak_end(current->hash_context, (char*)current->hash, 64);
++            keccak_free(&current->hash_context);
++        }
+     }
+ }
+ 
+diff -uNr a/vtools/src/keccak.h b/vtools/src/keccak.h
+--- a/vtools/src/keccak.h false
++++ b/vtools/src/keccak.h 4690c5fc14651a07b10242229ed106f68daefb21b48ed9275c265c6a122af0bf900fd9ac01fab96800b9e5b7341869a45a8ff65aa4043a03e2dd0b1d10efc390
+@@ -0,0 +1,16 @@
++#ifndef KECCAK_H_
++#define KECCAK_H_
++
++#include<stdio.h>
++#include<string.h>
++#include<stdlib.h>
++
++extern void *keccak_begin();
++extern void keccak_get_ctx_byte_size(size_t *size);
++extern void keccak_hash(void *ctx, char *array, size_t size);
++extern void keccak_end(void *ctx, char *out, size_t size);
++extern void keccak_free(void **ctx);
++extern void adainit();
++extern void adafinal();
++
++#endif
+diff -uNr a/vtools/src/keccak_c.adb b/vtools/src/keccak_c.adb
+--- a/vtools/src/keccak_c.adb false
++++ b/vtools/src/keccak_c.adb 9cc62485cae00916aae9729b2cb5c767299c08f76de1de250961ca2dd034fcf12d3fc93731f7364cf34f84392f4da2951b92d34c5c7ae88f3aac99e8c60195bf
+@@ -0,0 +1,89 @@
++package body Keccak_C is
++   -- helper functions
++   procedure ToBitstream(S: in String; B: out Bitstream ) is
++      V   : Unsigned_8;
++      Pos : Natural;
++   begin
++      Pos := B'First;
++      for C of S loop
++         V := Character'Pos( C );
++         B( Pos     ) := Bit( V and 1 );
++         B( Pos + 1 ) := Bit( Shift_Right( V, 1 ) and 1 );
++         B( Pos + 2 ) := Bit( Shift_Right( V, 2 ) and 1 );
++         B( Pos + 3 ) := Bit( Shift_Right( V, 3 ) and 1 );
++         B( Pos + 4 ) := Bit( Shift_Right( V, 4 ) and 1 );
++         B( Pos + 5 ) := Bit( Shift_Right( V, 5 ) and 1 );
++         B( Pos + 6 ) := Bit( Shift_Right( V, 6 ) and 1 );
++         B( Pos + 7 ) := Bit( Shift_Right( V, 7 ) and 1 );
++         Pos := Pos + 8;
++      end loop;
++   end ToBitstream;
++
++   procedure ToString(B: in Bitstream; S: out String ) is
++      N   : Natural;
++      Pos : Natural;
++   begin
++      Pos := B'First;
++      for I in S'Range loop
++         N := Natural( B( Pos     ) ) +
++           Natural( B( Pos + 1 ) ) * 2 +
++           Natural( B( Pos + 2 ) ) * 4 +
++           Natural( B( Pos + 3 ) ) * 8 +
++           Natural( B( Pos + 4 ) ) * 16 +
++           Natural( B( Pos + 5 ) ) * 32 +
++           Natural( B( Pos + 6 ) ) * 64 +
++           Natural( B( Pos + 7 ) ) * 128;
++         Pos := Pos + 8;
++         S( I ) := Character'Val( N );
++      end loop;
++   end ToString;
++
++   -- C interface
++
++   procedure C_Get_Size(Size: out Interfaces.C.size_t) is
++   begin
++      Size := C_Context'Size / 8;
++   end C_Get_Size;
++
++   function C_Begin return C_Context_Access is
++      Result : C_Context_Access;
++   begin
++      Result := new C_Context;
++      KeccakBegin(Result.all);
++      return Result;
++   end C_Begin;
++
++   procedure C_Hash(Ctx: in C_Context_Access;
++                    Input: Interfaces.C.Char_Array;
++                    Len: Interfaces.C.Size_T) is
++      L: Natural := Natural(Len);
++      S: String(1..L);
++      B: Bitstream(1..S'Length*8);
++   begin
++      Interfaces.C.To_Ada(Input, S, L, Trim_Nul => False);
++      ToBitstream(S, B);
++      KeccakHash(Ctx.all, B);
++   end C_Hash;
++
++   procedure C_End(Ctx: C_Context_Access;
++                   Output: out Interfaces.C.Char_Array;
++                   Len: Interfaces.C.Size_T) is
++      L: Natural := Natural(Len);
++      S: String(1..L);
++      B: Bitstream(1..S'Length*8);
++      Count: Interfaces.C.Size_T;
++   begin
++      KeccakEnd(Ctx.all, B);
++      ToString(B, S);
++      Interfaces.C.To_C(S, Output(0..Len), Count, Append_Nul => False);
++      -- Len = Count
++   end C_End;
++
++   procedure C_Context_Deallocate is new Ada.Unchecked_Deallocation
++     (C_Context, C_Context_Access);
++
++   procedure C_Deallocate(Ctx: in out C_Context_Access) is
++   begin
++      C_Context_Deallocate(Ctx);
++   end C_Deallocate;
++end Keccak_C;
+diff -uNr a/vtools/src/keccak_c.ads b/vtools/src/keccak_c.ads
+--- a/vtools/src/keccak_c.ads false
++++ b/vtools/src/keccak_c.ads a351b3b0acf16e101056172a8ba94dcc7759bb2bcf60150ea6cf4200d993135e43c7fa733271174bed00449570ec9417f47c0f8d62abfec95e641e8a11867f1f
+@@ -0,0 +1,22 @@
++with Interfaces; use Interfaces;
++with Interfaces.C; use Interfaces.C;
++with Ada.Unchecked_Deallocation;
++with SMG_Keccak; use SMG_Keccak;
++package Keccak_C is
++   subtype C_Context is Keccak_Context(Block_Len=>Default_Bitrate);
++   type C_Context_Access is access C_Context;
++   procedure C_Get_Size(Size: out Interfaces.C.size_t);
++   pragma Export (C, C_Get_Size, "keccak_get_ctx_byte_size");
++   function C_Begin return C_Context_Access;
++   pragma Export (C, C_Begin, "keccak_begin");
++   procedure C_Hash(Ctx: C_Context_Access;
++                    Input: Interfaces.C.Char_Array;
++                    Len: Interfaces.C.Size_T);
++   pragma Export (C, C_Hash, "keccak_hash");
++   procedure C_End(Ctx: C_Context_Access;
++                   Output: out Interfaces.C.Char_Array;
++                   Len: Interfaces.C.Size_T);
++   pragma Export (C, C_End, "keccak_end");
++   procedure C_Deallocate(Ctx: in out C_Context_Access);
++   pragma Export (C, C_Deallocate, "keccak_free");
++end Keccak_C;
+diff -uNr a/vtools/src/smg_keccak.adb b/vtools/src/smg_keccak.adb
+--- a/vtools/src/smg_keccak.adb 1836afa660b4c04bb072d4555fe1c77e4b6691e184ffaf09b44cd58ba2cb21ec85dae6eb50f46b0d8858d81129f3dee55edeb36a898dbf93ede6bea93bb4d531
++++ b/vtools/src/smg_keccak.adb 2687be567debee1558eef20cf47a120267c8fc75736a4b27771eb796d741d2e2156d9a57856bf3373b658ca26eb5dacd58f7251ebb34f3c1fcec0deae2281e13
+@@ -64,6 +64,75 @@
+     end; -- end squeeze stage
+   end Sponge;
+ 
++  -- public interface, state based Sponge
++  procedure KeccakBegin(Ctx : in out Keccak_Context) is
++  begin
++     Ctx.Internal := (others => (others => 0));
++     Ctx.Block := (others => 0);
++     Ctx.Pos := Ctx.Block'First;
++  end;
++
++  procedure KeccakHash(Ctx : in out Keccak_Context;
++                       Input : Bitstream) is
++     I0 : Natural;
++     I1 : Natural;
++     B0 : Natural;
++     B1 : Natural;
++  begin
++     I0 := Input'First;
++     <<Block_Process_Loop>>
++         I1 := Input'Last;
++         B0 := Ctx.Pos;
++         B1 := B0 + (I1-I0);
++
++         if B1>Ctx.Block'Last then
++            B1 := Ctx.Block'Last;
++            I1 := I0 + (B1-B0);
++         end if;
++         Ctx.Block(B0..B1) := Input(I0..I1);
++         Ctx.Pos := B1 + 1;
++         -- we've filled up the buffer
++         if Ctx.Pos > Ctx.Block'Last then
++            AbsorbBlock(Ctx.Block, Ctx.Internal);
++            Ctx.Internal := Keccak_Function(Ctx.Internal);
++            Ctx.Pos := Ctx.Block'First;
++         end if;
++         -- we haven't processed entire input block, loop
++         if I1 < Input'Last then
++            I0 := I1 + 1;
++            goto Block_Process_Loop;
++         end if;
++  end;
++
++  procedure KeccakEnd(Ctx : in out Keccak_Context;
++                      Output : out Bitstream) is
++     BlocksPerOutput : constant Natural := Output'Length / Ctx.Block_Len;
++     StrayPerOutput : constant Natural := Output'Length mod Ctx.Block_Len;
++     Block : Bitstream(1 .. Ctx.Block_Len);
++     Need : Natural;
++  begin
++     if Ctx.Pos /= 0 then -- needs padding
++        Block := (others => 0);
++        Need := Ctx.Block'Last - Ctx.Pos;
++        Block(Block'First) := 1;
++        Block(Block'First+Need) := 1;
++        KeccakHash(Ctx, Block(1..Need+1));
++     end if;
++
++     -- squeez bits
++     for I in 0 .. BlocksPerOutput - 1 loop
++        SqueezeBlock(Block, Ctx.Internal);
++        Output(Output'First + I * Ctx.Block_Len ..
++                 Output'First + (I + 1) * Ctx.Block_Len -1) := Block;
++        Ctx.Internal := Keccak_Function(Ctx.Internal);
++     end loop;
++     if StrayPerOutput > 0 then
++        SqueezeBlock(Block, Ctx.Internal);
++        Output(Output'Last - StrayPerOutput + 1 .. Output'Last) :=
++          Block(Block'First .. Block'First + StrayPerOutput - 1);
++     end if;
++  end;
++
+   -- convert from a bitstream of ZWord size to an actual ZWord number
+   function BitsToWord( BWord: in Bitword ) return ZWord is
+     W    : ZWord;
+diff -uNr a/vtools/src/smg_keccak.ads b/vtools/src/smg_keccak.ads
+--- a/vtools/src/smg_keccak.ads 325dfbb93c6e8b34fa3e44bd7e72253fa3a5da2982d79aeb79338716499cd3f590c0f152dd60fef5fdac97ff0076edef578f3be1611f8964281c7bceaec2567e
++++ b/vtools/src/smg_keccak.ads 4881474f164540b91e044834b7884bbd283d0a87ea62b510be69dc8aacfacba6c0c03e52e14ed9f313fee2ff3631ef79b792082d5e9d2b184d27256f96fac511
+@@ -59,6 +59,20 @@
+                    Output     : out Bitstream;
+                    Block_Len  : in Keccak_Rate := Default_Bitrate );
+ 
++  -- state based Sponge
++  type Keccak_Context (Block_Len: Keccak_Rate := Default_Bitrate) is
++     record
++        Internal: State := (others => (others => 0));
++        Block: Bitstream(1..Block_Len) := (others => 0);
++        Pos: Natural;
++     end record;
++ 
++  procedure KeccakBegin(Ctx: in out Keccak_Context);
++  procedure KeccakHash(Ctx: in out Keccak_Context;
++                       Input: Bitstream);
++  procedure KeccakEnd(Ctx: in out Keccak_Context;
++                      Output: out Bitstream);
++
+ private
+   -- these are internals of the keccak implementation, not meant to be directly 
+   --  accessed/used
+diff -uNr a/vtools/vdiff.gpr b/vtools/vdiff.gpr
+--- a/vtools/vdiff.gpr false
++++ b/vtools/vdiff.gpr 3f5d96a11d80d820a6a3774fbec02b7296177e5faceca8d60068d25fb6c99f44e2bd58786a2e8fe0e2e419d0dd6b55b8c747034ea1a434193361df4cc631cefe
+@@ -0,0 +1,10 @@
++project Vdiff is
++  for Languages use ("Ada", "C");
++  for Source_Dirs use ("src", "lib");
++  for Object_Dir use "obj";
++  for Exec_Dir use ".";
++  for Main use ("diff.c");
++  package Builder is
++     for Executable ("diff.c") use "vdiff";
++  end Builder;
++end Vdiff;

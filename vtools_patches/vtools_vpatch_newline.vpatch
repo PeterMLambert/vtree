@@ -1,0 +1,385 @@
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest 154d5f7e9ca4e2a7d9888e83b3887b9c6b27074fda0564c9054d78272728e73143930a538a7e8c8d0a7f3dc5bfe70d915f8366a4559a8510b59045156091268e
++++ b/vtools/manifest a5a33ff57b0921814d912a0922c96babc96ea982ed714f39225865b0b255b58102b6b010a96108986d443029d9efadf52c90a50e9cd772cd05e87eeb49909e28
+@@ -12,3 +12,5 @@
+ Initial vpatch tool implementation in Ada.
+ 2018-04-07 phf
+ Fixes for xalloc's use of static inline courtesy of spyked, fix broken ToHex implementation
++2018-04-07 phf
++Vpatch tool support for "No newline at end of file" directive.
+diff -uNr a/vtools/src/character_io.adb b/vtools/src/character_io.adb
+--- a/vtools/src/character_io.adb false
++++ b/vtools/src/character_io.adb a21567384f0fc1807d698497eec46a8d0e784b54f4e8381c39a66121a580c98f86e9c227045d67ee0d54cf09ab29d4de62e741d50056c344a63bf05271391087
+@@ -0,0 +1,81 @@
++package body Character_IO is
++   LM: constant Character := ASCII.LF;
++
++   procedure Get_Line(File : in Character_IO.File_Type;
++                      Item : out String;
++                      Last : out Natural;
++                      New_Line : out Boolean) is
++      C: Character;
++   begin
++      New_Line := False;
++      Last := Item'First - 1;
++      if Last >= Item'Last then
++         return;
++      end if;
++      if Character_IO.End_Of_File(File) then
++         raise Character_IO.End_Error;
++      end if;
++      loop
++         Character_IO.Read(File, C);
++         if C = LM then
++            New_Line := True;
++            return;
++         end if;
++         Last := Last + 1;
++         Item(Last) := C;
++         if Last = Item'Last then
++            return;
++         end if;
++         exit when Character_IO.End_Of_File(File);
++      end loop;
++   end;
++
++   function Get_Line (File : Character_IO.File_Type;
++                      New_Line : out Boolean) return String is
++      Buffer : String (1 .. 500);
++      Last   : Natural;
++
++      function Get_Rest (S : String) return String is
++         Buffer : String (1 .. S'Length);
++         Last   : Natural;
++      begin
++         Get_Line (File, Buffer, Last, New_Line);
++         declare
++            R : constant String := S & Buffer (1 .. Last);
++         begin
++            if Last < Buffer'Last then
++               return R;
++            else
++               return Get_Rest (R);
++            end if;
++         end;
++      end Get_Rest;
++
++   begin
++      Get_Line (File, Buffer, Last, New_Line);
++
++      if Last < Buffer'Last then
++         return Buffer (1 .. Last);
++      else
++         return Get_Rest (Buffer (1 .. Last));
++      end if;
++   end Get_Line;
++
++   function Get_Line(File : in Character_IO.File_Type) return String is
++      New_Line : Boolean;
++   begin
++      return Get_Line(File, New_Line);
++   end Get_Line;
++
++   procedure Put_Line(File : in Character_IO.File_Type;
++                      Item : in String;
++                      New_Line : Boolean := True) is
++   begin
++      for C of Item loop
++         Character_IO.Write(File, C);
++      end loop;
++      if New_Line then
++         Character_IO.Write(File, LM);
++      end if;
++   end;
++end;
+diff -uNr a/vtools/src/character_io.ads b/vtools/src/character_io.ads
+--- a/vtools/src/character_io.ads false
++++ b/vtools/src/character_io.ads 3bf0c1bc0a0326464d835ff46fe95e295b26407ed969fad5eaeee9b4a258d4aca18d0c19ebb9e8223bfb07e4a4a48df4da469df34907479fba4e86b6a30d78f8
+@@ -0,0 +1,28 @@
++with Ada.Sequential_IO;
++package Character_IO is
++   package Character_IO is
++      new Ada.Sequential_IO(Element_Type => Character);
++
++   procedure Open  (File : in out Character_IO.File_Type;
++                    Mode : in Character_IO.File_Mode;
++                    Name : in String;
++                    Form : in String := "") renames Character_IO.Open;
++   procedure Create(File : in out Character_IO.File_Type;
++                    Mode : in Character_IO.File_Mode := Character_IO.Out_File;
++                    Name : in String := "";
++                    Form : in String := "") renames Character_IO.Create;
++   function End_Of_File(File : in Character_IO.File_Type) return Boolean
++     renames Character_IO.End_Of_File;
++   function Name   (File : in Character_IO.File_Type) return String
++     renames Character_IO.Name;
++   function Is_Open(File : in Character_IO.File_Type) return Boolean
++     renames Character_IO.Is_Open;
++   procedure Close (File : in out Character_IO.File_Type) renames Character_IO.Close;
++
++   function Get_Line(File : in Character_IO.File_Type) return String;
++   function Get_Line(File : in Character_IO.File_Type;
++                     New_Line : out Boolean) return String;
++   procedure Put_Line(File : in Character_IO.File_Type;
++                      Item : in String;
++                      New_Line : Boolean := True );
++end Character_IO;
+diff -uNr a/vtools/src/vpatch.adb b/vtools/src/vpatch.adb
+--- a/vtools/src/vpatch.adb 2ada8cf6ee11c28ba9dacc2f6a72a3e562c973412bd519b060810159fb7c23975e5d75fc344c1c45465cf632468247147ae6ef1ee68f0c6f9c7d03b9061f65da
++++ b/vtools/src/vpatch.adb 7fda2219570280da2045c9e7fcd4d122447580ab2a2d235a9789ae04581edd8e992a26da1dd4a2a454a2c94ff1c000eaa1b1c132a773f1d617b7def2731f7fd9
+@@ -3,6 +3,7 @@
+ with Interfaces.C.Strings;
+ with Ada.Text_IO;  use Ada.Text_IO;
+ with Ada.Integer_Text_IO; use  Ada.Integer_Text_IO;
++with Character_IO; use Character_IO;
+ with Ada.Strings.Fixed;
+ with Ada.Directories;
+ with Ada.Characters;
+@@ -14,6 +15,7 @@
+ procedure VPatch is
+    package Latin_1 renames Ada.Characters.Latin_1;
+    package Dirs renames Ada.Directories;
++   package CIO renames Character_IO.Character_IO;
+ 
+    -- Utilities
+ 
+@@ -82,6 +84,15 @@
+       Create(File, Mode, Name, Form);
+    end;
+ 
++   procedure Create_Temp(File : in out CIO.File_Type;
++                         Mode : in CIO.File_Mode := CIO.Out_File;
++                         Template : in String := "vpatch.XXX";
++                         Form : in String := "") is
++      Name: String := Temp_File_Name(Template);
++   begin
++      Create(File, Mode, Name, Form);
++   end;
++
+    -- VPatch data structures
+ 
+    type Patch_Op is (Op_Create, Op_Delete, Op_Patch);
+@@ -330,8 +341,8 @@
+       From_Count: Natural := 0;
+       To_Count: Natural := 0;
+       Has_Input_File: Boolean;
+-      In_F: File_Type;
+-      To_F: File_Type;
++      In_F: CIO.File_Type;
++      To_F: CIO.File_Type;
+       Line: Positive := 1;
+       In_Ctx: Keccak_Context;
+       To_Ctx: Keccak_Context;
+@@ -339,28 +350,37 @@
+       To_Hash: Bitstream(1..64*8);
+       To_F_Name: constant String := Press_Name(A_Header);
+       Op: Patch_Op;
+-
+-      procedure Hash_Line(Ctx: in out Keccak_Context; S: String) is
++      Newline_Directive: constant String := "\ No newline at end of file";
++      
++      procedure Hash_Line(Ctx: in out Keccak_Context;
++                          S: String;
++                          New_Line: Boolean := True) is
+          B: Bitstream(1..S'Length*8);
+          LF_B: constant Bitstream(1..8) := (0, 1, 0, 1, 0, 0, 0, 0);
+       begin
+          ToBitstream(S, B);
+          KeccakHash(Ctx, B);
+-         KeccakHash(Ctx, LF_B);
++         if New_Line then
++            KeccakHash(Ctx, LF_B);
++         end if;
+       end;
+-
++      
++      Check_Input_File_Hash_Pending: Boolean := True;
+       procedure Check_Input_File_Hash is
+       begin
+-         if Has_Input_File then
++         if Has_Input_File and Is_Open(In_F) 
++           and Check_Input_File_Hash_Pending then
+             begin
++               Check_Input_File_Hash_Pending := False;
+            Catch_Up_Loop:
+                loop
+                   declare
+-                     In_Line: String := Get_Line(In_F);
++                     New_Line: Boolean;
++                     In_Line: String := Get_Line(In_F, New_Line);
+                   begin
+-                     Put_Line(To_F, In_Line);
+-                     Hash_Line(In_Ctx, In_Line);
+-                     Hash_Line(To_Ctx, In_Line);
++                     Put_Line(To_F, In_Line, New_Line);
++                     Hash_Line(In_Ctx, In_Line, New_Line);
++                     Hash_Line(To_Ctx, In_Line, New_Line);
+                   end;
+                end loop Catch_Up_Loop;
+             exception
+@@ -374,8 +394,7 @@
+                H: Hash := (Value => Hex_Hash,
+                            The_Type => Value);
+             begin
+-               if A_Header.From_Hash /= (Value => Hex_Hash,
+-                                         The_Type => Value)  then
++               if A_Header.From_Hash /= H then
+                   raise State with "from hash doesn't match";
+                end if;
+             end;
+@@ -408,7 +427,19 @@
+             Dirs.Delete_File(Name(To_F));
+          end if;
+       end Cleanup;
+-
++      
++      function Has_No_Newline_Directive return Boolean is
++         C: Character;
++      begin
++         Look_Ahead(C, EOL);
++         if C = '\' then
++            Looking_At(Newline_Directive);
++            Next_Line;
++            return True;
++         end if;
++         return False;
++      end;
++      
+    begin
+       Op := Operation(A_Header);
+ 
+@@ -435,14 +466,14 @@
+ 
+       -- prepare keccak and open files
+       KeccakBegin(To_Ctx);
+-      Create_Temp(To_F, Out_File, "tmp.XXX");
++      Create_Temp(To_F, Template => "tmp.XXX");
+       case Op is
+          when Op_Create =>
+             Has_Input_File := False;
+          when Op_Delete | Op_Patch =>
+             Has_Input_File := True;
+             KeccakBegin(In_Ctx);
+-            Open(In_F, In_File, To_F_Name);
++            Open(In_F, CIO.In_File, To_F_Name);
+       end case;
+ 
+   Hunk_Loop:
+@@ -466,11 +497,12 @@
+                     & "but the file has ended";
+                end if;
+                declare
+-                  In_Line: String := Get_Line(In_F);
++                  New_Line: Boolean;
++                  In_Line: String := Get_Line(In_F, New_Line);
+                begin
+-                  Hash_Line(In_Ctx, In_Line);
+-                  Hash_Line(To_Ctx, In_Line);
+-                  Put_Line(To_F, In_Line);
++                  Hash_Line(In_Ctx, In_Line, New_Line);
++                  Hash_Line(To_Ctx, In_Line, New_Line);
++                  Put_Line(To_F, In_Line, New_Line);
+                   Line := Line + 1;
+                end;
+             end loop;
+@@ -483,6 +515,7 @@
+                raise Parse with "blank line in hunk";
+             end if;
+             case C is
++
+                when '+' => -- line added
+                   Get(C);
+                   case Op is
+@@ -494,13 +527,20 @@
+                      raise State with "hunk trying to add lines, "
+                        & "but the line count is not valid";
+                   end if;
++
+                   declare
++                     New_Line: Boolean := True;
+                      Patch_Line: String := Get_Line;
+                   begin
+-                     Put_Line(To_F, Patch_Line);
+-                     Hash_Line(To_Ctx, Patch_Line);
++                     -- Last line, check for Newline directive.
++                     if To_Count = 1 then
++                        New_Line := not Has_No_Newline_Directive;
++                     end if;
++                     Put_Line(To_F, Patch_Line, New_Line);
++                     Hash_Line(To_Ctx, Patch_Line, New_Line);
+                   end;
+                   To_Count := To_Count - 1;
++
+                when '-' => -- line deleted
+                   Get(C);
+                   case Op is
+@@ -515,17 +555,28 @@
+                      raise State with "hunk trying to remove lines, "
+                        & "when the input file already ended";
+                   end if;
++
+                   declare
+-                     In_Line: String := Get_Line(In_F);
++                     New_Line: Boolean;
++                     In_Line: String := Get_Line(In_F, New_Line);
+                      Patch_Line: String := Get_Line;
+                   begin
++                     -- Last line, check for Newline directive.
++                     if From_Count = 1 then
++                        if Has_No_Newline_Directive and New_Line then
++                           raise State with "input file has newline, "
++                             & "while hunk claims it doesn't";
++                        end if;
++                     end if;
++
+                      if In_Line /= Patch_Line then
+                         raise State with "lines don't match";
+                      end if;
+-                     Hash_Line(In_Ctx, In_Line);
++                     Hash_Line(In_Ctx, In_Line, New_Line);
+                   end;
+                   Line := Line + 1;
+                   From_Count := From_Count - 1;
++
+                when ' ' => -- line stays the same
+                   Get(C);
+                   if not Has_Input_File then
+@@ -540,20 +591,34 @@
+                      raise State with "hunk claims identical lines, "
+                        & "when input file already ended";
+                   end if;
++
+                   declare
+-                     In_Line: String := Get_Line(In_F);
++                     New_Line: Boolean;
++                     In_Line: String := Get_Line(In_F, New_Line);
+                      Patch_Line: String := Get_Line;
+                   begin
+                      if In_Line /= Patch_Line then
+                         raise State with "lines don't match";
+                      end if;
+-                     Put_Line(To_F, Patch_Line);
+-                     Hash_Line(In_Ctx, In_Line);
+-                     Hash_Line(To_Ctx, In_Line);
++                     if From_Count = 1 then
++                        if Has_No_Newline_Directive and New_Line then
++                           raise State with "input file has newline, "
++                             & "while hunk claims it doesn't";                           
++                        end if;
++                     end if;
++                     
++                     Put_Line(To_F, Patch_Line, New_Line);
++                     Hash_Line(In_Ctx, In_Line, New_Line);
++                     Hash_Line(To_Ctx, In_Line, New_Line);
+                   end;
+                   Line := Line + 1;
+                   From_Count := From_Count - 1;
+                   To_Count := To_Count - 1;
++
++               when '\' =>
++                  Looking_At(Newline_Directive);
++                  raise State with "invalid line count in hunk";
++
+                when others =>
+                   raise Parse with "unexpected character "
+                     & Character'Image(C)

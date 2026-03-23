@@ -1,0 +1,848 @@
+diff -uNr a/vtools/Makefile b/vtools/Makefile
+--- a/vtools/Makefile 6d17aa7e0eb0f0901f1bef3324b09e14b2afa2c83291b8d732384b7276e3fc8f7ab90f9469005ece8ef9d7fd1e04d2b1636621c5e871131c746dc936835cc3a0
++++ b/vtools/Makefile aa43310381662643140a080738bf279f633e86357f4eee2413c4612012b2e3a8560e5168f8538419bdf0c79fffb9189cf96d8a50219915d4686d4474224b76f6
+@@ -2,6 +2,9 @@
+ vdiff:
+ 	gprbuild -Pvdiff.gpr
+ 
++vpatch:
++	gprbuild -Pvpatch.gpr
++
+ clean:
+ 	gprclean -Pvdiff.gpr
+-
++	gprclean -Pvpatch.gpr
+diff -uNr a/vtools/manifest b/vtools/manifest
+--- a/vtools/manifest 6144af85a54f9e62de72d34b9a975036b0250d085c12fc51bdcb831d0957026363e68ca9360d818ae15489b49fb71354d52761ab48ffbe4a156edda28756e28a
++++ b/vtools/manifest 7ebff9758ff7653a61266fa97075ad9706e7ab8fa7507242071c6701327387fc81043394159715aae08fc7454539c414268c670604e133a34354db3c9f5d6c12
+@@ -8,3 +8,5 @@
+ Vdiff hashing and output using Keccak instead of SHA512.
+ 2018-03-08 phf
+ Fixes for keccak from diana_coman, different approach to C interop.
++2018-03-22 phf
++Initial vpatch tool implementation in Ada.
+diff -uNr a/vtools/src/bits.adb b/vtools/src/bits.adb
+--- a/vtools/src/bits.adb false
++++ b/vtools/src/bits.adb 02a00809e5d6234f488f5b02e7302c6bc11ed666e20aba1de109ec0c678bdb6628951405b9c37f89fb8e4060e276eb06bffe899f222679bc0145089060671051
+@@ -0,0 +1,67 @@
++with Interfaces; use Interfaces;
++package body Bits is
++   -- helper functions
++   procedure ToBitstream(S: in String; B: out Bitstream ) is
++      V   : Unsigned_8;
++      Pos : Natural;
++   begin
++      Pos := B'First;
++      for C of S loop
++         V := Character'Pos( C );
++         B( Pos     ) := Bit( V and 1 );
++         B( Pos + 1 ) := Bit( Shift_Right( V, 1 ) and 1 );
++         B( Pos + 2 ) := Bit( Shift_Right( V, 2 ) and 1 );
++         B( Pos + 3 ) := Bit( Shift_Right( V, 3 ) and 1 );
++         B( Pos + 4 ) := Bit( Shift_Right( V, 4 ) and 1 );
++         B( Pos + 5 ) := Bit( Shift_Right( V, 5 ) and 1 );
++         B( Pos + 6 ) := Bit( Shift_Right( V, 6 ) and 1 );
++         B( Pos + 7 ) := Bit( Shift_Right( V, 7 ) and 1 );
++         Pos := Pos + 8;
++      end loop;
++   end ToBitstream;
++
++   procedure ToString(B: in Bitstream; S: out String ) is
++      N   : Natural;
++      Pos : Natural;
++   begin
++      Pos := B'First;
++      for I in S'Range loop
++         N := Natural( B( Pos     ) ) +
++           Natural( B( Pos + 1 ) ) * 2 +
++           Natural( B( Pos + 2 ) ) * 4 +
++           Natural( B( Pos + 3 ) ) * 8 +
++           Natural( B( Pos + 4 ) ) * 16 +
++           Natural( B( Pos + 5 ) ) * 32 +
++           Natural( B( Pos + 6 ) ) * 64 +
++           Natural( B( Pos + 7 ) ) * 128;
++         Pos := Pos + 8;
++         S( I ) := Character'Val( N );
++      end loop;
++   end ToString;
++
++   -- direction translation of C function from vdiff
++   procedure ToHex(B: in Bitstream; S: out String) is
++      Bytes: String(1..B'Length/8);
++      Hex_Digits: constant String := "0123456789abcdef";
++      I: Positive := 1;
++      V: Unsigned_8;
++      X: Positive := 1;
++   begin
++      ToString(B, Bytes);
++      for C of S loop
++         V := Character'Pos(C);
++         S(I) := Hex_Digits(Integer(Shift_Right(V, 4) + 1));
++         I := I + 1;
++         S(I) := Hex_Digits(Integer((V and 16#F#) + 1));
++         I := I + 1;
++      end loop;
++   end;
++
++   function ToHex(B: in Bitstream) return String is
++      S: String(1..B'Length/4);
++   begin
++      ToHex(B, S);
++      return S;
++   end;
++
++end Bits;
+diff -uNr a/vtools/src/bits.ads b/vtools/src/bits.ads
+--- a/vtools/src/bits.ads false
++++ b/vtools/src/bits.ads a3efd8851302f4a4968b52b2d94e21ede8eff4927fb0f57e75e46af8895d21a2af2221a09c926882ce1d8cc94095c81b85714366b28c1e0ec1159510f451a22c
+@@ -0,0 +1,11 @@
++package Bits is
++   pragma Pure(Bits);
++
++   type Bit is mod 2;
++   type Bitstream is array( Natural range <> ) of Bit; -- any length; message
++
++   procedure ToBitstream(S: in String; B: out Bitstream);
++   procedure ToString(B: in Bitstream; S: out String);
++   procedure ToHex(B: in Bitstream; S: out String);
++   function ToHex(B: in Bitstream) return String;
++end Bits;
+diff -uNr a/vtools/src/keccak_c.adb b/vtools/src/keccak_c.adb
+--- a/vtools/src/keccak_c.adb 29b834d3fcfa47b6c26b12bab548445dd61c3e184b73e8f85f0a7f47675afd3b748bb08c46931c61a46e89fc8d611c8c087bd973843b1d5175ea24be2bb0731c
++++ b/vtools/src/keccak_c.adb 129f1fd2eafbe24d2452f4450fd0548f92768b633354d147607ab59c1d999543c52b4de09482ff382b7cccabf862205940bedaba7149702bc0ce7d74db686ae8
+@@ -1,43 +1,5 @@
++with Bits; use Bits;
+ package body Keccak_C is
+-   -- helper functions
+-   procedure ToBitstream(S: in String; B: out Bitstream ) is
+-      V   : Unsigned_8;
+-      Pos : Natural;
+-   begin
+-      Pos := B'First;
+-      for C of S loop
+-         V := Character'Pos( C );
+-         B( Pos     ) := Bit( V and 1 );
+-         B( Pos + 1 ) := Bit( Shift_Right( V, 1 ) and 1 );
+-         B( Pos + 2 ) := Bit( Shift_Right( V, 2 ) and 1 );
+-         B( Pos + 3 ) := Bit( Shift_Right( V, 3 ) and 1 );
+-         B( Pos + 4 ) := Bit( Shift_Right( V, 4 ) and 1 );
+-         B( Pos + 5 ) := Bit( Shift_Right( V, 5 ) and 1 );
+-         B( Pos + 6 ) := Bit( Shift_Right( V, 6 ) and 1 );
+-         B( Pos + 7 ) := Bit( Shift_Right( V, 7 ) and 1 );
+-         Pos := Pos + 8;
+-      end loop;
+-   end ToBitstream;
+-
+-   procedure ToString(B: in Bitstream; S: out String ) is
+-      N   : Natural;
+-      Pos : Natural;
+-   begin
+-      Pos := B'First;
+-      for I in S'Range loop
+-         N := Natural( B( Pos     ) ) +
+-           Natural( B( Pos + 1 ) ) * 2 +
+-           Natural( B( Pos + 2 ) ) * 4 +
+-           Natural( B( Pos + 3 ) ) * 8 +
+-           Natural( B( Pos + 4 ) ) * 16 +
+-           Natural( B( Pos + 5 ) ) * 32 +
+-           Natural( B( Pos + 6 ) ) * 64 +
+-           Natural( B( Pos + 7 ) ) * 128;
+-         Pos := Pos + 8;
+-         S( I ) := Character'Val( N );
+-      end loop;
+-   end ToString;
+-
+    -- C interface
+ 
+    procedure C_Get_Size(Size: out Interfaces.C.size_t) is
+@@ -62,7 +24,7 @@
+       Ptr: Char_Star := Input;
+    begin
+       if Input = null then
+-         raise C.Strings.Dereference_Error;
++         raise Strings.Dereference_Error;
+       end if;
+       for Chr of S loop
+          Chr := Character(Ptr.all);
+@@ -81,7 +43,7 @@
+       Ptr: Char_Star := Output;
+    begin
+       if Output = null then
+-         raise C.Strings.Dereference_Error;
++         raise Strings.Dereference_Error;
+       end if;
+       KeccakEnd(Ctx.all, B);
+       ToString(B, S);
+diff -uNr a/vtools/src/keccak_c.ads b/vtools/src/keccak_c.ads
+--- a/vtools/src/keccak_c.ads 046c50d67920ee9245a86d127db41c66b4c1cc8998a1f32c2f9f524d072156514f1abcf2f831c5efde31a8b966e80e85da62b89047b3a7659c7291d1de83b7f6
++++ b/vtools/src/keccak_c.ads 39ef5a4e4cafa515e6574b47865044f379b3813cd634f8783b9b7d9998725628c3d7071d64fde5c2ca6ae4593f46547299c6aee47bfbdb8341abc5dc4c79656e
+@@ -1,4 +1,3 @@
+-with Interfaces; use Interfaces;
+ with Interfaces.C; use Interfaces.C;
+ with Interfaces.C.Strings;
+ with Interfaces.C.Pointers;
+diff -uNr a/vtools/src/smg_keccak.ads b/vtools/src/smg_keccak.ads
+--- a/vtools/src/smg_keccak.ads 4881474f164540b91e044834b7884bbd283d0a87ea62b510be69dc8aacfacba6c0c03e52e14ed9f313fee2ff3631ef79b792082d5e9d2b184d27256f96fac511
++++ b/vtools/src/smg_keccak.ads 69f7a1bda8da6cf855fbbab6911483f393592bae06b327a82d03792537078b1900f266a6d4f95f5bd8f592b672871af2b03fbaa634382e48c7872decdde91c64
+@@ -5,6 +5,7 @@
+ 
+  -- S.MG, 2018
+ 
++with Bits; use Bits;
+ package SMG_Keccak is
+ 	pragma Pure(SMG_Keccak);  --stateless, no side effects -> can cache calls
+ 
+@@ -38,8 +39,6 @@
+   --   the "secret" part of the state (i.e. lower capacity)
+   subtype Keccak_Rate is Positive range 1..Width;  -- capacity = width - rate
+ 
+-  type Bit is mod 2;
+-  type Bitstream is array( Natural range <> ) of Bit; -- any length; message
+   subtype Bitword is Bitstream( 0..Z_Length - 1 ); -- bits of one state "word"
+ 
+   -- type conversions
+diff -uNr a/vtools/src/vpatch.adb b/vtools/src/vpatch.adb
+--- a/vtools/src/vpatch.adb false
++++ b/vtools/src/vpatch.adb 2ada8cf6ee11c28ba9dacc2f6a72a3e562c973412bd519b060810159fb7c23975e5d75fc344c1c45465cf632468247147ae6ef1ee68f0c6f9c7d03b9061f65da
+@@ -0,0 +1,619 @@
++with Bits; use Bits;
++with Interfaces.C;
++with Interfaces.C.Strings;
++with Ada.Text_IO;  use Ada.Text_IO;
++with Ada.Integer_Text_IO; use  Ada.Integer_Text_IO;
++with Ada.Strings.Fixed;
++with Ada.Directories;
++with Ada.Characters;
++with Ada.Characters.Handling;
++with Ada.Characters.Latin_1;
++with Ada.Sequential_IO;
++with SMG_Keccak; use SMG_Keccak;
++
++procedure VPatch is
++   package Latin_1 renames Ada.Characters.Latin_1;
++   package Dirs renames Ada.Directories;
++
++   -- Utilities
++
++   function Starts_With(S: String; Prefix: String) return Boolean is
++   begin
++      if S'Length < Prefix'Length then
++         return False;
++      end if;
++      return S(S'First..S'First+Prefix'Length-1) = Prefix;
++   end;
++
++   function Path_Prefix(Pathname: String;
++                        Suffix: Positive) return String is
++      Pos: Natural := Pathname'Last;
++   begin
++      for I in 1..Suffix loop
++         Pos := Ada.Strings.Fixed.Index(Pathname, "/",
++                                        From => Pos,
++                                        Going => Ada.Strings.Backward);
++         if Pos = 0 then
++            return Pathname;
++         end if;
++         Pos := Pos - 1;
++      end loop;
++      return Pathname(Pathname'First .. Pos);
++   end;
++
++   function Path_Without_Prefix(Pathname: String;
++                                Prefix: Positive) return String is
++      Pos: Natural := 1;
++   begin
++      for I in 1..Prefix loop
++         Pos := Ada.Strings.Fixed.Index(Pathname, "/", From => Pos);
++         if Pos = 0 then
++            return Pathname;
++         end if;
++         Pos := Pos + 1;
++      end loop;
++      return Pathname(Pos .. Pathname'Last);
++   end;
++
++   -- Temporary File
++
++   procedure MkTemp(Template: Interfaces.C.Strings.Chars_Ptr);
++   pragma Import(C, mktemp);
++
++   function Temp_File_Name(Template: String) return String is
++      X: Interfaces.C.Strings.Chars_Ptr
++        := Interfaces.C.Strings.New_String(Template);
++   begin
++      MkTemp(X);
++      declare
++         Result: String := Interfaces.C.Strings.Value(X);
++      begin
++         Interfaces.C.Strings.Free(X);
++         return Result;
++      end;
++   end;
++
++   procedure Create_Temp(File : in out File_Type;
++                         Mode : in File_Mode := Out_File;
++                         Template : in String := "vpatch.XXX";
++                         Form : in String := "") is
++      Name: String := Temp_File_Name(Template);
++   begin
++      Create(File, Mode, Name, Form);
++   end;
++
++   -- VPatch data structures
++
++   type Patch_Op is (Op_Create, Op_Delete, Op_Patch);
++
++   Hash_Length: constant Positive := 128;
++   type Hash_Type is (Empty, Value);
++   type Hash(The_Type: Hash_Type := Empty) is record
++      case The_Type is
++         when Value =>
++            Value: String(1..Hash_Length);
++         when Empty =>
++            null;
++      end case;
++   end record;
++
++   function "=" (Left, Right: in Hash) return Boolean is
++   begin
++      if Left.The_Type = Empty and Right.The_Type = Empty then
++         return True;
++      elsif Left.The_Type = Empty or Right.The_Type = Empty then
++         return False;
++      elsif Left.Value /= Right.Value then
++         return False;
++      else
++         return True;
++      end if;
++   end "=";
++
++   type Header (From_L, To_L: Natural) Is record
++      From_Hash: Hash;
++      From_File: String(1..From_L);
++      To_Hash: Hash;
++      To_File: String(1..To_L);
++   end record;
++
++   function Operation(A_Header: Header) return Patch_Op is
++   begin
++      if A_Header.From_Hash.The_Type = Empty then
++         return Op_Create;
++      elsif A_Header.To_Hash.The_Type = Empty then
++         return Op_Delete;
++      else
++         return Op_Patch;
++      end if;
++   end;
++
++   function Press_Name(A_Header: Header) return String is
++   begin
++      return Path_Without_Prefix(A_Header.From_File, 1);
++   end;
++
++   type Line_Numbers is record
++      Start: Natural;
++      Count: Natural;
++   end record;
++
++   type Hunk is record
++      From_File_Line_Numbers: Line_Numbers;
++      To_File_Line_Numbers: Line_Numbers;
++   end record;
++
++   -- VPatch debug output routines
++
++   procedure Put(A_Line_Numbers: Line_Numbers) is
++   begin
++      Put(A_Line_Numbers.Start);
++      Put(A_Line_Numbers.Count);
++   end;
++
++   procedure Put(A_Hash: Hash) is
++   begin
++      case A_Hash.The_Type is
++         when Value =>
++            Put(A_Hash.Value);
++         when Empty =>
++            Put("no value");
++      end case;
++   end;
++
++   procedure Put(A_Header: Header) is
++   begin
++      Put("from file: ");
++      Put(A_Header.From_File);
++      New_Line;
++      Put("to file: ");
++      Put(A_Header.To_File);
++      New_Line;
++      Put("from hash: ");
++      Put(A_Header.From_Hash);
++      New_Line;
++      Put("to hash: ");
++      Put(A_Header.To_Hash);
++      New_Line;
++   end;
++
++   procedure Put(A_Hunk: Hunk) is
++   begin
++      Put("from file line numbers: ");
++      Put(A_Hunk.From_File_Line_Numbers);
++      New_Line;
++      Put("to file line numbers: ");
++      Put(A_Hunk.To_File_Line_Numbers);
++      New_Line;
++   end;
++
++   -- VPatch parser
++
++   Parse, State: exception;
++
++   procedure Skip_Whitespace is
++      EOL: Boolean;
++      C: Character;
++   begin
++  Skip_Loop:
++      loop
++         Look_Ahead(C, EOL);
++         exit Skip_Loop when EOL;
++         exit Skip_Loop when
++           C /= Latin_1.Space and
++           C /= Latin_1.HT;
++         Get(C);
++      end loop Skip_Loop;
++   end;
++
++   procedure Looking_At(Expected: String) is
++      Actual: String(Expected'Range);
++   begin
++      Get(Actual);
++      if Expected /= Actual then
++         raise Parse with "expected " & Expected & ", got " & Actual;
++      end if;
++   end;
++
++   procedure Next_Line is
++   begin
++      if not End_Of_Line then
++         raise Parse with "expected end of line";
++      end if;
++      Skip_Line;
++   end;
++
++   procedure Get(A_Hash: out Hash) is
++      No_Hash_Label: constant String := "false";
++      V: String(1..Hash_Length);
++   begin
++      Get(V(1..No_Hash_Label'Length));
++      if V(1..No_Hash_Label'Length) = No_Hash_Label then
++         A_Hash := (The_Type => Empty);
++         return;
++      end if;
++      Get(V(No_Hash_Label'Length + 1..V'Last));
++      A_Hash := (The_Type => Value,
++                 Value => V);
++   end;
++
++   procedure Get(A_Line_Numbers: out Line_Numbers) is
++      C: Character;
++      Eol: Boolean;
++   begin
++      Get(A_Line_Numbers.Start);
++      Look_Ahead(C, Eol);
++      if Eol then
++         raise Parse;
++      end if;
++      case C is
++         when ' ' =>
++            -- If a hunk contains just one line, only its start line
++            --  number appears.
++            A_Line_Numbers.Count := 1;
++         when ',' =>
++            -- Otherwise its line numbers look like ‘start,count’. An
++            --  empty hunk is considered to start at the line that
++            --  follows the hunk.
++            Get(C);
++            Get(A_Line_Numbers.Count);
++         when others =>
++            raise Parse;
++      end case;
++   end;
++
++   function Get_Header_Filename return String is
++      EOL: Boolean;
++      Buffer: String(1..1000);
++      C: Character;
++      I: Natural := 0;
++   begin
++  Read_Loop:
++      loop
++         Look_Ahead(C, EOL);
++         exit Read_Loop when EOL;
++         exit Read_Loop when
++           C = Latin_1.Space or C = Latin_1.HT;
++         Get(C);
++         I := I + 1;
++         Buffer(I) := C;
++      end loop Read_Loop;
++      return Buffer(1..I);
++   end;
++
++   function Get_Header return Header is
++      From_Hash: Hash;
++      To_Hash: Hash;
++   begin
++      Looking_At("--- ");
++      declare
++         From_File: String := Get_Header_Filename;
++      begin
++         Skip_Whitespace;
++         Get(From_Hash);
++         Looking_At("+++ ");
++         declare
++            To_File: String := Get_Header_Filename;
++         begin
++            Skip_Whitespace;
++            Get(To_Hash);
++            Next_Line;
++            declare
++               H: Header := (From_L => From_File'Length,
++                             To_L => To_File'Length,
++                             From_File => From_File,
++                             To_File => To_File,
++                             From_Hash => From_Hash,
++                             To_Hash => To_Hash);
++            begin
++               return H;
++            end;
++         end;
++      end;
++   end;
++
++   procedure Get(A_Hunk: out Hunk) is
++   begin
++      Looking_At("@@ -");
++      Get(A_Hunk.From_File_Line_Numbers);
++      Looking_At(" +");
++      Get(A_Hunk.To_File_Line_Numbers);
++      Looking_At(" @@");
++      Next_Line;
++   end;
++
++   procedure Process_Hunks_For_Header(A_Header: Header) Is
++      EOL: Boolean;
++      C: Character;
++      A_Hunk: Hunk;
++      -- ensure valid line counts
++      From_Count: Natural := 0;
++      To_Count: Natural := 0;
++      Has_Input_File: Boolean;
++      In_F: File_Type;
++      To_F: File_Type;
++      Line: Positive := 1;
++      In_Ctx: Keccak_Context;
++      To_Ctx: Keccak_Context;
++      In_Hash: Bitstream(1..64*8);
++      To_Hash: Bitstream(1..64*8);
++      To_F_Name: constant String := Press_Name(A_Header);
++      Op: Patch_Op;
++
++      procedure Hash_Line(Ctx: in out Keccak_Context; S: String) is
++         B: Bitstream(1..S'Length*8);
++         LF_B: constant Bitstream(1..8) := (0, 1, 0, 1, 0, 0, 0, 0);
++      begin
++         ToBitstream(S, B);
++         KeccakHash(Ctx, B);
++         KeccakHash(Ctx, LF_B);
++      end;
++
++      procedure Check_Input_File_Hash is
++      begin
++         if Has_Input_File then
++            begin
++           Catch_Up_Loop:
++               loop
++                  declare
++                     In_Line: String := Get_Line(In_F);
++                  begin
++                     Put_Line(To_F, In_Line);
++                     Hash_Line(In_Ctx, In_Line);
++                     Hash_Line(To_Ctx, In_Line);
++                  end;
++               end loop Catch_Up_Loop;
++            exception
++               when End_Error =>
++                  null;
++            end;
++            KeccakEnd(In_Ctx, In_Hash);
++
++            declare
++               Hex_Hash: String := ToHex(In_Hash);
++               H: Hash := (Value => Hex_Hash,
++                           The_Type => Value);
++            begin
++               if A_Header.From_Hash /= (Value => Hex_Hash,
++                                         The_Type => Value)  then
++                  raise State with "from hash doesn't match";
++               end if;
++            end;
++         end if;
++      end Check_Input_File_Hash;
++
++      procedure Check_Output_File_Hash is
++      begin
++         KeccakEnd(To_Ctx, To_Hash);
++         declare
++            H_Hex: String := ToHex(To_Hash);
++            H: Hash;
++         begin
++            case Op is
++               when Op_Create | Op_Patch =>
++                  H := (Value => H_Hex,
++                        The_Type => Value);
++               when Op_Delete =>
++                  H := (The_Type => Empty);
++            end case;
++            if A_Header.To_Hash /= H then
++               raise State with "to hash doesn't match";
++            end if;
++         end;
++      end Check_Output_File_Hash;
++
++      procedure Cleanup is
++      begin
++         if Is_Open(To_F) then
++            Dirs.Delete_File(Name(To_F));
++         end if;
++      end Cleanup;
++
++   begin
++      Op := Operation(A_Header);
++
++      -- log
++      case Op is
++         when Op_Create => Put_Line("creating " & To_F_Name);
++         when Op_Delete => Put_Line("deleting " & To_F_Name);
++         when Op_Patch  => Put_Line("patching " & To_F_Name);
++      end case;
++
++      -- check the file system state
++      case Op is
++         when Op_Delete | Op_Patch =>
++            if not Dirs.Exists(To_F_Name) then
++               raise State with "attempt to "
++                 & Patch_Op'Image(Op)
++                 & " non existing file " & To_F_Name;
++            end if;
++         when Op_Create =>
++            if Dirs.Exists(To_F_Name) then
++               raise State with "attempt to create a file, but file already exists";
++            end if;
++      end case;
++
++      -- prepare keccak and open files
++      KeccakBegin(To_Ctx);
++      Create_Temp(To_F, Out_File, "tmp.XXX");
++      case Op is
++         when Op_Create =>
++            Has_Input_File := False;
++         when Op_Delete | Op_Patch =>
++            Has_Input_File := True;
++            KeccakBegin(In_Ctx);
++            Open(In_F, In_File, To_F_Name);
++      end case;
++
++  Hunk_Loop:
++      loop
++         Look_Ahead(C, EOL);
++         exit Hunk_Loop when EOL;
++         exit Hunk_Loop when C /= '@';
++         Get(A_Hunk);
++         From_Count := A_Hunk.From_File_Line_Numbers.Count;
++         To_Count := A_Hunk.To_File_Line_Numbers.Count;
++         -- Hunk is not at the beginning of the file, copy lines up to
++         --  start.
++         if Line < A_Hunk.From_File_Line_Numbers.Start then
++            if not Has_Input_File then
++               raise State with "hunk requires before context lines, "
++                 & "but there's no input file";
++            end if;
++            while Line < A_Hunk.From_File_Line_Numbers.Start loop
++               if End_Of_File(In_F) then
++                  raise State with "hunk requires before context lines, "
++                    & "but the file has ended";
++               end if;
++               declare
++                  In_Line: String := Get_Line(In_F);
++               begin
++                  Hash_Line(In_Ctx, In_Line);
++                  Hash_Line(To_Ctx, In_Line);
++                  Put_Line(To_F, In_Line);
++                  Line := Line + 1;
++               end;
++            end loop;
++         end if;
++     Hunk_Body_Loop:
++         loop
++            exit Hunk_Body_Loop when From_Count = 0 and To_Count = 0;
++            Look_Ahead(C, EOL);
++            if EOL then
++               raise Parse with "blank line in hunk";
++            end if;
++            case C is
++               when '+' => -- line added
++                  Get(C);
++                  case Op is
++                     when Op_Create | Op_Patch => null;
++                     when Op_Delete => raise State with "hunk trying to add lines, "
++                        & "but the operation is deletion";
++                  end case;
++                  if To_Count = 0 then
++                     raise State with "hunk trying to add lines, "
++                       & "but the line count is not valid";
++                  end if;
++                  declare
++                     Patch_Line: String := Get_Line;
++                  begin
++                     Put_Line(To_F, Patch_Line);
++                     Hash_Line(To_Ctx, Patch_Line);
++                  end;
++                  To_Count := To_Count - 1;
++               when '-' => -- line deleted
++                  Get(C);
++                  case Op is
++                     when Op_Delete | Op_Patch => null;
++                     when Op_Create => raise State;
++                  end case;
++                  if not Has_Input_File then
++                     raise State with "hunk trying to remove lines, "
++                       & "but the input file doesn't exist";
++                  end if;
++                  if From_Count = 0 then
++                     raise State with "hunk trying to remove lines, "
++                       & "when the input file already ended";
++                  end if;
++                  declare
++                     In_Line: String := Get_Line(In_F);
++                     Patch_Line: String := Get_Line;
++                  begin
++                     if In_Line /= Patch_Line then
++                        raise State with "lines don't match";
++                     end if;
++                     Hash_Line(In_Ctx, In_Line);
++                  end;
++                  Line := Line + 1;
++                  From_Count := From_Count - 1;
++               when ' ' => -- line stays the same
++                  Get(C);
++                  if not Has_Input_File then
++                     raise State with "hunk claims identical lines, "
++                       & "but the input file doesn't exist";
++                  end if;
++                  if End_Of_File(In_F) then
++                     raise State with "hunk claims identical lines, "
++                       & "but the input file has ended";
++                  end if;
++                  if From_Count = 0 then
++                     raise State with "hunk claims identical lines, "
++                       & "when input file already ended";
++                  end if;
++                  declare
++                     In_Line: String := Get_Line(In_F);
++                     Patch_Line: String := Get_Line;
++                  begin
++                     if In_Line /= Patch_Line then
++                        raise State with "lines don't match";
++                     end if;
++                     Put_Line(To_F, Patch_Line);
++                     Hash_Line(In_Ctx, In_Line);
++                     Hash_Line(To_Ctx, In_Line);
++                  end;
++                  Line := Line + 1;
++                  From_Count := From_Count - 1;
++                  To_Count := To_Count - 1;
++               when others =>
++                  raise Parse with "unexpected character "
++                    & Character'Image(C)
++                    & " at beginning of line in hunk body";
++            end case;
++         end loop Hunk_Body_Loop;
++      end loop Hunk_Loop;
++
++      Check_Input_File_Hash;
++      Check_Output_File_Hash;
++
++      declare
++         Tmp_Name: String := Name(To_F);
++      begin
++         Close(To_F);
++         if Has_Input_File then
++            Close(In_F);
++            Dirs.Delete_File(To_F_Name);
++         else
++            if not Dirs.Exists(Path_Prefix(To_F_Name, 1)) then
++               Dirs.Create_Path(Path_Prefix(To_F_Name, 1));
++            end if;
++         end if;
++         case Op is
++            when Op_Create | Op_Patch =>
++               Dirs.Rename(Tmp_Name, To_F_Name);
++            when Op_Delete =>
++               Dirs.Delete_File(Tmp_Name);
++         end case;
++      end;
++
++   exception
++      when E : State =>
++         -- we've encountered state issue,
++         --   check first that the input hash is valid
++         Cleanup;
++         Check_Input_File_Hash;
++         raise;
++
++      when E : others =>
++         Cleanup;
++         raise;
++   end Process_Hunks_For_Header;
++
++begin
++Read_Loop:
++    loop
++       declare
++          S: String := Get_Line;
++       begin
++          if Starts_With(S, "diff ") then
++             declare
++                H: Header := Get_Header;
++             begin
++                Process_Hunks_For_Header(H);
++                exit Read_Loop when End_Of_File;
++             end;
++          else
++             Put_Line("Prelude: " & S);
++          end if;
++       end;
++    end loop Read_Loop;
++end;
+diff -uNr a/vtools/vdiff.gpr b/vtools/vdiff.gpr
+--- a/vtools/vdiff.gpr 3f5d96a11d80d820a6a3774fbec02b7296177e5faceca8d60068d25fb6c99f44e2bd58786a2e8fe0e2e419d0dd6b55b8c747034ea1a434193361df4cc631cefe
++++ b/vtools/vdiff.gpr 413bbf2b593e671ca4b5c8de947df8e25b2ee5d1c09debfe9e09e3ede1d9c75cdc4e77260342f9e3352c2862f7e56d739e3f7fe5990febaa61180bc6daf51df9
+@@ -4,6 +4,7 @@
+   for Object_Dir use "obj";
+   for Exec_Dir use ".";
+   for Main use ("diff.c");
++  for Excluded_Source_Files use ("vpatch.adb");
+   package Builder is
+      for Executable ("diff.c") use "vdiff";
+   end Builder;
+diff -uNr a/vtools/vpatch.gpr b/vtools/vpatch.gpr
+--- a/vtools/vpatch.gpr false
++++ b/vtools/vpatch.gpr de955e3214af349f1ddb8c1e7e41295b24e5b3fed25fdaa545d4bb44f279bf67b0560b662b2bc40025c3518fdaf9d6bc6bc04fed7d4933feb5e4d62c574ae37b
+@@ -0,0 +1,7 @@
++project Vpatch is
++  for Languages use ("Ada");
++  for Source_Dirs use ("src");
++  for Object_Dir use "obj";
++  for Exec_Dir use ".";
++  for Main use ("vpatch.adb");
++end Vpatch;
