@@ -1,0 +1,2579 @@
+diff -uNr a/adalisp/README b/adalisp/README
+--- a/adalisp/README false
++++ b/adalisp/README 74c1e88d5af7eec476c54f9c879514c63ee0bff3b9354a36ab282dfc6cd010e0f8e9c89ff091732859cc18238f467efbe35959bf9a4445a422012536e899403f
+@@ -0,0 +1,33 @@
++README
++
++`adalisp` is an interpreter for a small Lisp-like scripting language
++that aims to a. fit in head, while b. being written in a small,
++restricted, safe subset of the `Ada` programming language. For more
++details, see:
++
++  http://thetarpit.org/posts/y04/074-adalisp-prototype.html
++
++---
++To INSTALL `adalisp`:
++
++  * Install an `Ada` distribution; `adalisp` was tested on GNAT GPL
++    2016.
++
++  * Use `V` to press:
++
++  mkdir ~/src/adalisp
++  cd ~/src/adalisp
++
++  mkdir .wot
++  cd .wot && wget http://lucian.mogosanu.ro/spyked.asc && cd ..
++
++  v.pl init http://lucian.mogosanu.ro/src/adalisp
++  v.pl press adalisp_genesis adalisp_genesis.vpatch
++
++---
++To BUILD and USE `adalisp`:
++
++  cd ~/src/adalisp/adalisp_genesis/adalisp
++  gprbuild
++
++  cat test.scm | ./bin/test_repl
+diff -uNr a/adalisp/bin/README b/adalisp/bin/README
+--- a/adalisp/bin/README false
++++ b/adalisp/bin/README 86525f2c7086039d79e5bf92869d02934a44716812433ca3a90e18a8d03745785c5ca54fe8c39e681b3b13c00c33a5128884a28c8cbaccbc65d0b401d901ec2e
+@@ -0,0 +1 @@
++Placeholder.
+diff -uNr a/adalisp/manifest b/adalisp/manifest
+--- a/adalisp/manifest false
++++ b/adalisp/manifest 7c90ed5668838eebb2f201ab981083b05af9a9e39946b11914b7cd81e66ce5dd8b2b11246e6fda73f9dfc96ca9645cee9f6b7d5ae5791320330c3501da302e7a
+@@ -0,0 +1 @@
++530176 adalisp_genesis spyked Lucian's first adalisp iteration
+diff -uNr a/adalisp/obj/README b/adalisp/obj/README
+--- a/adalisp/obj/README false
++++ b/adalisp/obj/README 86525f2c7086039d79e5bf92869d02934a44716812433ca3a90e18a8d03745785c5ca54fe8c39e681b3b13c00c33a5128884a28c8cbaccbc65d0b401d901ec2e
+@@ -0,0 +1 @@
++Placeholder.
+diff -uNr a/adalisp/src/evaler.adb b/adalisp/src/evaler.adb
+--- a/adalisp/src/evaler.adb false
++++ b/adalisp/src/evaler.adb 97b22557f90fe3bb7b5889a5976afee0788cc7063f955194bb78287d7c4a6924f99a400271a0db241da7d19c4f210af1afda511e533c4b9c20a956be87c9f6dd
+@@ -0,0 +1,1014 @@
++-- LispM evaluator implementation.
++
++with Ada.Text_IO; use Ada.Text_IO; -- for error reporting
++
++package body Evaler is
++   
++   -- An accumulator register for arithmetic/logic ops.
++   ALU_Acc : Long_Integer := 0;
++   
++   -- Apply arithmetic and logic function, i.e. +, -, * or /
++   procedure Apply_ALU_Func(Func : in ALUFunc;
++                            Args : in MemPtr;
++                            Env : in MemPtr; OutP : out MemPtr) is
++      P, CarP : MemPtr;
++   begin
++      -- General form: (f e1 e2 ...) where f is one of +, -, * or
++      --  /. Special cases:
++      --
++      -- - (+) --> 0
++      -- - (- x) --> -x
++      -- - (*) --> 1
++      -- - (/ x) --> 1/x (always 0 for Fixnums)
++      
++      -- Initialize loop variables and perform argument count checks
++      --  where needed.
++      P := Args;
++      case Func is
++         when ALU_Add =>
++            -- Identity element for +
++            ALU_Acc := 0;
++         when ALU_Sub =>
++            -- - needs at least one argument
++            pragma Assert(P /= 0, "- needs at least 1 argument");
++            CarP := Get_Car(AMem(P));
++            P := Get_Cdr(AMem(P));
++            
++            -- (- x) is arithmetic negation; (- x y ...) is equivalent
++            --  to x - y - ...
++            if (P = 0) then
++               ALU_Acc := -Get_Fixnum(AMem(CarP));
++            else
++               ALU_Acc := Get_Fixnum(AMem(CarP));
++            end if;
++         when ALU_Mul =>
++            -- Identity element for *
++            ALU_Acc := 1;
++         when ALU_Div =>
++            -- / needs at least 1 argument
++            pragma Assert(P /= 0, "/ needs at least 1 argument");
++            CarP := Get_Car(AMem(P));
++            P := Get_Cdr(AMem(P));
++            
++            -- (/ x) is 1 / x; (/ x y ...) is equivalent to x / y /
++            --  ... ; we don't support floats, so 1 / x should always
++            --  yield 0.
++            if (P = 0) then
++               ALU_Acc := 1 / Get_Fixnum(AMem(CarP));
++            else
++               ALU_Acc := Get_Fixnum(AMem(CarP));
++            end if;
++      end case;
++      
++      -- Loop through the arg list and accumulate.
++      while P /= 0 loop
++         -- Get car and accumulate it
++         CarP := Get_Car(AMem(P));
++         pragma Assert(AMem(CarP).T = Fixnum,
++                       "Expected a number.");
++         case Func is
++            when ALU_Add =>
++               ALU_Acc := ALU_Acc + Get_Fixnum(AMem(CarP));
++            when ALU_Sub =>
++               ALU_Acc := ALU_Acc - Get_Fixnum(AMem(CarP));
++            when ALU_Mul =>
++               ALU_Acc := ALU_Acc * Get_Fixnum(AMem(CarP));
++            when ALU_Div =>
++               pragma Assert(Get_Fixnum(AMem(CarP)) /= 0,
++                             "Division by zero!");
++               ALU_Acc := ALU_Acc / Get_Fixnum(AMem(CarP));
++         end case;
++         
++         -- Continue
++         P := Get_Cdr(AMem(P));
++      end loop;
++      -- Store value in a new cell and return it.
++      Alloc_Fixnum(ALU_Acc, OutP);
++   end Apply_ALU_Func;
++   
++   -- Apply unary predicate.
++   procedure Apply_UPred(Pred : in UPred;
++                         Args : in MemPtr;
++                         Env : in MemPtr;
++                         OutP : out MemPtr) is
++      P : MemPtr := Args;
++      ArgP : MemPtr;
++   begin
++      -- General form: (pred val) where pred is one of pair?, boolean?,
++      --  number?, symbol?, null? or list?. Read below for
++      --  particularities.
++      
++      -- Argument sanity checking
++      pragma Assert(P /= 0, "Function requires 1 argument.");
++      ArgP := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P = 0, "Function requires 1 argument.");
++      
++      -- What predicate op are we applying?
++      case Pred is
++         when UPred_Pair =>
++            -- (pair? '()) --> #f
++            -- (pair? anything-else) --> anything-else is a cons
++            if ArgP = 0 then
++               Alloc_Bool(False, OutP);
++            else
++               Alloc_Bool(AMem(ArgP).T = Cons, OutP);
++            end if;
++         when UPred_Bool =>
++            -- (boolean? '()) --> #f
++            -- (boolean? anything-else) --> anything-else is #t or #f
++            if ArgP = 0 then
++               Alloc_Bool(False, OutP);
++            else
++               Alloc_Bool(AMem(ArgP).T = Bool, OutP);
++            end if;
++         when UPred_Num =>
++            -- (number? '()) --> #f
++            -- (number? anything-else) --> anything-else is a fixnum
++            if ArgP = 0 then
++               Alloc_Bool(False, OutP);
++            else
++               Alloc_Bool(AMem(ArgP).T = Fixnum, OutP);
++            end if;
++         when UPred_Sym =>
++            -- (symbol? '()) --> #f
++            -- (symbol? 'anything-else) --> anything else is a symbol
++            if ArgP = 0 then
++               Alloc_Bool(False, OutP);
++            else
++               Alloc_Bool(AMem(ArgP).T = Symbol, OutP);
++            end if;
++         when UPred_Nil =>
++            -- (null? '()) --> #t
++            -- (null? anything-else) --> #f
++            Alloc_Bool(ArgP = 0, OutP);
++         when UPred_List =>
++            -- (list? x) --> x is a proper-list, i.e. NIL or a form
++            --  (cons e1 .. (cons en NIL))
++            
++            -- try walking through a list until NIL
++            loop
++               exit when ArgP = 0;
++               exit when AMem(ArgP).T /= Cons;
++               ArgP := Get_Cdr(AMem(ArgP));
++            end loop;
++            -- if a non-NIL is encountered anywhere in a cdr (or in the
++            --  main object), then not a list.
++            Alloc_Bool(ArgP = 0, OutP);
++      end case;
++   end Apply_UPred;
++   
++   -- Apply and/or special form.
++   procedure Apply_AndOr(Cond : in AndOr;
++                         Args : in MemPtr;
++                         Env : in MemPtr;
++                         OutP : out MemPtr) is
++      P, ArgP : MemPtr;
++      ReachedEnd : Boolean := False;      
++   begin
++      -- General form: (cond e1 e2 ...) where cond is one of and or
++      --  or. Particularities:
++      --
++      -- - and evaluates until the end or the first #f encountered
++      -- - or evaluates until the end or the first non-#f encountered
++      --
++      -- More details below.
++      
++      P := Args;
++      if P = 0 then
++         -- vacuous truth/falsity:
++         -- (and) --> #t
++         -- (or) --> #f
++         ReachedEnd := True;
++         Alloc_Bool(Cond = AndOr_And, ArgP);
++      end if;
++      loop
++         -- have we reached the end?
++         if P = 0 then
++            ReachedEnd := True;
++            exit;
++         end if;         
++         -- eval lazily:
++         -- - and stops at the first argument evaluated to #f
++         -- - or stops at the first argument evaluated to #t
++         ArgP := Get_Car(AMem(P));
++         Eval(ArgP, Env, ArgP);
++         
++         exit when Cond = AndOr_And and Boolean_Value(ArgP) = False;
++         exit when Cond = AndOr_Or and Boolean_Value(ArgP) = True;
++         
++         -- continue
++         P := Get_Cdr(AMem(P));
++      end loop;
++      
++      -- Returned value:
++      -- (and e1 e2 ...) returns #f or the last element
++      -- (or e1 e2 ...) returns #f or the first non-#f element
++      case Cond is
++         when AndOr_And =>
++            if ReachedEnd then
++               OutP := ArgP;
++            else
++               Alloc_Bool(False, OutP);
++            end if;
++         when AndOr_Or =>
++            if ReachedEnd then
++               Alloc_Bool(False, OutP);
++            else
++               OutP := ArgP;
++            end if;
++      end case;
++   end Apply_AndOr;
++   
++   -- Apply quote.
++   procedure Apply_QuoteB(Args : in MemPtr; OutP : out MemPtr) is
++   begin
++      -- General form:
++      --
++      -- (quote '()) --> ()
++      -- (quote expr) --> expr
++      
++      OutP := (if Args = 0 then 0 else Get_Car(AMem(Args)));
++   end Apply_QuoteB;
++   
++   -- Apply eval.
++   procedure Apply_EvalB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      Arg : MemPtr;
++   begin
++      -- General form: (eval expr env), where expr is any S-expression
++      --  and env is an optional environment (currently unimplemented).
++      
++      -- XXX: Need to do eval environments.
++      pragma Assert(Args /= 0, "Eval needs at least 1 argument.");
++      Arg := Get_Car(AMem(Args));
++      -- Just call eval on arg
++      Eval(Arg, Env, OutP);
++   end Apply_EvalB;
++   
++   -- Apply if.
++   procedure Apply_IfB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      PredP : MemPtr;
++      PredVal : Boolean;
++   begin
++      -- General form: (if pred a b) where pred, a and b are optional
++      --  S-expressions. The evaluation rules are:
++      --
++      -- - (if) --> ()
++      -- - (if pred) --> pred is evaluated and () is returned
++      -- - (if pred a) --> pred is evaluated
++      --   . if pred evals to #t, then a is evaluated and returned
++      --   . otherwise, () is returned
++      -- - (if pred a b) --> pred is evaluated
++      --   . if pred evals to #t, then a is evaluated and returned
++      --   . otherwise, b is evaluated and returned
++      
++      -- no args: (if) --> ()
++      if P = 0 then
++         OutP := 0;
++         return;
++      end if;
++      
++      -- get predicate, evaluate it and determine its boolean value
++      --  (implicitly true for non-booleans)
++      PredP := Get_Car(AMem(P));
++      Eval(PredP, Env, PredP);
++      PredVal := Boolean_Value(PredP);
++      
++      -- look for branches: P points to () or (a) or (a b)
++      P := Get_Cdr(AMem(P));
++      
++      -- select branch: if pred evaluated to #f and the user specified
++      --  (at least) the #t branch, then we cdr to the #f branch;
++      --  otherwise, if no branches are specified, we return.
++      if not PredVal and P /= 0 then
++         P := Get_Cdr(AMem(P));
++      elsif P = 0 then
++         OutP := 0;
++         return;
++      end if;
++      -- evaluate taken branch
++      P := Get_Car(AMem(P));
++      Eval(P, Env, OutP);
++   end Apply_IfB;
++   
++   -- Apply cons.
++   procedure Apply_ConsB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      CarP, CdrP : MemPtr;
++   begin
++      -- General form: (cons a b) where a and b are S-expressions.
++      
++      pragma Assert(P /= 0, "Cons needs exactly 2 arguments.");
++      -- get car
++      CarP := Get_Car(AMem(P));
++      -- get cdr
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P /= 0, "Cons needs exactly 2 arguments.");
++      CdrP := Get_Car(AMem(P));
++      
++      -- Rest of P needs to be nil now.
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P = 0, "Cons needs exactly 2 arguments.");
++      
++      -- Cons the two
++      Alloc_Cons(CarP, CdrP, OutP);
++   end Apply_ConsB;
++   
++   -- Apply car.
++   procedure Apply_CarB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      ConsP : MemPtr;
++   begin
++      -- General form: (car x) where x is a cons.
++      
++      pragma Assert(P /= 0, "car needs exactly 1 argument.");
++      -- Get x
++      ConsP := Get_Car(AMem(P));
++      pragma Assert (AMem(ConsP).T = Cons, "Expected pair.");
++      OutP := Get_Car(AMem(ConsP));
++      
++      -- Rest of P needs to be nil
++      P := Get_Cdr(AMem(P));
++      pragma Assert (P = 0, "car needs exactly 1 argument.");
++   end Apply_CarB;
++   
++   -- Apply cdr.
++   procedure Apply_CdrB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      ConsP : MemPtr;
++   begin
++      -- General form: (cdr x) where x is a cons.
++      
++      pragma Assert(P /= 0, "cdr needs exactly 1 argument.");
++      -- Get x
++      ConsP := Get_Car(AMem(P));
++      pragma Assert (AMem(ConsP).T = Cons, "Expected pair.");
++      OutP := Get_Cdr(AMem(ConsP));
++      
++      -- Rest of P needs to be nil
++      P := Get_Cdr(AMem(P));
++      pragma Assert (P = 0, "cdr needs exactly 1 argument.");
++   end Apply_CdrB;
++   
++   -- Apply list.
++   procedure Apply_ListB(Args, Env : in MemPtr; OutP : out MemPtr) is
++   begin
++      -- General form: (list e1 e2 ...) where e1 e2 ... are optional
++      --  S-expressions.
++      
++      -- Applicative order evaluation is done by Apply_Func, so we just
++      --  propagate the arguments.
++      OutP := Args;
++   end Apply_ListB;
++   
++   -- Apply apply.
++   procedure Apply_ApplyB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      OpP, ArgsP, LastArgP : MemPtr;
++   begin
++      -- General form: (apply f a1 a2 ... args) where f is a function,
++      --  a1 a2 ... are S-expressions and args is a list.
++      --
++      --  The result is the same as applying f with (append (list a1 a2
++      --  ...) args) as arguments.
++      
++      pragma Assert(P /= 0, "apply needs at least 1 argument.");
++      
++      -- get op
++      OpP := Get_Car(AMem(P));
++      
++      -- get args: this section is roughly equivalent to list* (or
++      --  cons*), i.e. (list* a1 a2 a3 ... args) --> (a1 a2 a3
++      --  ... . args), i.e. we stick args in the butt of (a1 a2 a3 ...).
++      P := Get_Cdr(AMem(P));
++      -- first, we check if we have any args at all
++      if P = 0 then goto DoApply; end if;
++      -- if so, we do a shallow (reversed) copy of the list, accumulated
++      --  in ArgsP; we put the car (the "args" above) in LastArgP and we
++      --  keep the cdr in ArgsP.
++      ArgsP := 0;
++      while P /= 0 loop
++         exit when AMem(P).T /= Cons;
++         Alloc_Cons(Get_Car(AMem(P)), ArgsP, ArgsP);
++         P := Get_Cdr(AMem(P));
++      end loop;
++      -- ArgsP has at least one element now!
++      LastArgP := Get_Car(AMem(ArgsP));
++      ArgsP := Get_Cdr(AMem(ArgsP));
++      -- now put this in the proper form
++      Rev_In_Place(ArgsP, LastArgP, P);
++            
++  <<DoApply>>
++      -- Do the actual application
++      Apply_Func(OpP, P, Env, True, OutP);
++   end Apply_ApplyB;
++   
++   -- Apply define.
++   procedure Apply_DefineB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      SymP, ValP : MemPtr;
++   begin
++      -- General form: (define sym val) where sym is a symbol and val is
++      --  an optional S-expression.
++      --
++      -- XXX we need to split this into two types of defines:
++      --  symbol-defines (such as the one described here) and
++      --  lambda-defines, e.g. (define (func arg1 ...) val).
++      
++      -- get sym
++      SymP := Get_Car(AMem(P));
++      pragma Assert (SymP /= 0, "Define: expected symbol for arg 1!");
++      pragma Assert (AMem(SymP).T = Symbol,
++                     "Define: expected symbol for arg 1!");
++      
++      -- get val: (define sym) binds sym to NIL.
++      P := Get_Cdr(AMem(P));
++      ValP := (if P = 0 then 0 else Get_Car(AMem(P)));
++      
++      -- evaluate val
++      Eval(ValP, Env, ValP);
++      -- make (top-level!) binding
++      Bind_Env(SymP, ValP, Global_Env, P);
++      -- return symbol name
++      OutP := Get_Car(AMem(P));
++   end Apply_DefineB;
++
++   -- Apply set.
++   procedure Apply_SetB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      SymP, ValP : MemPtr;
++      BindingP : MemPtr;
++   begin
++      -- General form: (set! sym val) where sym is a bound symbol and
++      --  val is an optional S-expression. set! returns the evaluated
++      --  val.
++      
++      pragma Assert(P /= 0, "set! requires at least 1 argument.");
++      -- get sym
++      SymP := Get_Car(AMem(P));
++      -- and look it up in the scoped Envs
++      Lookup_Env_Or_Global(SymP, Env, BindingP);
++      -- binding must exist
++      pragma Assert(BindingP /= 0, "set! got an unbound variable.");
++      
++      -- get value
++      P := Get_Cdr(AMem(P));
++      ValP := (if P = 0 then 0 else Get_Car(AMem(P)));
++      -- eval it
++      Eval(ValP, Env, ValP);
++      -- and modify the binding
++      Set_Cdr(AMem(BindingP), ValP);
++      -- return the value
++      OutP := ValP;
++   end Apply_SetB;
++   
++   -- Apply numeric equality.
++   procedure Apply_EqnB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      Fst, Other : MemPtr;
++      Result : MemPtr;
++   begin
++      -- General form: (= n1 n2 ...) where n1, n2, ... are numbers. =
++      --  expects at least two numbers as parameters.
++      
++      pragma Assert(P /= 0, "= requires at least 2 arguments");
++      -- get first number
++      Fst := Get_Car(AMem(P));
++      pragma Assert(AMem(Fst).T = Fixnum, "Expected numeric arguments.");
++      -- move on to rest
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P /= 0, "= requires at least 2 arguments");
++      
++      -- allocate result: assume all numbers are equal until found
++      --  otherwise.
++      Alloc_Bool(True, Result);
++      -- loop through the other numbers
++      while P /= 0 loop
++         -- get other
++         Other := Get_Car(AMem(P));
++         pragma Assert(AMem(Other).T = Fixnum, "Expected numeric arguments.");
++         -- check equality: we assume two's complement representation
++         if AMem(Fst).Data /= AMem(Other).Data then
++            Set_Bool(AMem(Result), False);
++         end if;
++         -- move on to next element of the arg list
++         P := Get_Cdr(AMem(P));
++      end loop;
++      -- store result
++      OutP := Result;
++   end Apply_EqnB;
++   
++   -- Apply pointer equality.
++   procedure Apply_EqB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      P1, P2 : MemPtr;
++   begin
++      -- General form: (eq? x y) where x and y are S-expressions.
++      
++      -- get x
++      pragma Assert(P /= 0, "eq? requires 2 arguments.");
++      P1 := Get_Car(AMem(P));      
++      P := Get_Cdr(AMem(P));
++      
++      -- get y
++      pragma Assert(P /= 0, "eq? requires 2 arguments.");
++      P2 := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P = 0, "eq? requires 2 arguments.");
++      
++      -- compare x and y. XXX this is a hack, but eq? guarantees that
++      --  matching boolean values match, e.g. (eq? #f #f) --> #t. As an
++      --  alternative, we could reserve two special cells for #f and #t,
++      --  or give up the schemism altogether and use nil and everything
++      --  else as booleans.
++      --
++      -- (eq? '() '()) --> #t
++      -- (eq? 1 1) --> may be #f if the two instances of 1 have
++      --  different memory locations.
++      if P1 /= 0 and P2 /= 0 then
++         if AMem(P1).T = Bool and AMem(P2).T = Bool then
++            Alloc_Bool(AMem(P1).Data = AMem(P2).Data, OutP);
++         else
++            Alloc_Bool(P1 = P2, OutP);
++         end if;
++      else
++         Alloc_Bool(P1 = P2, OutP);
++      end if;
++   end Apply_EqB;
++   
++   -- Apply value-wise equality.
++   procedure Apply_EqvB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      Val1, Val2 : MemPtr;
++      Result : Boolean;
++   begin
++      -- General form: (eqv? x y) where x and y are
++      --  S-expressions. Unlike eq?, eqv? compares the data found in the
++      --  cells pointed to by x and y, with the exception of NIL
++      --  pointers, which are compared pointer-wise.
++      
++      -- get x
++      pragma Assert(P /= 0, "eqv? requires 2 arguments.");
++      Val1 := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      
++      -- get y
++      pragma Assert(P /= 0, "eqv? requires 2 arguments.");
++      Val2 := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      pragma Assert(P = 0, "eqv? requires 2 arguments.");
++      
++      -- (eqv? '() y) --> (null? y)
++      -- (eqv? x y) (where x is non-NIL) --> values are equal, e.g.
++      -- - (eqv? 1 1) --> #t
++      -- - (eqv? '(1) '(1)) --> #f (comparison between values of cons cells)
++      if Val1 = 0 then
++         Result := Val2 = 0;
++      else
++         Result := AMem(Val1).Data = AMem(Val2).Data;
++      end if;
++      -- set result
++      Alloc_Bool(Result, OutP);
++   end Apply_EqvB;
++   
++   -- Apply not.
++   procedure Apply_NotB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      Val : MemPtr;
++   begin
++      -- General form: (not x) where x is a S-expression. not is
++      --  evaluated using the following rules:
++      -- - (not #f) --> #t
++      -- - (not x) (x /= #f) --> #f
++      
++      -- get argument
++      pragma Assert (P /= 0, "not requires 1 argument.");
++      Val := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      pragma Assert (P = 0, "not requires 1 argument.");
++      
++      -- perform logic negation on boolean value.
++      Alloc_Bool(not Boolean_Value(Val), OutP);
++   end Apply_NotB;
++   
++   -- Apply lambda.
++   procedure Apply_LambdaB(Args, Env : in MemPtr; OutP : out MemPtr) is
++   begin
++      -- General form: (lambda args e1 e2 ...) where args is a list of
++      --  formal arguments (symbols) and e1 e2 ... are optional
++      --  S-expressions that may contain references to the formal
++      --  arguments; i.e., e1 e2 ... forms a lexical scope where the
++      --  formal arguments are bound.
++      --
++      -- See Alloc_Closure for more details.
++      Alloc_Closure(Args, Env, OutP);
++   end Apply_LambdaB;
++   
++   -- Apply let.
++   procedure Apply_LetB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      BndsP, CodeP : MemPtr;
++      ArgsP, ValuesP, ClosureP : MemPtr;
++   begin
++      -- General form: (let bnds . code) where bnds is a list (bnd1 bnd2
++      --  ...) and code is a list (e1 e2 ...). More precisely:
++      --
++      -- - bndi is a list of the form (si vi) where si is a symbol and
++      --  vi is a mandatory S-expression.
++      -- - ek is an optional S-expression that may contain references to
++      --  si.
++      --
++      -- Lets do the following: 1. every vi is evaluated; 2. every
++      --  evaluated vi is used as a lexical binding for the
++      --  corresponding si; and 3. in the newly-created lexical scope,
++      --  ek are evaluated in the order they appear in code.
++      --
++      -- More generally, any expression of the form:
++      --
++      -- (let ((s1 v1) (s2 v2) ... (sn vn)) e1 e2 ... em)
++      --
++      -- is equivalent to:
++      --
++      -- ((lambda (s1 s2 ... sn) e1 e2 ... em) v1 v2 ... vn).
++      --
++      -- Thus this implementation: 1. collects the formal arguments
++      --  (names) in ArgsP and the effective arguments (values) in
++      --  ValuesP; 2. collects the code in CodeP; 3. creates a closure
++      --  ClosureP from the list (ArgsP . CodeP); 4. applies ClosureP on
++      --  ValuesP.
++      
++      -- (let) --> ()
++      if Args = 0 then
++         -- nothing to do here
++         OutP := 0;
++         return;
++      end if;
++   
++      -- get bindings and code; initialize arglist and valuelist
++      BndsP := Get_Car(AMem(Args));
++      CodeP := Get_Cdr(AMem(Args));
++      ArgsP := 0; ValuesP := 0;
++      
++      -- collect formal args and effective values
++      while BndsP /= 0 loop
++         declare
++            BndP : MemPtr := Get_Car(AMem(BndsP));
++            SymP, ValP : MemPtr;
++         begin
++            pragma Assert(BndP /= 0, "Bad syntax of let spec.");
++            pragma Assert(AMem(BndP).T = Cons, "Bad syntax of let spec.");
++            
++            -- get symbol and advance in BndP
++            SymP := Get_Car(AMem(BndP));
++            ValP := Get_Cdr(AMem(BndP));
++            -- XXX: this is the stricter version
++            pragma Assert (ValP /= 0, "Bad syntax of binding in let.");
++            -- get val and evaluate it
++            ValP := Get_Car(AMem(ValP));
++            Eval(ValP, Env, ValP);
++            -- add symbol to ArgsP, value to ValuesP
++            Alloc_Cons(SymP, ArgsP, ArgsP);
++            Alloc_Cons(ValP, ValuesP, ValuesP);
++            -- continue
++            BndsP := Get_Cdr(AMem(BndsP));
++         end;
++      end loop;
++      
++      -- cons args to code
++      Alloc_Cons(ArgsP, CodeP, CodeP);
++      -- make closure
++      Apply_LambdaB(CodeP, Env, ClosureP);
++      -- apply closure
++      Apply_Closure(ClosureP, ValuesP, Env, OutP);
++   end Apply_LetB;
++   
++   -- Apply reverse.
++   procedure Apply_ReverseB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := Args;
++      List : MemPtr;
++   begin
++      -- General form: (reverse x) where x is a list.
++      
++      -- get x
++      pragma Assert (P /= 0, "reverse requires 1 argument.");
++      List := Get_Car(AMem(P));
++      P := Get_Cdr(AMem(P));
++      pragma Assert (P = 0, "reverse requires 1 argument.");
++      
++      -- reverse x
++      Rev_Append(0, List, OutP);
++   end Apply_ReverseB;
++   
++   -- Apply append.
++   procedure Apply_AppendB(Args, Env : in MemPtr; OutP : out MemPtr) is
++      Lists : MemPtr := Args;
++      Acc : MemPtr := 0;
++   begin
++      -- General form: (append x1 x2 ...) where x1 x2 ... are lists. In
++      --  particular, the last xi may be any object, in which case the
++      --  result of append is not a proper list, e.g.
++      --
++      -- - (append '(x) '(y)) --> (x y)
++      -- - (append '(x y) 'z) --> (x y . z)
++      
++      -- (append) --> ()
++      if Lists = 0 then
++         OutP := 0;
++         return;
++      end if;
++      
++      -- accumulate in acc; stop when Lists has one element, so that we
++      --  don't lose the reference to the last element.
++      while Get_Cdr(AMem(Lists)) /= 0 loop
++         -- prepend in reverse to Acc
++         Rev_Append(Acc, Get_Car(AMem(Lists)), Acc);
++         -- continue
++         Lists := Get_Cdr(AMem(Lists));
++      end loop;
++      
++      -- reverse Acc in place, adding the last element in Lists to the
++      --  tail.
++      Rev_In_Place(Acc, Get_Car(AMem(Lists)), Acc);
++      OutP := Acc;
++   end Apply_AppendB;
++   
++   -- Apply closure.
++   procedure Apply_Closure(Op, Args, Env : in MemPtr; OutP : out MemPtr) is
++      EArgs : MemPtr := Args;
++      CArgs, CCode, CEnv : MemPtr;
++   begin
++      -- General form: (f a1 a2 ... an) where:
++      --
++      -- - f is a closure object, comprising an environment env (a list
++      --  of bindings) and a code; the code is itself made of a list of
++      --  formal parameters and a code body;
++      -- - a1, a2 ... an, are arguments, i.e. effective parameters, to
++      --  f, such that n is equal to the length of the list of formal
++      --  parameters.
++      --
++      -- The application of f on the arguments is performed by binding
++      --  each formal parameter to each corresponding argument, adding
++      --  them to env and evaluating each expression in the code body in
++      --  the (lexical) context of env.
++      
++      -- Initialize CArgs, CCode, CEnv.
++      CEnv := Get_Closure_Env(AMem(Op));
++      CCode := Get_Closure_Code(AMem(Op));
++      -- Do we have an arglist and code?
++      if CCode = 0 then
++         CArgs := 0;
++      else
++         CArgs := Get_Car(AMem(CCode));
++         CCode := Get_Cdr(AMem(CCode));
++      end if;
++      
++      -- ((lambda () ...) ...)
++      if CArgs = 0 then goto DoEval; end if;
++      
++      -- CArgs can be a:
++      -- - symbol, e.g. ((lambda x (cdr x)) 1 2) --> (2)
++      -- - list, e.g. ((lambda (x y) (+ x y)) 1 2) --> 3
++      if AMem(CArgs).T = Symbol then
++         -- extend env with a binding to effective arglist
++         Alloc_Cons(CArgs, EArgs, CArgs);
++         Alloc_Cons(CArgs, CEnv, CEnv);
++      elsif AMem(CArgs).T = Cons then
++         -- for each argument in CArgs corresponding to an actual value
++         --  in EArgs, add a binding in CEnv.
++         while CArgs /= 0 loop
++            declare
++               ArgP, ValP, BindingP : MemPtr;
++            begin
++               -- assert: (= (length CArgs) (length EArgs))
++               pragma Assert(EArgs /= 0,
++                             "Not enough arguments.");
++               -- (cons (car CArgs) (car EArgs))
++               ArgP := Get_Car(AMem(CArgs));
++               ValP := Get_Car(AMem(EArgs));
++               -- add binding to env, ignore non-symbols
++               if ArgP /= 0 then
++                  if AMem(ArgP).T = Symbol then
++                     Alloc_Cons(ArgP, ValP, BindingP);
++                     Alloc_Cons(BindingP, CEnv, CEnv);
++                  end if;
++               end if;
++               -- continue with next argument
++               CArgs := Get_Cdr(AMem(CArgs));
++               EArgs := Get_Cdr(AMem(EArgs));
++            end;
++         end loop;
++      else
++         pragma Assert(False, "Expected symbol or cons.");
++      end if;
++      
++  <<DoEval>>
++      -- eval all coads
++      while CCode /= 0 loop
++         declare
++            E : MemPtr;
++         begin
++            -- get current coad
++            E := Get_Car(AMem(CCode));
++            -- eval it, put result in OutP
++            Eval(E, CEnv, OutP);
++            -- continue
++            CCode := Get_Cdr(AMem(CCode));
++         end;
++      end loop;
++   end Apply_Closure;
++
++   -- Apply a function on argument list.
++   procedure Apply_Func(Op, Args, Env : in MemPtr;
++                        Meta : in Boolean;
++                        OutP : out MemPtr) is
++      
++      -- XXX: This should actually delimit between built-in functions
++      --  and keywords; other functions (e.g. apply) may need to use
++      --  this to provide relevant errors.
++      Applicative_OrderP : constant array(BuiltinID) of Boolean :=
++        (QuoteB | IfB | DefineB | SetB | AndB | OrB | LambdaB |
++           LetB => False,
++         others => True);
++      
++      BID : BuiltinID;
++      EvaledArgs : MemPtr;
++   begin
++      pragma Assert(Op /= 0, "NIL op!");
++      
++      -- Is Op a builtin?
++      if AMem(Op).T = Builtin then
++         BID := Get_Builtin(AMem(Op));
++         
++         -- We want to evaluate the arguments before applying the
++         --  function if:
++         --  . the function permits it, or
++         --  . Apply_Func was not called by apply (who already evals)
++         if Applicative_OrderP(BID) and (not Meta) then
++            Eval_List(Args, Env, EvaledArgs);
++         else
++            EvaledArgs := Args;
++         end if;
++         -- What builtin Op do we evaluate?
++         case BID is
++            when AddB => Apply_ALU_Func(ALU_Add, EvaledArgs, Env, OutP);
++            when SubB => Apply_ALU_Func(ALU_Sub, EvaledArgs, Env, OutP);
++            when MulB => Apply_ALU_Func(ALU_Mul, EvaledArgs, Env, OutP);
++            when DivB => Apply_ALU_Func(ALU_Div, EvaledArgs, Env, OutP);
++            when QuoteB => Apply_QuoteB(EvaledArgs, OutP);
++            when EvalB => Apply_EvalB(EvaledArgs, Env, OutP);
++            when IfB => Apply_IfB(EvaledArgs, Env, OutP);
++            when ConsB => Apply_ConsB(EvaledArgs, Env, OutP);
++            when CarB => Apply_CarB(EvaledArgs, Env, OutP);
++            when CdrB => Apply_CdrB(EvaledArgs, Env, OutP);
++            when ListB => Apply_ListB(EvaledArgs, Env, OutP);
++            when ApplyB => Apply_ApplyB(EvaledArgs, Env, OutP);
++            when DefineB => Apply_DefineB(EvaledArgs, Env, OutP);
++            when SetB => Apply_SetB(EvaledArgs, Env, OutP);
++            when EqnB => Apply_EqnB(EvaledArgs, Env, OutP);
++            when EqB => Apply_EqB(EvaledArgs, Env, OutP);
++            when EqvB => Apply_EqvB(EvaledArgs, Env, OutP);
++            when PairPB => Apply_UPred(UPred_Pair, EvaledArgs, Env, OutP);
++            when BooleanPB => Apply_UPred(UPred_Bool, EvaledArgs, Env, OutP);
++            when NumberPB => Apply_UPred(UPred_Num, EvaledArgs, Env, OutP);
++            when SymbolPB => Apply_UPred(UPred_Sym, EvaledArgs, Env, OutP);
++            when NullPB => Apply_UPred(UPred_Nil, EvaledArgs, Env, OutP);
++            when ListPB => Apply_UPred(UPred_List, EvaledArgs, Env, OutP);
++            when AndB => Apply_AndOr(AndOr_And, EvaledArgs, Env, OutP);
++            when OrB => Apply_AndOr(AndOr_Or, EvaledArgs, Env, OutP);
++            when NotB => Apply_NotB(EvaledArgs, Env, OutP);
++            when LambdaB => Apply_LambdaB(Args, Env, OutP);
++            when LetB => Apply_LetB(Args, Env, OutP);
++            when ReverseB => Apply_ReverseB(EvaledArgs, Env, OutP);
++            when AppendB => Apply_AppendB(EvaledArgs, Env, OutP);
++         end case;
++      elsif AMem(Op).T = Closure then
++         -- We evaluate the argument list only if this is not a
++         --  meta-application (e.g. called by apply).
++         if not Meta then
++            Eval_List(Args, Env, EvaledArgs);
++         else
++            EvaledArgs := Args;
++         end if;
++         -- Apply closure.
++         Apply_Closure(Op, EvaledArgs, Env, OutP);
++      else
++         OutP := 0;
++         pragma Assert(False, "Trying to apply a non-function.");
++      end if;
++   end Apply_Func;
++   
++   -- Evaluate a list element by element.
++   procedure Eval_List(List, Env : in MemPtr; OutP : out MemPtr) is
++      LP : MemPtr := List;
++      Result : MemPtr := 0;
++      Default : MemPtr := 0;
++   begin
++      -- eval elements one by one
++      while LP /= 0 loop
++         declare
++            TempP : MemPtr;
++         begin
++            -- degenerate case: cdr is neither list nor nil
++            exit when AMem(LP).T /= Cons;
++            -- eval current element in LP
++            Eval(Get_Car(AMem(LP)), Env, TempP);
++            -- cons result to Result
++            Alloc_Cons(TempP, Result, Result);
++            -- advance in LP
++            LP := Get_Cdr(AMem(LP));
++         end;
++      end loop;
++      
++      -- also eval in the degenerate case
++      if LP /= 0 then
++         if AMem(LP).T /= Cons then
++            Eval(LP, Env, Default);
++         end if;
++      end if;
++
++      -- result is the reverse-in-place of our computation
++      Rev_In_Place(Result, Default, OutP);
++   end Eval_List;
++
++   -- Evaluate a given S-expression
++   procedure Eval(InP, Env : in MemPtr; OutP : out MemPtr) is
++      TempP, OpP, ArgsP : MemPtr;
++   begin
++      -- NIL.
++      if (InP = 0) then
++         OutP := 0;
++         return;
++      end if;
++      
++      -- Non-NIL data.
++      case AMem(InP).T is
++         when Free => -- this is illegal
++            pragma Assert(False, "Trying to eval free cell!");
++         when Cons =>
++            -- Eval car to get Op
++            TempP := Get_Car(AMem(InP));
++            Eval(TempP, Env, OpP);
++            -- Get arglist
++            ArgsP := Get_Cdr(AMem(InP));
++            -- Apply op on arglist
++            Apply_Func(OpP, ArgsP, Env, False, OutP);
++         when Bool | Fixnum | Char | Builtin | Closure  =>
++            -- Constants are returned as they are.
++            OutP := InP;
++         when Symbol =>
++            -- Lookup symbol value in Env.
++            Lookup_Env_Or_Global(InP, Env, TempP);
++            -- If found return it, otherwise report error.
++            if TempP = 0 then
++               Put("Not found: "); Dump_Cell(InP);
++               pragma Assert(False, "No binding for symbol.");
++            end if;
++            OutP := Get_Cdr(AMem(TempP));
++      end case;
++   end Eval;
++   
++   -- Prepend the elements of B to A, in reverse.
++   procedure Rev_Append(A, B : in MemPtr; OutP : out MemPtr) is
++      Acc : MemPtr := A;
++      P : MemPtr := B;
++   begin
++      while P /= 0 loop
++         exit when AMem(P).T /= Cons;
++         Alloc_Cons(Get_Car(AMem(P)), Acc, Acc);
++         P := Get_Cdr(AMem(P));
++      end loop;
++      
++      pragma Assert (P = 0, "Non-list argument to append");
++      
++      OutP := Acc;
++   end Rev_Append;
++   
++   procedure Rev_In_Place(List, Default : in MemPtr; OutP : out MemPtr) is
++      P : MemPtr := List;
++      Result : MemPtr := Default;
++      Temp : MemPtr;
++   begin
++      while P /= 0 loop
++         Temp := Get_Cdr(AMem(P)); -- save cdr
++         Set_Cdr(AMem(P), Result); -- put partial result in tail
++         Result := P; -- update result
++         P := Temp; -- get cdr
++      end loop;
++      
++      OutP := Result;
++   end Rev_In_Place;
++   
++   -- Return the actual boolean associated with a Lisp value.
++   function Boolean_Value(P : MemPtr) return Boolean is
++   begin
++      -- Non-boolean values (including NIL) default to True. Boolean
++      --  values get the value of Get_Bool;         
++      if P = 0 then
++         return True;
++      elsif AMem(P).T = Bool then
++         return Get_Bool(AMem(P));
++      else
++         return True;
++      end if;
++   end Boolean_Value;
++end Evaler;
+diff -uNr a/adalisp/src/evaler.ads b/adalisp/src/evaler.ads
+--- a/adalisp/src/evaler.ads false
++++ b/adalisp/src/evaler.ads 546d8d1ac8f29f4cef32dfda953790663ce53016c8f63024be2802cf0c60d0c9d899896abea4896df637ad2fc11610f54cd7b1c89ca32e1195094416f41a5dc8
+@@ -0,0 +1,83 @@
++-- Basic LispM evaluator, based on the following rules:
++--
++-- - LispM constants, i.e. booleans, numbers, characters, builtins and
++--  closures are returned as they are.
++--
++-- - Symbols have their values looked up in the current (lexical) Env
++--  or, if not found, in the (dynamic) Global_Env; the first value found
++--  is returned; if no bindings are found, an error message is returned.
++--
++-- - Cons objects are interpreted as function applications, i.e. for any
++--  list L, car(L) is evaluated and applied upon cdr(L); if car(L) is
++--  not a closure or a builtin, then an error message is returned.
++--
++-- A large subset of this module is dedicated to the implementation of
++--  builtin functions and keywords. An explicit distinction between
++--  keywords and functions is not made at this point, i.e. the
++--  distinction is implicit in e.g. the way arguments are evaluated.
++
++with LispM; use LispM;
++
++package Evaler is
++   
++   -- Arithmetic and logic functions
++   type ALUFunc is (ALU_Add, ALU_Sub, ALU_Mul, ALU_Div);
++   -- Unary predicates
++   type UPred is (UPred_Pair, UPred_Bool, UPred_Num, UPred_Sym,
++                  UPred_Nil, UPred_List);
++   -- And/or conditional forms
++   type AndOr is (AndOr_And, AndOr_Or);
++   
++   -- Application routines for builtin functions. These should be
++   --  self-explanatory.
++   procedure Apply_ALU_Func(Func : in ALUFunc;
++                            Args : in MemPtr;
++                            Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_UPred(Pred : in UPred;
++                         Args : in MemPtr;
++                         Env : in MemPtr;
++                         OutP : out MemPtr);
++   procedure Apply_AndOr(Cond : in AndOr;
++                         Args : in MemPtr;
++                         Env : in MemPtr;
++                         OutP : out MemPtr);
++
++   procedure Apply_QuoteB(Args : in MemPtr; OutP : out MemPtr);
++   procedure Apply_EvalB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_IfB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_ConsB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_CarB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_CdrB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_ListB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_ApplyB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_DefineB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_SetB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_EqnB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_EqB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_EqvB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_NotB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_LambdaB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_LetB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_ReverseB(Args, Env : in MemPtr; OutP : out MemPtr);
++   procedure Apply_AppendB(Args, Env : in MemPtr; OutP : out MemPtr);
++   
++   -- Application routine for closures
++   procedure Apply_Closure(Op, Args, Env : in MemPtr; OutP : out MemPtr);
++   
++   -- Apply function with name identified by Op, on Args.
++   procedure Apply_Func(Op, Args, Env : in MemPtr;
++                        Meta : in Boolean;
++                        OutP : out MemPtr);
++   
++   -- Evaluate a list element by element.
++   procedure Eval_List(List, Env : in MemPtr; OutP : out MemPtr);
++   
++   -- Eval S-expression
++   procedure Eval(InP, Env : in MemPtr; OutP : out MemPtr);
++   
++   -- Other usefuls: reverse append, reverse in place, boolean
++   --  value. XXX: move these somewhere else.
++   procedure Rev_Append(A, B : in MemPtr; OutP : out MemPtr);   
++   procedure Rev_In_Place(List, Default : in MemPtr; OutP : out MemPtr);
++   function Boolean_Value(P : MemPtr) return Boolean;
++end Evaler;
+diff -uNr a/adalisp/src/lispm.adb b/adalisp/src/lispm.adb
+--- a/adalisp/src/lispm.adb false
++++ b/adalisp/src/lispm.adb cb79fb7b406a1d59ab393e1ade0ccfb11deebef1398f69e3bf73b675616339f018df6ec769c54f2c922f4ee2dac0c0ff60f571a9793bd0ebbc8ae1be348c0feb
+@@ -0,0 +1,696 @@
++-- Lisp machine, procedures for memory manipulation (at least for the
++--  time being).
++with Ada.Text_IO;
++
++package body LispM is
++   
++   -- The initial environment requires a set of symbols and their
++   --  bindings to builtin functions/keywords. Thus we hold these into a
++   --  statically-allocated table and we let the Lisp run-time copy them
++   --  in AMem at the beginning of the world.
++   
++   -- Constant symbol name size: 10 characters should be enough for
++   --  everyone.
++   subtype BuiltinNameSize is Integer range 1..10;
++   -- Symbol name-builtin association
++   type BuiltinAssoc is record
++      BiName : String(BuiltinNameSize);
++      BiValue : BuiltinID;
++   end record;
++   -- Array of BuiltinAssoc objects
++   type BuiltinAssocs is array (Natural range <>) of BuiltinAssoc;
++   
++   BuiltinTable : constant BuiltinAssocs :=
++     (0  => (BiName => "+         ", BiValue => AddB),
++      1  => (BiName => "-         ", BiValue => SubB),
++      2  => (BiName => "*         ", BiValue => MulB),
++      3  => (BiName => "/         ", BiValue => DivB),
++      4  => (BiName => "quote     ", BiValue => QuoteB),
++      5  => (BiName => "eval      ", BiValue => EvalB),
++      6  => (BiName => "if        ", BiValue => IfB),
++      7  => (BiName => "cons      ", BiValue => ConsB),
++      8  => (BiName => "car       ", BiValue => CarB),
++      9  => (BiName => "cdr       ", BiValue => CdrB),
++      10 => (BiName => "list      ", BiValue => ListB),
++      11 => (BiName => "apply     ", BiValue => ApplyB),
++      12 => (BiName => "define    ", BiValue => DefineB),
++      13 => (BiName => "set!      ", BiValue => SetB),
++      14 => (BiName => "=         ", BiValue => EqnB),
++      15 => (BiName => "eq?       ", BiValue => EqB),
++      16 => (BiName => "eqv?      ", BiValue => EqvB),
++      17 => (BiName => "pair?     ", BiValue => PairPB),
++      18 => (BiName => "boolean?  ", BiValue => BooleanPB),
++      19 => (BiName => "number?   ", BiValue => NumberPB),
++      20 => (BiName => "symbol?   ", BiValue => SymbolPB),
++      21 => (BiName => "null?     ", BiValue => NullPB),
++      22 => (BiName => "list?     ", BiValue => ListPB),
++      23 => (BiName => "and       ", BiValue => AndB),
++      24 => (BiName => "or        ", BiValue => OrB),
++      25 => (BiName => "not       ", BiValue => NotB),
++      26 => (BiName => "lambda    ", BiValue => LambdaB),
++      27 => (BiName => "let       ", BiValue => LetB),
++      28 => (BiName => "reverse   ", BiValue => ReverseB),
++      29 => (BiName => "append    ", BiValue => AppendB));
++   
++   -- Hack: used for maintaining a special "quote" symbol used by the
++   --  parser.
++   Quote_Name : constant String := "quote";
++   
++   -- Shifting functions for MWord, used for low-level arithmetic.
++   function Shift_Left
++     (Value  : MWord; 
++      Amount : Natural)
++     return    MWord;
++   pragma Import(Intrinsic, Shift_Left);
++   
++   function Shift_Right
++     (Value  : MWord; 
++      Amount : Natural)
++     return    MWord;
++   pragma Import(Intrinsic, Shift_Right);
++   
++   -- Getters.
++   
++   -- Get the ID of a builtin cell
++   function Get_Builtin(C : Cell) return BuiltinID is
++   begin
++      pragma Assert (C.T = Builtin, "Not a builtin cell!");
++      -- Disclaimer: This list is hand-maintained, programmer must
++      --  ensure that 'Get' and 'Set' sides match!
++      return BuiltinTable(Integer(C.Data)).BiValue;
++   end Get_Builtin;
++   
++   -- Get the car of a cons cell
++   function Get_Car(C : Cell) return MemPtr is
++   begin
++      pragma Assert (C.T = Cons or C.T = Closure,
++                     "Car: Not a cons cell!");
++      return MemPtr(Shift_Right(C.Data, 32));
++   end Get_Car;
++   
++   -- Get the cdr of a cons cell
++   function Get_Cdr(C : Cell) return MemPtr is
++   begin
++      pragma Assert (C.T = Cons or C.T = Closure,
++                     "Cdr: Not a cons cell!");
++      return MemPtr(C.Data and 16#0000_0000_FFFF_FFFF#);
++   end Get_Cdr;
++   
++   -- Get the value of a bool cell
++   function Get_Bool(C : Cell) return Boolean is
++   begin
++      pragma Assert (C.T = Bool, "Not a bool cell!");
++      pragma Assert (C.Data = 0 or C.Data = 1,
++                     "Bool cell in undefined state!");
++      if (C.Data = 0) then
++         return False;
++      else
++         return True;
++      end if;
++   end Get_Bool;
++   
++   -- Get the value of a fixnum cell
++   function Get_Fixnum(C : Cell) return Long_Integer is
++      Temp : Long_Integer;
++   begin
++      pragma Assert (C.T = Fixnum, "Not a fixnum cell!");
++      if (C.Data and 16#8000_0000_0000_0000#) /= 0 then
++         Temp := -(Long_Integer(not C.Data) + 1);
++      else
++         Temp := Long_Integer(C.Data);
++      end if;
++      return Temp;
++   end Get_Fixnum;
++   
++   -- Get the value of a char cell
++   function Get_Char(C : Cell) return Character is
++   begin
++      pragma Assert (C.T = Char, "Not a char cell!");
++      return Character'Val(C.Data);
++   end Get_Char;
++
++   -- Get the string (list-of-chars) associated with a symbol cell
++   function Get_Symbol(C : Cell) return MemPtr is
++   begin
++      pragma Assert (C.T = Symbol, "Not a symbol cell!");
++      return MemPtr(C.Data);
++   end Get_Symbol;
++   
++   -- Get the code of a closure cell (in practice, the pair car)
++   function Get_Closure_Code(C : Cell) return MemPtr is
++   begin
++      return Get_Car(C);
++   end Get_Closure_Code;
++   
++   -- Get the env of a closure cell (in practice, the pair cdr)
++   function Get_Closure_Env(C : Cell) return MemPtr is
++   begin
++      return Get_Cdr(C);
++   end Get_Closure_Env;
++   
++   -- Setters.
++   
++   -- Set the value of a builtin cell.
++   procedure Set_Builtin(C : in out Cell; B : in BuiltinID) is
++      Index : Integer := -1;
++   begin
++      pragma Assert (C.T = Builtin, "Not a builtin cell!");
++      -- Lookup builtin in table
++      for I in 0..(BuiltinTable'Length - 1) loop
++         if BuiltinTable(I).BiValue = B then
++            Index := I;
++            exit;
++         end if;
++      end loop;
++      pragma Assert (Index /= -1, "Builtin not found.");
++      
++      C.Data := MWord(Index);
++   end Set_Builtin;
++   
++   -- Set the car of a cons cell.
++   procedure Set_Car(C : in out Cell; Car : in MemPtr) is
++   begin
++      pragma Assert (C.T = Cons or C.T = Closure,
++                     "Not a cons cell!");
++      C.Data := (C.Data and 16#0000_0000_FFFF_FFFF#)
++        or Shift_Left(MWord(Car), 32);
++   end Set_Car;
++   
++   -- Set the cdr of a cons cell.
++   procedure Set_Cdr(C : in out Cell; Cdr : in MemPtr) is
++   begin
++      pragma Assert (C.T = Cons or C.T = Closure,
++                     "Not a cons cell!");
++      C.Data := (C.Data and 16#FFFF_FFFF_0000_0000#)
++        or MWord(Cdr);
++   end Set_Cdr;
++   
++   -- Set the value of a bool cell.
++   procedure Set_Bool(C : in out Cell; Value : in Boolean) is
++   begin
++      pragma Assert (C.T = Bool, "Not a bool cell!");
++      if Value then
++         C.Data := 1;
++      else
++         C.Data := 0;
++      end if;
++   end Set_Bool;
++   
++   -- Set the value of a fixnum cell.
++   procedure Set_Fixnum(C : in out Cell; Value : in Long_Integer) is
++   begin
++      pragma Assert (C.T = Fixnum, "Not a fixnum cell!");
++      if Value < 0 then
++         C.Data := not MWord(-Value) + 1;
++      else
++         C.Data := MWord(Value);
++      end if;
++   end Set_Fixnum;
++   
++   -- Set the value of a char cell.
++   procedure Set_Char(C : in out Cell; Value : in Character) is
++   begin
++      pragma Assert (C.T = Char, "Not a char cell!");
++      C.Data := MWord(Character'Pos(Value));
++   end Set_Char;
++   
++   -- Set the name of a symbol cell.
++   procedure Set_Symbol(C : in out Cell; Name : in MemPtr) is
++      IsStr : Boolean := True;
++      PList : MemPtr := Name;
++      PCar : MemPtr;
++   begin
++      pragma Assert (C.T = Symbol, "Not a symbol cell!");
++      
++      -- Sanity check! At this point, a string is a list-of-chars, so we
++      --  need to check that the type of list elements matches.
++      pragma Assert (PList /= 0, "Symbol name is empty string!");
++      while PList /= 0 loop
++         pragma Assert (AMem(PList).T = Cons, "Not a string cons cell!");
++         
++         -- Get car cell and check its type
++         PCar := Get_Car(AMem(PList));
++         if (AMem(PCar).T /= Char) then
++            IsStr := False;
++            exit;
++         end if;
++         
++         -- Get cdr cell
++         PList := Get_Cdr(AMem(PList));
++      end loop;
++      pragma Assert(IsStr, "Symbol not a string!");
++      
++      C.Data := MWord(Name);
++   end Set_Symbol;
++   
++   -- Set the closure code (car)
++   procedure Set_Closure_Code(C : in out Cell; Code : in MemPtr) is
++   begin
++      Set_Car(C, Code);
++   end Set_Closure_Code;
++   
++   -- Set the closure env (cdr)
++   procedure Set_Closure_Env(C : in out Cell; Env : in MemPtr) is
++   begin
++      Set_Cdr(C, Env);
++   end Set_Closure_Env;
++   
++   -- Allocate new cell in Lisp machine memory.
++   procedure Alloc_Cell(C : in Cell; P : out MemPtr) is
++   begin
++      -- For now we just increase the heap and add the new cell.
++      
++      -- Increase heap size
++      Heap_End := Heap_End + 1;
++      -- Check that we're overwriting a free cell.
++      pragma Assert (AMem(Heap_End).T = Free,
++                     "Alloc_Cell using a non-free cell.");
++      -- Assign given cell value
++      AMem(Heap_End) := C;
++      -- Set P to point to new pointer
++      P := Heap_End;
++   end Alloc_Cell;
++   
++   -- Allocate builtin cell.
++   procedure Alloc_Builtin(B : BuiltinID; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Builtin, Data => 0), P);
++      Set_Builtin(AMem(P), B);
++   end Alloc_Builtin;
++   
++   -- Allocate a cons cell.
++   procedure Alloc_Cons(Car, Cdr : in MemPtr; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Cons, Data => 0), P);
++      Set_Car(AMem(P), Car);
++      Set_Cdr(AMem(P), Cdr);
++   end Alloc_Cons;
++   
++   -- Allocate a bool cell.
++   procedure Alloc_Bool(Value : in Boolean; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Bool, Data => 0), P);
++      Set_Bool(AMem(P), Value);
++   end Alloc_Bool;
++
++   -- Allocate a fixnum cell.
++   procedure Alloc_Fixnum(Value : in Long_Integer; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Fixnum, Data => 0), P);
++      Set_Fixnum(AMem(P), Value);
++   end Alloc_Fixnum;
++   
++   -- Allocate a char cell.
++   procedure Alloc_Char(Value : in Character; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Char, Data => 0), P);
++      Set_Char(AMem(P), Value);
++   end Alloc_Char;
++
++   -- Allocate a symbol cell.
++   procedure Alloc_Symbol(Name : in MemPtr; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Symbol, Data => 0), P);
++      Set_Symbol(AMem(P), Name);
++   end Alloc_Symbol;
++   
++   -- Allocate a closure cell.
++   procedure Alloc_Closure(Code, Env : in MemPtr; P : out MemPtr) is
++   begin
++      Alloc_Cell((T => Closure, Data => 0), P);
++      Set_Closure_Code(AMem(P), Code);
++      Set_Closure_Env(AMem(P), Env);
++   end Alloc_Closure;
++   
++   -- Dump cell from Lisp machine memory.
++   procedure Dump_Cell(P : in MemPtr) is
++      use Ada.Text_IO;
++
++      C : Cell;
++   begin
++      -- Check for NIL.
++      if (P = 0) then
++         -- Scheme notation.
++         Put("()");
++         return;
++      end if;
++
++      -- Otherwise our cell lies in AMem. It's either a free cell or it
++      --  has some allocated data in it.
++      C := AMem(P);
++      case C.T is
++         when Free =>
++            Put("<free cell>");
++         when Builtin =>
++            -- XXX check whether the builtin is a function or a keyword.
++            Put("<builtin func ");
++            Dump_BuiltinID(Get_Builtin(C));
++            Put(">");
++         when Cons =>
++            Dump_Cons(P);
++         when Bool =>
++            if C.Data = 0 then
++               Put("#f");
++            else
++               Put("#t");
++            end if;
++         when Fixnum =>
++            Dump_Longint(Get_Fixnum(C));
++         when Char =>
++            Put("#\");
++            if Get_Char(C) = ' ' then
++               Put("space");
++            else
++               Put(Get_Char(C));
++            end if;
++         when Symbol =>
++            Dump_String(Get_Symbol(C));
++         when Closure =>
++            Put("<closure>");
++      end case;
++   end Dump_Cell;
++   
++   -- Recursively dump a cons cell, doing sugary processing.
++   procedure Dump_Cons(P : in MemPtr) is
++      use Ada.Text_IO;
++      
++      C : Cell;
++   begin
++      -- Initialization and sanity checks
++      pragma Assert (P /= 0, "List must be non-empty.");
++      C := AMem(P);
++      pragma Assert (C.T = Cons,
++                     "Dump_Cons must receive pointer to a Cons cell.");
++      
++      -- Special processing: if our cons is a list of the form (quote
++      --  expr), print 'expr.
++      declare
++         CarP, CdrP, CadrP : MemPtr;
++      begin
++         CarP := Get_Car(C);
++         CdrP := Get_Cdr(C);
++         -- Car(P) = Quote_Sym?
++         if CarP = Quote_Sym then
++            -- Cdr(P) /= 0?
++            if CdrP = 0 then
++               Put("()");
++               return;
++            end if;
++            -- Get Cadr(P)
++            CadrP := Get_Car(AMem(CdrP));
++            -- 'expr
++            Put("'");
++            Dump_Cell(CadrP);
++            return;
++         end if;
++      end;
++      
++      -- This cons cell may be a list, so we iterate through it as
++      --  long as possible and recursively call ourselves.
++      Put("(");
++      Dump_Cell(Get_Car(C));
++            
++      -- XXX This will fail *hard* for circular lists!
++      while Get_Cdr(C) /= 0 loop
++         -- Exit if cdr(C).tag /= cons.
++         exit when (AMem(Get_Cdr(C)).T /= Cons);
++         C := AMem(Get_Cdr(C));
++         
++         Put(" ");
++         Dump_Cell(Get_Car(C));
++      end loop;
++
++      -- What remains should be either a NIL or some other
++      --  value. In the latter case, print it in dotted format.
++      if Get_Cdr(C) /= 0 then
++         Put(" . ");
++         Dump_Cell(Get_Cdr(C));
++      end if;
++      Put(")");
++   end Dump_Cons;
++   
++   procedure Dump_Longint(N : in Long_Integer) is
++      use Ada.Text_IO;
++      
++      N1, N2 : Long_Integer;
++      Num_Digits : Integer;
++   begin
++      -- 0
++      if N = 0 then
++         Put("0");
++         return;
++      end if;
++      
++      -- Check whether N is negative
++      if N < 0 then
++         Put('-');
++         N1 := -N;
++      else
++         N1 := N;
++      end if;
++      
++      -- Compute the number of digits
++      N2 := 0;
++      Num_Digits := 0;
++      while N1 /= 0 loop
++         N2 := N2 * 10 + N1 rem 10;
++         N1 := N1 / 10;
++         Num_Digits := Num_Digits + 1;
++      end loop;
++      -- Same, but algorithm, but print digit by digit
++      while Num_Digits > 0 loop
++         N1 := N2 rem 10;
++         N2 := N2 / 10;
++         Put(Character'Val(N1 + Character'Pos('0')));
++         Num_Digits := Num_Digits - 1;
++      end loop;
++   end Dump_Longint;
++   
++   procedure Dump_BuiltinID(BID : in BuiltinID) is
++      use Ada.Text_IO;
++   begin
++      case BID is
++         when AddB => Put("+");
++         when SubB => Put("-");
++         when MulB => Put("*");
++         when DivB => Put("/");
++         when QuoteB => Put("quote");
++         when EvalB => Put("eval");
++         when IfB => Put("if");
++         when ConsB => Put("cons");
++         when CarB => Put("car");
++         when CdrB => Put("cdr");
++         when ListB => Put("list");
++         when ApplyB => Put("apply");
++         when DefineB => Put("define");
++         when SetB => Put("set");
++         when EqnB => Put("eqn");
++         when EqB => Put("eq");
++         when EqvB => Put("eqv");
++         when PairPB => Put("pairp");
++         when BooleanPB => Put("booleanp");
++         when NumberPB => Put("numberp");
++         when SymbolPB => Put("symbolp");
++         when NullPB => Put("nullp");
++         when ListPB => Put("listp");
++         when AndB => Put("and");
++         when OrB => Put("or");
++         when NotB => Put("not");
++         when LambdaB => Put("lambda");
++         when LetB => Put("let");
++         when ReverseB => Put("reverse");
++         when AppendB => Put("append");
++      end case;
++   end Dump_BuiltinID;
++   
++   -- Dump string represented as list of characters.
++   procedure Dump_String(P : in MemPtr) is
++      use Ada.Text_IO;
++
++      CarP, ListP : MemPtr;
++   begin
++      ListP := P;
++      while ListP /= 0 loop         
++         pragma Assert(AMem(ListP).T = Cons, "Not a string-as-list!");
++         CarP := Get_Car(AMem(ListP));
++         
++         -- print elem.
++         pragma Assert(AMem(CarP).T = Char, "Not a list of chars!");
++         Put(Get_Char(AMem(CarP)));
++         
++         -- next
++         ListP := Get_Cdr(AMem(ListP));
++      end loop;
++   end Dump_String;
++   
++   -- Init default bindings to builtin functions
++   procedure Init_Builtin_Bindings is
++      BuiltinP : MemPtr;
++      SymP : MemPtr;
++      CharP : MemPtr;
++      NameP : MemPtr;
++   begin
++      -- Allocate symbol-value pair for each builtin, and add it to the
++      --  front of Symbol_Table list.      
++      for I in 0..(BuiltinTable'Length - 1) loop
++         -- allocate builtin
++         Alloc_Builtin(BuiltinTable(I).BiValue, BuiltinP);
++         -- allocate name
++         NameP := 0;
++         for K in reverse BuiltinTable(I).BiName'Range loop
++            -- skip spaces
++            if BuiltinTable(I).BiName(K) /= ' ' then
++               Alloc_Char(BuiltinTable(I).BiName(K), CharP);
++               Alloc_Cons(CharP, NameP, NameP);
++            end if;
++         end loop;
++         pragma Assert(NameP /= 0, "Name is empty!");
++         Alloc_Symbol(NameP, SymP); -- create symbol
++         Alloc_Cons(SymP, Sym_Table, Sym_Table); -- intern
++         Bind_Env(SymP, BuiltinP, Global_Env, SymP); -- bind in global namespace
++      end loop;
++      
++      -- XXX: Set Quote_Sym to be used by parser routine to convert the
++      --  quote token to a proper S-expression. This is quite a
++      --  hack, quote symbol could be represented as its own constant by
++      --  lispm.
++      NameP := 0;
++      for K in reverse Quote_Name'Range loop
++         Alloc_Char(Quote_Name(K), CharP);
++         Alloc_Cons(CharP, NameP, NameP);
++      end loop;
++
++      Lookup_Symbol(NameP, Quote_Sym);
++      
++      -- Use these for debugging.
++
++      --  Dump_Cell(Sym_Table);
++      --  Dump_Cell(Global_Env);
++   end Init_Builtin_Bindings;
++   
++   function Name_EqualP(Sym1, Sym2 : MemPtr) return Boolean is
++      TempStr1, TempStr2 : MemPtr;
++      P1, P2 : MemPtr;
++      C1, C2 : Character;
++      Same : Boolean := True;
++   begin
++      TempStr1 := Sym1;
++      TempStr2 := Sym2;
++      -- Compare strings character by character: iterate while any of
++      --  the strings are not NIL.
++      while TempStr1 /= 0 or TempStr2 /= 0 loop
++         -- If any of them is NIL, then stop and return false.
++         if TempStr1 = 0 or TempStr2 = 0 then
++            Same := False;
++            exit;
++         end if;
++         -- Otherwise, do the cars match?
++         P1 := Get_Car(AMem(TempStr1)); C1 := Get_Char(AMem(P1));
++         P2 := Get_Car(AMem(TempStr2)); C2 := Get_Char(AMem(P2));
++         if C1 /= C2 then
++            Same := False;
++            exit;
++         end if;
++         -- If they do, check the rest.
++         TempStr1 := Get_Cdr(AMem(TempStr1));
++         TempStr2 := Get_Cdr(AMem(TempStr2));
++      end loop;
++      
++      return Same;
++   end Name_EqualP;
++   
++   -- Lookup Sym_Table for symbol whose name field is equal to Name.
++   procedure Lookup_Symbol(Name : in MemPtr; Sym : out MemPtr) is
++      ListP : MemPtr := Sym_Table;
++   begin
++      -- Assume we haven't found a value
++      Sym := 0;
++      
++      -- Iterate through Sym_Table
++      while ListP /= 0 loop
++        declare
++           CurrSym : MemPtr := Get_Car(AMem(ListP));
++           CurrName : MemPtr;
++        begin
++           pragma Assert(CurrSym /= 0, "Sym_Table contains a NIL symbol!");
++           pragma Assert(AMem(CurrSym).T = Symbol,
++                         "Sym_Table contains a non-symbol!");
++           -- Compare the given symbol name with the current alist value.
++           CurrName := Get_Symbol(AMem(CurrSym));
++           -- Found?
++           if Name_EqualP(Name, CurrName) then
++              Sym := CurrSym;
++              exit;
++           end if;
++           -- Otherwise keep looking
++           ListP := Get_Cdr(AMem(ListP));
++        end;
++      end loop;
++   end Lookup_Symbol;
++   
++   -- Lookup Name in Sym_Table; if non-existent, add a new (Name . NIL)
++   --  pair to the table and set NameVal to it.
++   procedure Lookup_Or_Create_Symbol(Name : in MemPtr; Sym: out MemPtr) is
++      TempSym : MemPtr;
++   begin
++      -- Lookup for Name
++      Lookup_Symbol(Name, TempSym);
++      -- If not found, intern Name
++      if TempSym = 0 then
++         Alloc_Symbol(Name, TempSym);
++         Alloc_Cons(TempSym, Sym_Table, Sym_Table);
++      end if;
++      -- Return symbol
++      Sym := TempSym;
++   end Lookup_Or_Create_Symbol;
++   
++   -- Lookup Sym in Env set Binding to the Sym-Value pair if found.
++   procedure Lookup_Env(Sym, Env : in MemPtr; Binding : out MemPtr) is
++      EnvP : MemPtr := Env;
++   begin
++      -- NIL by default
++      Binding := 0;
++      
++      while EnvP /= 0 loop
++         declare
++            CurrBinding : MemPtr := Get_Car(AMem(EnvP));
++            CurrSym : MemPtr;
++         begin
++            pragma Assert (CurrBinding /= 0, "NIL binding in Env!");
++            -- Get symbol of current binding
++            CurrSym := Get_Car(AMem(CurrBinding));
++            pragma Assert(AMem(CurrSym).T = Symbol, "Not a symbol!");
++            -- Compare symbols pointer-wise
++            if Sym = CurrSym then
++               Binding := CurrBinding;
++               exit;
++            end if;
++            EnvP := Get_Cdr(AMem(EnvP));
++         end;
++      end loop;   
++   end Lookup_Env;
++   
++   -- Lookup value of Sym in Env or Global_Env
++   procedure Lookup_Env_Or_Global(Sym, Env : in MemPtr;
++                                  Binding : out MemPtr) is
++      TempP : MemPtr;
++   begin
++      Lookup_Env(Sym, Env, TempP);
++      if TempP = 0 then
++         Lookup_Env(Sym, Global_Env, Binding);
++      else
++         Binding := TempP;
++      end if;
++   end Lookup_Env_Or_Global;
++   
++   -- Add Sym-Value binding in Env and set Binding to the new pair.
++   procedure Bind_Env(Sym, Value : in MemPtr;
++                      Env : in out MemPtr; Binding : out MemPtr) is
++      TempP : MemPtr;
++   begin
++      Alloc_Cons(Sym, Value, TempP); -- create pair
++      Alloc_Cons(TempP, Env, Env); -- cons pair to env
++      
++      Binding := TempP; -- return pair.
++   end Bind_Env;
++end LispM;
+diff -uNr a/adalisp/src/lispm.ads b/adalisp/src/lispm.ads
+--- a/adalisp/src/lispm.ads false
++++ b/adalisp/src/lispm.ads 0fc0c9657956634910edc6dc4abe8c5f9743f9c541491d3c1800cd9f9c05b3bf081190dd80c90abba91e9358d43cf40f1b7c20f645ffebaf459683e711abd782
+@@ -0,0 +1,157 @@
++-- Basic lisp machine memory and data representation. The basic memory
++--  unit of lisp machines is a cell of the form [ tag | data ]. Lisp
++--  memory is an array of such cells, with cell index 0 being reserved
++--  for the special value NIL.
++package LispM is
++   -- 8MCells should be enough for everyone
++   Mem_Size : constant := 2**23;
++   
++   -- Machine words
++   type MWord is mod 2 ** 64;
++   for MWord'Size use 64;
++   
++   -- Cell tags.
++   type Tag is (Free, Builtin, Cons, Bool, Fixnum, Char, Symbol, Closure);
++   type MemPtr is range 0 .. Mem_Size;
++   
++   -- Built-in functions are tied in to a conceptual arithmetic-logic
++   --  unit that provides the building blocks for evaluation.
++   type BuiltinID is (AddB, SubB, MulB, DivB, QuoteB, EvalB, IfB,
++                      ConsB, CarB, CdrB, ListB, ApplyB, DefineB, SetB,
++                      EqnB, EqB, EqvB, PairPB, BooleanPB, NumberPB, SymbolPB,
++                      NullPB, ListPB, AndB, OrB, NotB, LambdaB, LetB,
++                      ReverseB, AppendB);
++
++   -- Cell data type. The first part of any cell is a tag. The second
++   --  part is a tag-dependent machine word.
++   --
++   -- Machine words are defined by tag, as follows:
++   --
++   -- [ free | 0 ]
++   --
++   -- [ builtin | bid ] where bid is a number corresponding uniquely to
++   --  a BuiltinID.
++   --
++   -- [ cons | car, cdr ] where car and cdr are each half of an MWord.
++   --
++   -- [ bool | b ] where b is a truth value (0 is false, 1 is true). XXX
++   --  bool values should be hardcoded symbols (or something similar).
++   --
++   -- [ fixnum | n ] where n is a signed integer of MWord size / 2, the
++   --  first bit being a sign bit.
++   --
++   -- [ char | c ] where c is the ASCII code of a character.
++   --
++   -- [ symbol | ptr ] where ptr points to a list of characters uniquely
++   --  determining the symbol's name.
++   --
++   -- [ closure | code, env ] where code points to a list of the form
++   --  (args e1 e2 ... en) (where args is a list of symbols) and env
++   --  points to a symbol-value alist.
++   type Cell is record
++      T : Tag;
++      Data : MWord;
++   end record;
++
++   -- This puts it all together.
++   type Mem is array (MemPtr range 1 .. Mem_Size) of Cell;
++
++   -- Pointer to heap end. This is incremented on memory
++   --  allocations. Don't worry about deallocations for now, since we
++   --  don't have a GC (yet).
++   Heap_End : MemPtr := 0;
++   
++   -- Pointer to interned symbol list.
++   Sym_Table : MemPtr := 0;
++   -- Pointer to interned symbol representing the "quote" keyword. This
++   --  is used by the parser to transform ' tokens into (quote ...).
++   Quote_Sym : MemPtr := 0;
++   
++   -- Pointer to environment: the environment is a list of symbol-value
++   --  associations; a symbol may have more than one associations at a
++   --  given point in time, in which case the most recent association
++   --  will be considered.
++   Global_Env : MemPtr := 0;
++
++   -- A statically-allocated memory.
++   AMem : Mem := (others => (T => Free, Data => 0));
++   
++   -- Cell manipulation primitives.
++   function Get_Builtin(C : Cell) return BuiltinID;
++   function Get_Car(C : Cell) return MemPtr;
++   function Get_Cdr(C : Cell) return MemPtr;
++   function Get_Bool(C : Cell) return Boolean;
++   function Get_Fixnum(C : Cell) return Long_Integer;
++   function Get_Char(C : Cell) return Character;
++   function Get_Symbol(C : Cell) return MemPtr;
++   function Get_Closure_Code(C : Cell) return MemPtr;
++   function Get_Closure_Env(C : Cell) return MemPtr;
++   procedure Set_Builtin(C : in out Cell; B : in BuiltinID);
++   procedure Set_Car(C : in out Cell; Car : in MemPtr);
++   procedure Set_Cdr(C : in out Cell; Cdr : in MemPtr);
++   procedure Set_Bool(C : in out Cell; Value : in Boolean);
++   procedure Set_Fixnum(C : in out Cell; Value : in Long_Integer);
++   procedure Set_Char(C : in out Cell; Value : in Character);
++   procedure Set_Symbol(C : in out Cell; Name : in MemPtr);
++   procedure Set_Closure_Code(C : in out Cell; Code : in MemPtr);
++   procedure Set_Closure_Env(C : in out Cell; Env : in MemPtr);
++   
++   -- Memory management primitives.
++
++   -- Allocate cell in AMem.
++   procedure Alloc_Cell(C : in Cell; P : out MemPtr);
++   -- Higher-level allocation primitives
++   procedure Alloc_Builtin(B : BuiltinID; P : out MemPtr);
++   procedure Alloc_Cons(Car, Cdr : in MemPtr; P : out MemPtr);
++   procedure Alloc_Bool(Value : in Boolean; P : out MemPtr);
++   procedure Alloc_Fixnum(Value : in Long_Integer; P : out MemPtr);
++   procedure Alloc_Char(Value : in Character; P : out MemPtr);
++   procedure Alloc_Symbol(Name : in MemPtr; P : out MemPtr);
++   procedure Alloc_Closure(Code, Env : in MemPtr; P : out MemPtr);
++   
++   -- I/O: output primitives. XXX these should be placed in a separate
++   --  module.
++   
++   -- Dump cell to standard output.
++   procedure Dump_Cell(P : in MemPtr);
++   
++   -- Recursively dump a cons cell, doing sugary processing.
++   procedure Dump_Cons(P : in MemPtr);
++   
++   -- Dump a long integer
++   procedure Dump_Longint(N : in Long_Integer);
++   
++   -- Dump the name of a builtin id
++   procedure Dump_BuiltinID(BID : in BuiltinID);
++   
++   -- Dump a sequence of chars represented as a list.
++   procedure Dump_String(P : in MemPtr);
++   
++   -- Init symbol table to a list of known symbols and add their
++   --  bindings to builtins to the global environment.
++   procedure Init_Builtin_Bindings;
++   
++   -- Check whether two symbol names are equal.
++   function Name_EqualP(Sym1, Sym2 : MemPtr) return Boolean;
++   
++   -- Lookup symbol in symbol table. Return a pointer to a the unique
++   --  symbol object representing it if found, NIL otherwise.
++   procedure Lookup_Symbol(Name : in MemPtr; Sym : out MemPtr);
++   
++   -- Similar to Lookup_Symbol, only if the name does not exist, we
++   --  create and add a new symbol object to the symbol table, and we
++   --  return it.
++   procedure Lookup_Or_Create_Symbol(Name : in MemPtr;
++                                     Sym : out MemPtr);
++   
++   -- Lookup a binding for Sym in Env. Returns a symbol-value pair if it
++   --  exists, NIL otherwise.
++   procedure Lookup_Env(Sym, Env : in MemPtr; Binding : out MemPtr);
++   -- Similar to Lookup_Env, only also try Global_Env
++   procedure Lookup_Env_Or_Global(Sym, Env : in MemPtr;
++                                  Binding : out MemPtr);
++
++   -- Add a Sym-Value binding in Env. Returns the new binding.
++   procedure Bind_Env(Sym, Value : in MemPtr;
++                      Env : in out MemPtr; Binding : out MemPtr);
++end LispM;
+diff -uNr a/adalisp/src/parser.adb b/adalisp/src/parser.adb
+--- a/adalisp/src/parser.adb false
++++ b/adalisp/src/parser.adb d343c9d00e533b72e6b07f6e9849bfb796df42ae0e0d376ef7b459c261124311aab7402ea6e9608bb84dd2037ab837a6c06f9935d371a6d7eff75a619c054670
+@@ -0,0 +1,291 @@
++-- S-expression parser implementation.
++with Ada.Text_IO; use Ada.Text_IO;
++
++package body Parser is
++   -- Predicates on input characters
++   WhitespaceP : constant array (Character) of Boolean :=
++     (' ' | ASCII.Nul | ASCII.HT | ASCII.CR | ASCII.LF => True, others => False);
++   DigitP : constant array (Character) of Boolean :=
++     ('0' .. '9' => True, others => False);
++   
++   -- Reserved characters, although '.' and '#' can technically speaking
++   --  be part of symbol names.
++   ReservedP : constant array (Character) of Boolean :=
++     ('(' | ')' | '#' | '.' | ''' => True, others => False);
++   
++   C : Character := ' ';
++   I : Long_Integer;
++   
++   -- Given a string, check if all its characters are digits. If so,
++   --  accumulate them in I.
++   procedure Parse_Integer(Str : in MemPtr;
++                           Success : out Boolean;
++                           I : out Long_Integer) is
++      P : MemPtr := Str;
++      PC : MemPtr;
++      C : Character;
++      Negative : Boolean := False;
++      Result : Long_Integer;
++   begin
++      Result := 0;
++      Success := True;
++      
++      pragma Assert (P /= 0, "Parse_Integer received a NIL string!");
++      
++      -- Check for leading +/- signs first
++      PC := Get_Car(AMem(P));
++      C := Get_Char(AMem(PC));
++      if C = '-' then
++         Negative := True;
++      end if;
++      if C = '-' or C = '+' then
++         P := Get_Cdr(AMem(P));
++         -- If we don't have other characters after + or -, then this is
++         --  not a number.
++         if P = 0 then
++            Success := False;
++            return;
++         end if;
++      end if;
++      
++      while P /= 0 loop
++         -- Check list and its car.
++         PC := Get_Car(AMem(P));
++         C := Get_Char(AMem(PC));
++         
++         -- Do we have a non-digit?
++         if not DigitP(C) then
++            Success := False;
++            exit;
++         end if;
++         
++         -- If we're still in the all-digits game, gather them, hoping
++         --  we get a number.
++         Result := Result * 10 + (Character'Pos(C) - Character'Pos('0'));
++         
++         -- Move on.
++         P := Get_Cdr(AMem(P));
++      end loop;
++
++      if Negative then
++         Result := -Result;
++      end if;
++      
++      -- Set the output value if and only if we succeeded.
++      if Success then
++         I := Result;
++      end if;
++   end Parse_Integer;
++   
++   procedure Eat_Whitespace is
++   begin
++      while WhitespaceP(C) loop
++         Get(C);
++      end loop;
++   end Eat_Whitespace;
++   
++   -- Parse a list of characters that may be a symbol or an integer.
++   procedure Parse_Atom(P : out MemPtr) is
++      CharP, TempP : MemPtr;
++      ListP : MemPtr := 0;
++      ListTailP : MemPtr := 0;
++   begin
++      pragma Assert (not ReservedP(C),
++                     "Parse_Atom received a reserved character!");
++      
++      loop
++         -- Get a new char cell
++         Alloc_Char(C, CharP);
++         -- Save old list tail
++         TempP := ListTailP;
++         -- Cons cell to be appended to the list
++         Alloc_Cons(CharP, 0, ListTailP);
++         
++         -- Does the old list tail point to a cons cell? If so, set the
++         --  old cdr to the new list tail, otherwise set the list
++         --  pointer to the tail.
++         if TempP /= 0 then
++            Set_Cdr(AMem(TempP), ListTailP);
++         else
++            ListP := ListTailP;
++         end if;
++         
++         -- Get a new character and verify the exit condition
++         Get(C);
++         exit when WhitespaceP(C);
++         exit when C = '(' or C = ')';
++      end loop;
++      -- Assign output parameter to our list.
++      P := ListP;
++   end Parse_Atom;
++   
++   -- Parse hash-prepended expression.
++   procedure Parse_Hash(P : out MemPtr; TID : out TokenID) is
++   begin
++      pragma Assert (C = '#',
++                     "Parse_Hash does not begin with a hash.");
++      
++      -- We support the following hash-prepended expressions:
++      --
++      -- . booleans (#t or #f)
++      -- . characters (e.g. #\a, #\b, ...)
++      
++      Get(C);
++      
++      if (C = 't') then -- true
++         Alloc_Bool(True, P);
++         TID := Bool_Token;
++      elsif (C = 'f') then -- false
++         Alloc_Bool(False, P);
++         TID := Bool_Token;
++      elsif (C = '\') then -- char
++         -- XXX should do more elaborate parsing here, e.g. #\space
++         --  etc.
++         Get(C);
++         Alloc_Char(C, P);
++         TID := Char_Token;
++      else -- unknown
++         pragma Assert (False, "Unknown hash expression.");
++      end if;
++      
++      -- Emulate a space for future calls of Parse
++      C := ' ';
++   end Parse_Hash;
++   
++   -- Parse cons objects, i.e. lists and pairs.
++   procedure Parse_Cons(P : out MemPtr) is
++      ListP : MemPtr := 0;
++      ListTailP : MemPtr := 0;
++      TID : TokenID;
++   begin
++      pragma Assert (C = '(', "Parse_Cons should receive an open paren.");
++      
++      -- Emulate a space for the first call to Parse
++      C := ' ';
++      
++      -- Iterate through the list elements and add them to the list.
++      loop
++         declare
++            ElemP, TempP : MemPtr;
++         begin
++            -- Parse current element
++            Parse(ElemP, TID);
++            
++            -- Exit conditions
++            exit when TID = ListE_Token; -- list end
++            exit when TID = ListP_Token; -- pair marker
++            
++            -- Save old list tail
++            TempP := ListTailP;
++            -- Add new element to the list: if the TempP is NIL, then we
++            --  have a fresh list that we can populate with the new
++            --  element.
++            Alloc_Cons(ElemP, 0, ListTailP);
++            if TempP = 0 then
++               ListP := ListTailP;
++            else
++               Set_Cdr(AMem(TempP), ListTailP);
++            end if;
++         end;
++      end loop;
++      
++      -- If we received a pair marker, then we have one more element to
++      --  parse.
++      if TID = ListP_Token then
++         declare
++            ElemP : MemPtr;
++         begin
++            pragma Assert (ListTailP /= 0, "Syntax error parsing pair.");
++            -- Emulate space
++            C := ' ';
++            -- Parse element
++            Parse(ElemP, TID);
++            
++            pragma Assert(TID = Bool_Token or TID = Num_Token or
++                            TID = List_Token or TID = Char_Token or
++                            TID = Symbol_Token,
++                          "Syntax error parsing pair.");
++            -- Point cdr of list tail to element
++            Set_Cdr(AMem(ListTailP), ElemP);
++         end;
++      elsif TID /= ListE_Token then
++         Put_Line("Impossible to get here!");
++         P := 0;
++         return;
++      end if;
++      
++      -- Set the output and emulate a space for whatever comes next.
++      P := ListP;
++      C := ' ';
++   end Parse_Cons;
++   
++   -- Parse quoted S-expression.
++   procedure Parse_Quoted(P : out MemPtr; TID : out TokenID) is
++      ExprP : MemPtr;
++   begin
++      pragma Assert (C = ''', "Parse_Quoted not given a quote");
++      
++      -- Emulate a space and parse whatever comes after the quote.
++      C := ' ';
++      Parse(ExprP, TID);
++      
++      -- If the result of Parse is an atomic constant, we return it as
++      --  it is. Otherwise we wrap whatever expr we get in a quote,
++      --  i.e. (quote expr).
++      case TID is
++         when Bool_Token | Num_Token | Char_Token =>
++            P := ExprP;
++         when others =>
++            -- (expr)
++            Alloc_Cons(ExprP, 0, ExprP);
++            -- (quote expr)
++            Alloc_Cons(Quote_Sym, ExprP, ExprP);
++            -- Assign output
++            P := ExprP;
++            TID := Quoted_Token;
++      end case;      
++   end Parse_Quoted;
++   
++   -- Parse any S-expression
++   procedure Parse(P : out MemPtr; TID : out TokenID) is
++      TempTID : TokenID := Error_Token;
++      AtomP : MemPtr;
++      TempP1, TempP2, TempP3 : MemPtr := 0;
++      Is_Number : Boolean;
++   begin
++      P := 0;
++      TID := Error_Token;
++      
++      Eat_Whitespace;
++      
++      -- Not (, ), #, . or '
++      if not ReservedP(C) then -- atom
++         -- Read atom from stdin
++         Parse_Atom(AtomP);
++         
++         -- Try to parse a number; if we succeed, then return it, else
++         --  return the atom as an interned symbol.
++         Parse_Integer(AtomP, Is_Number, I);
++         if Is_Number then
++            Alloc_Fixnum(I, P);
++            TID := Num_Token;
++         else
++            -- Alloc symbol cell
++            Lookup_Or_Create_Symbol(AtomP, P);
++            TID := Symbol_Token;
++         end if;
++      elsif C = '#' then -- hash token
++         Parse_Hash(P, TID);
++      elsif C = '(' then -- list/pair
++         Parse_Cons(P);
++         -- Instantiate TID
++         TID := List_Token;
++      elsif C = ')' then -- list/pair end
++         TID := ListE_Token;
++      elsif C = '.' then -- pair marker
++         TID := ListP_Token;
++      elsif C = ''' then -- quote marker
++         Parse_Quoted(P, TID);
++      end if;
++   end Parse;
++end Parser;
+diff -uNr a/adalisp/src/parser.ads b/adalisp/src/parser.ads
+--- a/adalisp/src/parser.ads false
++++ b/adalisp/src/parser.ads 30acffbb85d590f74e7e9b76f5611663bda26af35e38316f633a752a9248ac9b7e61e72bd411252a4be85b2f89e442f53f5e68a0414cfbbd6376b30f99f3b1be
+@@ -0,0 +1,56 @@
++-- S-expression parser. According to the current spec, any of the
++--  following objects constitute a S-expr:
++--
++-- - atom: a sequence containing any characters except spaces or parens,
++--  i.e. ( or ); atoms are separated by these characters and may not
++--  begin with any of (, ), #, . or '; if an atom is composed only of
++--  numeric decimal characters, then it is parsed as a number; otherwise
++--  it is parsed as an interned symbol.
++--
++-- - hash expression: any expression beginning with #; currently,
++--  expression beginning with # are the boolean values #t and #f, and
++--  escaped characters, e.g. #\a (the character corresponding to the
++--  letter a).
++--
++-- - cons expression: cons expressions begin with a (, contain any
++--  number of space-separated sub-expressions and end with ), e.g. (a b
++--  c d) denotes the list containing the symbols a, b, c and d, ()
++--  denotes the empty list, etc.; a cons expression may optionally
++--  contain a period (.) token before the last element, signifying that
++--  the last element is set as the cdr of the last cons cell, e.g. (1 2
++--  . 3) corresponds to (cons 1 (cons 2 3)).
++--
++-- - quoted expression: any expression beginning with a single quote (')
++--  token; 'expr (where expr is an arbitrary S-expression) gets
++--  translated to (quote expr).
++with LispM; use LispM;
++
++package Parser is
++   type TokenID is (Error_Token, Bool_Token, Num_Token, List_Token,
++                    Char_Token, Symbol_Token, ListE_Token, ListP_Token,
++                    Quoted_Token);
++   
++   -- Given a string, check if all its characters are digits.
++   procedure Parse_Integer(Str : in MemPtr;
++                           Success : out Boolean;
++                           I : out Long_Integer);
++   -- Eat whitespace.
++   procedure Eat_Whitespace;
++   
++   -- Parse a list of characters not in the reserved set.
++   procedure Parse_Atom(P : out MemPtr);
++   
++   -- Parse a hash-prepended expression.
++   procedure Parse_Hash(P : out MemPtr; TID : out TokenID);
++   
++   -- Parse cons objects, i.e. lists and pairs.
++   procedure Parse_Cons(P : out MemPtr);
++   
++   -- Parse quoted expression.
++   procedure Parse_Quoted(P : out MemPtr; TID : out TokenID);
++      
++   -- Parse an S-expression given as input on the console. Output a
++   --  pointer to the parsed expression and its type, as represented by
++   --  TokenID.
++   procedure Parse(P : out MemPtr; TID : out TokenID);
++end Parser;
+diff -uNr a/adalisp/src/restrict.adc b/adalisp/src/restrict.adc
+--- a/adalisp/src/restrict.adc false
++++ b/adalisp/src/restrict.adc 8aaf89145d930d102e76f08e51768e632c183155c4285d89d897cc5835e55de3c9c1d27f847203d627198b4a919a138f31eae131fba600c5cf9507d4cd5c4064
+@@ -0,0 +1,65 @@
++pragma Restrictions(Immediate_Reclamation);
++pragma Restrictions(Max_Asynchronous_Select_Nesting => 0);
++pragma Restrictions(Max_Protected_Entries => 0);
++pragma Restrictions(Max_Select_Alternatives => 0);
++pragma Restrictions(Max_Task_Entries => 0);
++pragma Restrictions(Max_Tasks => 0);
++pragma Restrictions(No_Abort_Statements);
++pragma Restrictions(No_Access_Parameter_Allocators);
++pragma Restrictions(No_Allocators);
++pragma Restrictions(No_Asynchronous_Control);
++pragma Restrictions(No_Calendar);
++pragma Restrictions(No_Coextensions);
++pragma Restrictions(No_Default_Stream_Attributes);
++pragma Restrictions(No_Delay);
++pragma Restrictions(No_Dispatch);
++pragma Restrictions(No_Dispatching_Calls);
++pragma Restrictions(No_Dynamic_Attachment);
++pragma Restrictions(No_Dynamic_Priorities);
++pragma Restrictions(No_Entry_Calls_In_Elaboration_Code);
++pragma Restrictions(No_Entry_Queue);
++pragma Restrictions(No_Enumeration_Maps);
++pragma Restrictions(No_Exception_Propagation);
++pragma Restrictions(No_Exception_Registration);
++pragma Restrictions(No_Finalization);
++pragma Restrictions(No_Fixed_Io);
++pragma Restrictions(No_Floating_Point);
++pragma Restrictions(No_Implementation_Aspect_Specifications);
++pragma Restrictions(No_Implementation_Units);
++pragma Restrictions(No_Implicit_Aliasing);
++pragma Restrictions(No_Implicit_Conditionals);
++pragma Restrictions(No_Implicit_Dynamic_Code);
++pragma Restrictions(No_Implicit_Heap_Allocations);
++pragma Restrictions(No_Implicit_Protected_Object_Allocations);
++pragma Restrictions(No_Implicit_Task_Allocations);
++pragma Restrictions(No_Initialize_Scalars);
++pragma Restrictions(No_Local_Protected_Objects);
++pragma Restrictions(No_Local_Timing_Events);
++pragma Restrictions(No_Multiple_Elaboration);
++pragma Restrictions(No_Nested_Finalization);
++pragma Restrictions(No_Protected_Type_Allocators);
++pragma Restrictions(No_Protected_Types);
++pragma Restrictions(No_Relative_Delay);
++pragma Restrictions(No_Requeue_Statements);
++pragma Restrictions(No_Secondary_Stack);
++pragma Restrictions(No_Select_Statements);
++pragma Restrictions(No_Specific_Termination_Handlers);
++pragma Restrictions(No_Standard_Allocators_After_Elaboration);
++pragma Restrictions(No_Stream_Optimizations);
++pragma Restrictions(No_Streams);
++pragma Restrictions(No_Task_Allocators);
++pragma Restrictions(No_Task_At_Interrupt_Priority);
++pragma Restrictions(No_Task_Attributes_Package);
++pragma Restrictions(No_Task_Hierarchy);
++pragma Restrictions(No_Tasking);
++pragma Restrictions(No_Task_Termination);
++pragma Restrictions(No_Terminate_Alternatives);
++pragma Restrictions(No_Unchecked_Access);
++pragma Restrictions(No_Unchecked_Conversion);
++pragma Restrictions(No_Unchecked_Deallocation);
++pragma Restrictions(No_Wide_Characters);
++pragma Restrictions(Pure_Barriers);
++pragma Restrictions(Simple_Barriers);
++pragma Restrictions(Static_Priorities);
++pragma Restrictions(Static_Storage_Size);
++pragma Validity_Checks(ALL_CHECKS);
+diff -uNr a/adalisp/src/test_repl.adb b/adalisp/src/test_repl.adb
+--- a/adalisp/src/test_repl.adb false
++++ b/adalisp/src/test_repl.adb 040a9f08a31a01c5506c1609493f3e55833f5a0092144fa4a084739cc5ef75fbe8e2124c6c386607e9295a96d1bdd3b1f660d81c91668f481987e29b84eb7b14
+@@ -0,0 +1,36 @@
++-- A test REPL putting all our Ada Lisp components together.
++with Ada.Text_IO; use Ada.Text_IO;
++
++with Parser; use Parser;
++with Evaler; use Evaler;
++with LispM; use LispM;
++
++procedure Test_Repl is
++   P : MemPtr;
++   TID : TokenID;
++begin
++   -- Init builtin bindings
++   Init_Builtin_Bindings;
++   
++   loop
++      Put("> ");
++      
++      -- Read
++      Parse(P, TID);
++      
++      -- Eval
++      case TID is
++         when Error_Token =>
++            Put("Parse error.");
++            exit;
++         when ListE_Token =>
++            Put("Unexpected end of list.");
++            exit;
++         when others =>
++            Eval(P, 0, P);
++      end case;
++      
++      -- Print
++      Dump_Cell(P); Put_Line("");
++   end loop;
++end Test_Repl;
+diff -uNr a/adalisp/test.scm b/adalisp/test.scm
+--- a/adalisp/test.scm false
++++ b/adalisp/test.scm 91d6afd6207c6ecca784175cadefb5512cb50a310bfbe2afa7dcec1c221a01f1a12f5167dc8a6bf8c21d96642d04963509356d5fce62f784584fe6365d327d5d
+@@ -0,0 +1,41 @@
++(define length (lambda (L)
++  (if (eq? L '())
++      0
++      (+ 1 (length (cdr L))))))
++
++(define map (lambda (f L)
++  (if (eq? L '())
++      '()
++      (cons (f (car L)) (map f (cdr L))))))
++
++(define fibs (lambda (n)
++  (if (= n 0)
++      0
++      (if (= n 1)
++          1
++          (+ (fibs (- n 1)) (fibs (- n 2)))))))
++
++(define fact (lambda (n)
++  (if (= n 0)
++      1
++      (* n (fact (- n 1))))))
++
++(define equal? (lambda (x y)
++  (if (pair? x)
++    (and (pair? y)
++         (equal? (car x) (car y))
++         (equal? (cdr x) (cdr y)))
++    (eqv? x y))))
++
++(define 1+ (lambda (x) (+ x 1)))
++(define 1- (lambda (x) (- x 1)))
++
++(define succ 1+)
++(define pred 1-)
++
++(if (= (length '(a b c d e f g)) 7) 'passed 'failed)
++(if (equal? (map (lambda (x) (* x x)) '(1 2 3 4 5))
++            '(1 4 9 16 25))
++  'passed 'failed)
++(if (= (fibs 10) 55) 'passed 'failed)
++(if (= (fact 10) 3628800) 'passed 'failed)
+diff -uNr a/adalisp/test_repl.gpr b/adalisp/test_repl.gpr
+--- a/adalisp/test_repl.gpr false
++++ b/adalisp/test_repl.gpr 9ec51c9dfdac10baa0e11529637447e9ed8b99d068144b966b6e8c653534cce7be30746d6ac834630758a14326353a1f12a560e06a9ff6b88df151cf1a8a8158
+@@ -0,0 +1,48 @@
++project Test_Repl is
++  for Object_Dir use "obj";
++  
++  type Mode_Type is ("debug", "release");
++  Mode : Mode_Type := external ("mode", "release");
++    
++  for Languages use ("Ada");
++  for Source_Dirs use ("src");
++  for Exec_Dir use "bin";
++  for Main use ("test_repl.adb");
++  
++  package Compiler is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ("-g");
++        when "release" =>
++           for Switches ("Ada")
++             use ("-O2", "-gnata", "-fstack-check",
++                  "-fdata-sections", "-ffunction-sections",
++                  "-gnatec=" & Test_Repl'Project_Dir & "src/restrict.adc");
++     end case;
++  end Compiler;
++  
++  package Binder is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-static");
++     end case;
++  end Binder;
++  
++  package Linker is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-Wl,--gc-sections",
++                  "-static");
++     end case;
++  end Linker;
++  
++end Test_Repl;
