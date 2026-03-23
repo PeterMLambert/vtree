@@ -1,0 +1,42 @@
+(Public key converted from GPG key for Peter Lambert)
+@RSA-Public-Modulus@
+	.
+	c9 a2 2d 3f 4b 52 80 2a 8a 4a 5e 60 3e 3e 0b 0e 30 93 a4 55 b0 4b 81 96 d6 
+	6a e2 d0 c3 97 2e 3c 81 86 e6 4b 45 54 20 ec 75 35 4e d6 ff 6f 69 b9 b6 20 
+	3c 39 d7 fe fb 19 35 11 a4 9f 7e d6 50 d2 89 67 48 6e 7e 71 6d 1b 20 a2 97 
+	4f 9f 3f 75 52 af e9 81 67 ee 2d 7a 19 4c e6 3f 1f d5 6e 29 ba 82 7a 70 4d 
+	08 ce 46 57 e9 b6 02 11 91 65 28 a6 26 44 3a d2 f4 f5 3a 70 43 53 65 83 59 
+	05 aa 93 77 09 35 f7 38 a9 b2 11 e7 e1 56 fd 46 31 bf da c4 4a 68 b2 b2 b1 
+	41 8d 0a ae 78 20 44 0e 95 9d a3 a6 ba 80 cd 54 34 6d f8 53 34 9c 4c 45 3d 
+	f4 ed a4 60 51 e4 6c e9 91 18 53 98 29 14 2d f4 68 b0 74 bd 0d 9a a8 bd ed 
+	c0 cc de 35 b4 16 c3 96 63 3c f9 af 4f 42 68 fb 29 bc 0d 49 00 f8 db 35 c2 
+	03 e6 e1 12 96 f7 68 d2 d6 c4 53 77 aa 47 6b c9 a1 a8 59 6a 88 62 89 53 28 
+	4e e1 39 b0 67 7f 20 3e 8f 20 b2 73 0c a7 7c 1a 10 76 43 42 42 d4 51 a9 98 
+	1d 1a 24 6d 99 d8 3d cb 69 71 11 6e 6e 58 b4 b6 aa 67 09 6e 70 b1 3b 14 f8 
+	51 b2 54 6f e9 91 30 bd fa 26 a9 d7 50 67 78 cb 1a 5a db 91 77 bf af dd 7a 
+	30 ab b2 50 20 26 10 22 c5 4c 06 b8 85 c8 a5 36 a1 f2 00 45 cb d5 ab 06 ce 
+	c6 6e 8f 99 c4 c5 07 34 17 80 d6 f2 81 c0 01 ac c1 cb 16 8d 84 8d 7c c6 21 
+	0b da d1 a1 4f 1a 6d 1d 9c e9 5f 2f 93 ed 22 5c b1 86 0d 73 4c e6 bc 23 d4 
+	14 70 52 e3 47 3f 47 03 fa 67 ad 7a 39 c2 ed 02 d3 ad b4 7f 72 f2 b9 5a bc 
+	2f 0f 48 b0 8c d8 d4 8b 7d 17 89 90 ed 3d 60 e3 fe 0b 2f 1a 30 37 92 d6 14 
+	40 ad d3 21 f8 35 94 87 63 13 a1 65 0a df a0 c6 1a 36 eb 4e 6e 4f cd c3 6e 
+	5a 3a b0 e0 b3 9a 5c 16 16 9f 7d 8d 77 f8 5e 6b be 49 d8 f3 95 00 73 fd 91 
+	65 73 4c 1d ed da b6 20 13 88 d8 a9
+;
+
+@RSA-Public-Exponent@
+	.
+	10001
+;
+
+LC
+(-----------------------------------------------------------------------------)
+@Public-Op@ (N is on stack)
+	@RSA-Public-Exponent! @RSA-Public-Modulus! MX
+;
+(-----------------------------------------------------------------------------)
+@Algo@[GPG RSA];
+(-----------------------------------------------------------------------------)
+@Owner@[PeterL <petermlambert@gmail.com>];
+(-----------------------------------------------------------------------------)
+RC
