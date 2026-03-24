@@ -1,0 +1,508 @@
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 4775dcd387fd903f856a9ec5ad9a1a526c4dee9c146b5393a958608e2abde97c75a92f32891804b3058c4316aa0399fca0713f17c78319e836d76cc93baaddf4
++++ b/ffa/ffacalc/ffa_calc.adb b9b8701b08b296b3b28d8d4300d28db362aa620804fbbbdbc47e5a96af9ecfc4ae164b17f38739091985cc0c0d8006a9d128a00b544013d15f2e5e3630703ec0
+@@ -32,6 +32,8 @@
+ with FZ_Pred;  use FZ_Pred;
+ with FZ_BitOp; use FZ_BitOp;
+ with FZ_Shift; use FZ_Shift;
++with FZ_Divis; use FZ_Divis;
++with FZ_Mul;   use FZ_Mul;
+ 
+ -- For Output
+ with FFA_IO;   use FFA_IO;
+@@ -147,6 +149,15 @@
+       end Want;
+       
+       
++      -- Ensure that a divisor is not zero
++      procedure MustNotZero(D : in FZ) is
++      begin
++         if FZ_ZeroP(D) = 1 then
++            E("Division by Zero!");
++         end if;
++      end MustNotZero;
++      
++      
+       -- Slide a new hex digit into the FZ on top of stack
+       procedure Ins_Hex_Digit(N : in out FZ;
+                               D : in Nibble) is
+@@ -316,6 +327,43 @@
+                Flag := W_NZeroP(F);
+                Drop;
+                
++               -- Divide and give Quotient and Remainder
++            when '\' =>
++               Want(2);
++               MustNotZero(Stack(SP));
++               FZ_IDiv(Dividend  => Stack(SP - 1),
++                       Divisor   => Stack(SP),
++                       Quotient  => Stack(SP - 1),
++                       Remainder => Stack(SP));
++               
++               -- Divide and give Quotient only
++            when '/' =>
++               Want(2);
++               MustNotZero(Stack(SP));
++               FZ_Div(Dividend  => Stack(SP - 1),
++                      Divisor   => Stack(SP),
++                      Quotient  => Stack(SP - 1));
++               Drop;
++               
++               -- Divide and give Remainder only
++            when '%' =>
++               Want(2);
++               MustNotZero(Stack(SP));
++               FZ_Mod(Dividend  => Stack(SP - 1),
++                      Divisor   => Stack(SP),
++                      Remainder => Stack(SP - 1));
++               Drop;
++               
++               -- Multiply, give bottom and top halves
++            when '*' =>
++               Want(2);
++               MustNotZero(Stack(SP));
++               -- Ch5: slow and simple 'Egyptological' method:
++               FZ_Mul_Egyptian(X     => Stack(SP - 1),
++                               Y     => Stack(SP),
++                               XY_Lo => Stack(SP - 1),
++                               XY_Hi => Stack(SP));
++               
+                -----------------
+                -- Bitwise Ops --
+                -----------------
+diff -uNr a/ffa/libffa/fz_arith.adb b/ffa/libffa/fz_arith.adb
+--- a/ffa/libffa/fz_arith.adb ee90484dc801b605ddc2db7b3dce4c95a6b99f59577253d40e437f94ea6e89534137102a68dab20b46d0ea1f8c7ba625258e7073102859ad764020989b95fa7c
++++ b/ffa/libffa/fz_arith.adb 27a59f78f058fcd385ec1b2e7edef7d2a8936ee3bf81338a64c786bc5b208befa8fb424eabd630f4042e4b32ffc5d6222778837bd04ead9bff096ba12bc32ea1
+@@ -44,6 +44,44 @@
+    pragma Inline_Always(FZ_Add);
+    
+    
++   -- Gate = 1: Sum := X + Y; Overflow := Carry
++   -- Gate = 0: Sum := X;     Overflow := 0
++   procedure FZ_Add_Gated_O(X          : in  FZ;
++                            Y          : in  FZ;
++                            Gate       : in  WBool;
++                            Sum        : out FZ;
++                            Overflow   : out WBool) is
++      Carry : WBool := 0;
++      Mask  : constant Word := 0 - Gate;
++   begin
++      for i in 0 .. Word_Index(X'Length - 1) loop
++         declare
++            A : constant Word := X(X'First + i);
++            B : constant Word := Y(Y'First + i) and Mask;
++            S : constant Word := A + B + Carry;
++         begin
++            Sum(Sum'First + i) := S;
++            Carry  := W_Carry(A, B, S);
++         end;
++      end loop;
++      Overflow := Carry;
++   end FZ_Add_Gated_O;
++   pragma Inline_Always(FZ_Add_Gated_O);
++   
++   
++   -- Same as FZ_Add_Gated_O, but without Overflow output
++   procedure FZ_Add_Gated(X          : in  FZ;
++                          Y          : in  FZ;
++                          Gate       : in  WBool;
++                          Sum        : out FZ) is
++      Overflow : Word;
++      pragma Unreferenced(Overflow);
++   begin
++      FZ_Add_Gated_O(X, Y, Gate, Sum, Overflow);
++   end FZ_Add_Gated;
++   pragma Inline_Always(FZ_Add_Gated);
++   
++   
+    -- Difference := X - Y; Underflow := Borrow
+    procedure FZ_Sub(X          : in  FZ;
+                     Y          : in  FZ;
+diff -uNr a/ffa/libffa/fz_arith.ads b/ffa/libffa/fz_arith.ads
+--- a/ffa/libffa/fz_arith.ads 614ad5186cb1fe04e3019af0e9ec9ae3f70b82eee7f2d7436be2c23a256677c76e2edc91f6df9e50a443ef03aeaa78ff86a2b83c8f0bf5326427af3c9ba2e9b5
++++ b/ffa/libffa/fz_arith.ads 384fbd4d5207234d75acfd11e7c62891ecfcb1c1cbd0205ff71e1b24846e43126538dbe6cdf63a3b78fd660bbe1671fa598c359703680e3aecb5144895893c31
+@@ -32,6 +32,22 @@
+                     Overflow   : out   WBool);
+    pragma Precondition(X'Length = Y'Length and X'Length = Sum'Length);
+    
++   -- Gate = 1: Sum := X + Y; Overflow := Carry
++   -- Gate = 0: Sum := X;     Overflow := 0
++   procedure FZ_Add_Gated_O(X          : in  FZ;
++                            Y          : in  FZ;
++                            Gate       : in  WBool;
++                            Sum        : out FZ;
++                            Overflow   : out WBool);
++   pragma Precondition(X'Length = Y'Length and X'Length = Sum'Length);
++   
++   -- Same as FZ_Add_Gated_O, but without Overflow output
++   procedure FZ_Add_Gated(X          : in  FZ;
++                          Y          : in  FZ;
++                          Gate       : in  WBool;
++                          Sum        : out FZ);
++   pragma Precondition(X'Length = Y'Length and X'Length = Sum'Length);
++   
+    -- Difference := X - Y; Underflow := Borrow
+    procedure FZ_Sub(X          : in  FZ;
+                     Y          : in  FZ;
+diff -uNr a/ffa/libffa/fz_basic.adb b/ffa/libffa/fz_basic.adb
+--- a/ffa/libffa/fz_basic.adb 6460958067c44f2c661e4a19590a65d33615bad5cbf436f155499a11e8015e81cef9b4f036a41bf280fc2cb1dbdb885bb56edd7d4a79f9276b93dd0470c91659
++++ b/ffa/libffa/fz_basic.adb 868d35f9327d08b5cbec9f573fbfd453bd3639e2b1cb93ba0c8264591c396e920883132037716798ab607a3cb0ac6a95ad819d8b39180693bd2b768b666ac6ee
+@@ -26,6 +26,14 @@
+    -- Fundamental Operations on FZ (finite integers)
+    ---------------------------------------------------------------------------
+    
++   -- Determine the Bitness of N
++   function FZ_Bitness(N : in FZ) return Bit_Count is
++   begin
++      return N'Length * Words.Bitness;
++   end FZ_Bitness;
++   pragma Inline_Always(FZ_Bitness);
++   
++   
+    -- N := 0
+    procedure FZ_Clear(N : out FZ) is
+    begin
+diff -uNr a/ffa/libffa/fz_basic.ads b/ffa/libffa/fz_basic.ads
+--- a/ffa/libffa/fz_basic.ads 9c1f0228b71059605c53d22a88c44e14705f5c82eb3877131228e30c62549e83187278b5370697c858f10aa8373d666fbc42b8831d39c1923fc544847b75a31c
++++ b/ffa/libffa/fz_basic.ads c03435b8b09d144be64c1e1fff0aa4626693d28ae15d30ef59293f215a8b135a24b28030e22835599775d117fb181e44fa9178423aacf1f641efac0392dc6ab1
+@@ -25,6 +25,9 @@
+    
+    pragma Pure;
+    
++   -- Determine the Bitness of N
++   function FZ_Bitness(N : in FZ) return Bit_Count;
++   
+    -- N := 0
+    procedure FZ_Clear(N : out FZ);
+    
+diff -uNr a/ffa/libffa/fz_divis.adb b/ffa/libffa/fz_divis.adb
+--- a/ffa/libffa/fz_divis.adb false
++++ b/ffa/libffa/fz_divis.adb 449d20be8ce3646757dcd06d68baf7fc83a5b32c085b5d617d30500c7eb4377caa2e74b3679c2751f5277660b5e9c8c2955608c696b3268c7d294caffa99e442
+@@ -0,0 +1,96 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;    use Words;
++with W_Pred;   use W_Pred;
++with FZ_Basic; use FZ_Basic;
++with FZ_Arith; use FZ_Arith;
++with FZ_BitOp; use FZ_BitOp;
++with FZ_Shift; use FZ_Shift;
++
++
++package body FZ_Divis is
++   
++   -- Dividend is divided by Divisor, producing Quotient and Remainder.
++   -- WARNING: NO div0 test here! Caller must test.
++   procedure FZ_IDiv(Dividend  : in  FZ;
++                     Divisor   : in  FZ;
++                     Quotient  : out FZ;
++                     Remainder : out FZ) is
++      
++      -- The working register
++      QR : FZ(1 .. Dividend'Length + Divisor'Length);
++      
++      -- Bottom seg of Z will end up containing the Quotient; top - remainder
++      Q  : FZ renames QR(1                   .. Dividend'Length); -- Quotient
++      R  : FZ renames QR(Dividend'Length + 1 .. QR'Last);          -- Remainder
++      
++      C : WBool := 0; -- Borrow, from comparator
++   begin
++      Q := Dividend; -- Q begins with the Dividend
++      FZ_Clear(R);   -- R begins empty
++      
++      -- For each bit of Dividend:
++      for i in 1 .. FZ_Bitness(Dividend) loop
++         
++         -- Advance QR by 1 bit:
++         FZ_ShiftLeft(QR, QR, 1);
++         
++         -- Subtract Divisor from R; Underflow goes into C
++         FZ_Sub(X => R, Y => Divisor, Difference => R, Underflow => C);
++         
++         -- If C=1, subtraction underflowed, and then Divisor gets added back:
++         FZ_Add_Gated(X => R, Y => Divisor, Gate => C, Sum => R);
++         
++         -- Current result-bit is equal to Not-C, i.e. 1 if Divisor 'went in'
++         FZ_Or_W(Q, W_Not(C));
++         
++      end loop;
++      
++      Quotient  := Q; -- Output the Quotient.
++      Remainder := R; -- Output the Remainder.
++      
++   end FZ_IDiv;
++   pragma Inline_Always(FZ_IDiv);
++   
++   
++   -- Exactly same thing as IDiv, but keep only the Quotient
++   procedure FZ_Div(Dividend  : in  FZ;
++                    Divisor   : in  FZ;
++                    Quotient  : out FZ) is
++      Remainder : FZ(Divisor'Range);
++      pragma Unreferenced(Remainder);
++   begin
++      FZ_IDiv(Dividend, Divisor, Quotient, Remainder);
++   end FZ_Div;
++   pragma Inline_Always(FZ_Div);
++   
++   
++   -- Exactly same thing as IDiv, but keep only the Remainder
++   procedure FZ_Mod(Dividend  : in FZ;
++                    Divisor   : in FZ;
++                    Remainder : out FZ) is
++      Quotient : FZ(Dividend'Range);
++      pragma Unreferenced(Quotient);
++   begin
++      FZ_IDiv(Dividend, Divisor, Quotient, Remainder);
++   end FZ_Mod;
++   pragma Inline_Always(FZ_Mod);
++   
++end FZ_Divis;
+diff -uNr a/ffa/libffa/fz_divis.ads b/ffa/libffa/fz_divis.ads
+--- a/ffa/libffa/fz_divis.ads false
++++ b/ffa/libffa/fz_divis.ads cf9e5bbcd7dd4df94dd9a95f52b631cb5c9d29eb6ec7eeec1ed40e06b7a80019f55206d3c3c0e210bc5a056e12203360c9f51ec2fe060542805a1be2e68949a9
+@@ -0,0 +1,51 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Divis is
++   
++   pragma Pure;
++   
++   -- Dividend is divided by Divisor, producing Quotient and Remainder.
++   -- WARNING: NO div0 test here! Caller must test.
++   procedure FZ_IDiv(Dividend  : in  FZ;
++                     Divisor   : in  FZ;
++                     Quotient  : out FZ;
++                     Remainder : out FZ);
++   pragma Precondition(Dividend'Length = Divisor'Length and
++                         Quotient'Length = Remainder'Length and
++                         Dividend'Length = Quotient'Length);
++   
++   -- Exactly same thing as IDiv, but keep only the Quotient
++   procedure FZ_Div(Dividend  : in FZ;
++                    Divisor   : in FZ;
++                    Quotient  : out FZ);
++   pragma Precondition(Dividend'Length = Divisor'Length and
++                         Dividend'Length = Quotient'Length);
++   
++   -- Exactly same thing as IDiv, but keep only the Remainder
++   procedure FZ_Mod(Dividend  : in FZ;
++                    Divisor   : in FZ;
++                    Remainder : out FZ);
++   pragma Precondition(Dividend'Length = Divisor'Length and
++                         Dividend'Length = Remainder'Length);
++   
++end FZ_Divis;
+diff -uNr a/ffa/libffa/fz_lim.adb b/ffa/libffa/fz_lim.adb
+--- a/ffa/libffa/fz_lim.adb f6117d2b425e46e65421abdab29fdb3ee664b657b36930a8249ec3e4983be09258ca4bd6b24c0b81050623c39f58bf6b2eeabda579a2066176f439d664cd2053
++++ b/ffa/libffa/fz_lim.adb 2cc9761900e19afbc04b07151108755d4ae49643a1d94db021d400de09b21b689fed635b5865ed0e0571bddd8d3bc90d5447eaeb40a39171ddeaaebb42bce929
+@@ -28,9 +28,7 @@
+       -- Supposing we meet the minimal bitness:
+       if B >= FZ_Minimal_Bitness then
+          while T > 0 loop
+-            if T mod 2 = 1 then
+-               PopCount := PopCount + 1;
+-            end if;
++            PopCount := PopCount + T mod 2;
+             T := T / 2;
+          end loop;
+          
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb false
++++ b/ffa/libffa/fz_mul.adb 81335cbf5970684e89c61b7a37bff32f747027a72251d88f2980d21e52d41b88d05503613e11404d55be9c5dea3170a7a069cdd32fc4df64500164bcee844af9
+@@ -0,0 +1,74 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;    use Words;
++with FZ_Basic; use FZ_Basic;
++with FZ_Pred;  use FZ_Pred;
++with FZ_Arith; use FZ_Arith;
++with FZ_Shift; use FZ_Shift;
++
++
++package body FZ_Mul is
++   
++   -- 'Egyptological' multiplier. XY_Lo and XY_Hi hold result of X*Y.
++   procedure FZ_Mul_Egyptian(X     : in  FZ;
++                             Y     : in  FZ;
++                             XY_Lo : out FZ;
++                             XY_Hi : out FZ) is
++      
++      -- Register holding running product
++      XY : FZ(1 .. X'Length + Y'Length);
++      
++      -- X-Slide
++      XS : FZ(1 .. X'Length + Y'Length);
++      
++      -- Y-Slide
++      YS : FZ(Y'Range) := Y;
++      
++   begin
++      -- Product register begins empty
++      FZ_Clear(XY);
++      
++      -- X-Slide initially equals X:
++      XS(1            .. X'Length) := X;
++      XS(X'Length + 1 .. XS'Last)  := (others => 0);
++      
++      -- For each bit of Y:
++      for i in 1 .. FZ_Bitness(Y) loop
++         
++         -- If lowest bit of Y-Slide is 1, X-Slide is added into XY
++         FZ_Add_Gated(X    => XY, Y => XS, Sum => XY,
++                      Gate => FZ_OddP(YS));
++         
++         -- X-Slide := X-Slide * 2
++         FZ_ShiftLeft(XS, XS, 1);
++         
++         -- Y-Slide := Y-Slide / 2
++         FZ_ShiftRight(YS, YS, 1);
++         
++      end loop;
++      
++      -- Write out the Product's lower and upper FZs:
++      XY_Lo := XY(1                .. XY_Lo'Length);
++      XY_Hi := XY(XY_Lo'Length + 1 .. XY'Last);
++      
++   end FZ_Mul_Egyptian;
++   pragma Inline_Always(FZ_Mul_Egyptian);
++
++end FZ_Mul;
+diff -uNr a/ffa/libffa/fz_mul.ads b/ffa/libffa/fz_mul.ads
+--- a/ffa/libffa/fz_mul.ads false
++++ b/ffa/libffa/fz_mul.ads 13feafdfafeb27c76e393ce5a2a7fac89360dccdfdade355cb248d66fe7b6be202f71311136a09e729271d468d2dfda6c2d4445c70c03a584e26fe53c458eaf0
+@@ -0,0 +1,36 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Mul is
++   
++   pragma Pure;
++   
++   -- 'Egyptological' multiplier. XY_Lo and XY_Hi hold result of X*Y.
++   procedure FZ_Mul_Egyptian(X     : in  FZ;
++                             Y     : in  FZ;
++                             XY_Lo : out FZ;
++                             XY_Hi : out FZ);
++   pragma Precondition(X'Length = Y'Length and
++                         XY_Lo'Length = XY_Hi'Length and
++                         XY_Lo'Length = ((X'Length + Y'Length) / 2));
++   
++end FZ_Mul;
+diff -uNr a/ffa/libffa/fz_type.ads b/ffa/libffa/fz_type.ads
+--- a/ffa/libffa/fz_type.ads c53d7e85e48b1c7ba062aec40e7d95c2230ee1d09f70dc19681b7759ee1f07f2aa599764ae2742fd3af4fb6cbdd599eac0e0c4e1f4f07c11b0f843efb73b02e5
++++ b/ffa/libffa/fz_type.ads d2817dfd3e193ec26a5466791e7a55e7b781272faa088ec051d96f622dcfffd369ae0f2f7717c8f803a3b4ad0a278b27ee79841751b5c4f9a16a0dec5fb7a907
+@@ -41,6 +41,9 @@
+    -- A count of Words in an FZ (cannot be 0):
+    subtype Word_Count is Indices range 1 .. Indices'Last;
+    
++   -- A count of Bits, anywhere (cannot be 0):
++   subtype Bit_Count is Positive;
++   
+    -- An index of a particular ~bit~ in an FZ:
+    subtype FZBit_Index is Indices;
+    
+diff -uNr a/ffa/libffa/w_pred.adb b/ffa/libffa/w_pred.adb
+--- a/ffa/libffa/w_pred.adb 5d4d9aa640f4415dcf8e18dfaf299fce4fa2c5deda3b22c851d67f54423814f035ccf4ae9184d4933bb90e0ea35e70f71a19b12da905584a374986618026e1a8
++++ b/ffa/libffa/w_pred.adb 793fd672fabc06ac1f852bfc681a23f845b8c7560a8601f1f1239ed07065a94e70b1e9402664d16d87449a5ff5c81420f7d5e0eebc95d84c3373576df66a7c0a
+@@ -38,6 +38,14 @@
+    pragma Inline_Always(W_NZeroP);
+    
+    
++   -- Return WBool-complement of N.
++   function W_Not(N : in WBool) return WBool is
++   begin
++      return 1 xor N;
++   end W_Not;
++   pragma Inline_Always(W_Not);
++   
++   
+    -- Return 1 if N is odd; otherwise return 0.
+    function W_OddP(N : in Word) return WBool is
+    begin
+diff -uNr a/ffa/libffa/w_pred.ads b/ffa/libffa/w_pred.ads
+--- a/ffa/libffa/w_pred.ads a8b74fcf54f88ee08e1f4760729ea54088c2d21db24083e695fd1c7bf0b17eec9a4d614045bb337fd0f5c7f8bf30d7bd80063f7dfe7fe28e2e49078ba52e8250
++++ b/ffa/libffa/w_pred.ads f367b121a5fd6fba68f6046a9329ac6ec98272a2728f38ddd75c52f348834ad811f20d88aeac38b24d07b1ce9c042a736554a6c7fb1f6ad7a264b2a09126f7ea
+@@ -30,6 +30,9 @@
+    -- Return 1 if N is unequal to 0; otherwise return 0.
+    function W_NZeroP(N : in Word) return WBool;
+    
++   -- Return WBool-complement of N.
++   function W_Not(N : in WBool) return WBool;
++   
+    -- Return 1 if N is odd; otherwise return 0.
+    function W_OddP(N : in Word) return WBool;
+    

@@ -1,0 +1,214 @@
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb b9b8701b08b296b3b28d8d4300d28db362aa620804fbbbdbc47e5a96af9ecfc4ae164b17f38739091985cc0c0d8006a9d128a00b544013d15f2e5e3630703ec0
++++ b/ffa/ffacalc/ffa_calc.adb 7176998bbc09e3c197329341463bf445ba9e05d1c2fa295a8aea710d7a4cfc60f4810134c74b92fcb71ddbae6d60ddb5a349ea9e4e3067ac7caf4ea7d43c7cf3
+@@ -34,11 +34,11 @@
+ with FZ_Shift; use FZ_Shift;
+ with FZ_Divis; use FZ_Divis;
+ with FZ_Mul;   use FZ_Mul;
++with FZ_ModEx; use FZ_ModEx;
+ 
+ -- For Output
+ with FFA_IO;   use FFA_IO;
+ 
+-
+ procedure FFA_Calc is
+    
+    Width  : Positive; -- Desired FFA Width
+@@ -357,13 +357,34 @@
+                -- Multiply, give bottom and top halves
+             when '*' =>
+                Want(2);
+-               MustNotZero(Stack(SP));
+                -- Ch5: slow and simple 'Egyptological' method:
+                FZ_Mul_Egyptian(X     => Stack(SP - 1),
+                                Y     => Stack(SP),
+                                XY_Lo => Stack(SP - 1),
+                                XY_Hi => Stack(SP));
+                
++               -- Modular Multiplication
++            when 'M' =>
++               Want(3);
++               MustNotZero(Stack(SP));
++               FZ_Mod_Mul(X       => Stack(SP - 2),
++                          Y       => Stack(SP - 1),
++                          Modulus => Stack(SP),
++                          Product => Stack(SP - 2));
++               Drop;
++               Drop;
++               
++               -- Modular Exponentiation
++            when 'X' =>
++               Want(3);
++               MustNotZero(Stack(SP));
++               FZ_Mod_Exp(Base     => Stack(SP - 2),
++                          Exponent => Stack(SP - 1),
++                          Modulus  => Stack(SP),
++                          Result   => Stack(SP - 2));
++               Drop;
++               Drop;
++               
+                -----------------
+                -- Bitwise Ops --
+                -----------------
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb false
++++ b/ffa/libffa/fz_modex.adb 3236467e5470ca5b3b1384473445491ee52c0151d36a450ca1b9e496a9fe53a5afe490b065fcddd7a6e7dc6bbbdd902643b7c3bc4cfe5984f84e69ae5d8a7b2e
+@@ -0,0 +1,109 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Basic; use FZ_Basic;
++with FZ_Pred;  use FZ_Pred;
++with FZ_Shift; use FZ_Shift;
++with FZ_Mul;   use FZ_Mul;
++with FZ_Divis; use FZ_Divis;
++
++
++package body FZ_ModEx is
++   
++   -- Modular Multiply: Product := X*Y mod Modulus
++   procedure FZ_Mod_Mul(X        : in  FZ;
++                        Y        : in  FZ;
++                        Modulus  : in  FZ;
++                        Product  : out FZ) is
++      
++      -- The wordness of all three operands is equal:
++      L     : constant Indices := X'Length;
++      
++      -- Double-width register for multiplication and modulus operations
++      XY    : FZ(1 .. L * 2);
++      
++      -- To refer to the lower and upper halves of the working register:
++      XY_Lo : FZ renames XY(1     .. L);
++      XY_Hi : FZ renames XY(L + 1 .. XY'Last);
++      
++      -- A zero-padded double-wide copy of Modulus, to satisfy Ch.5's FZ_Mod
++      M     : FZ(XY'Range);
++      
++   begin
++      -- Place the Modulus in a double-width M, as FZ_Mod currently demands
++      M(Modulus'Range)   := Modulus;
++      M(L + 1 .. M'Last) := (others => 0);
++      
++      -- XY_Lo:XY_Hi := X * Y
++      FZ_Mul_Egyptian(X, Y, XY_Lo, XY_Hi);
++      
++      -- XY := XY mod M
++      FZ_Mod(XY, M, XY);
++      
++      -- The bottom half of XY is our modular product; top half is always 0
++      Product := XY_Lo;
++   end FZ_Mod_Mul;
++   pragma Inline_Always(FZ_Mod_Mul);
++   
++   
++   -- Modular Exponent: Result := Base^Exponent mod Modulus
++   procedure FZ_Mod_Exp(Base     : in  FZ;
++                        Exponent : in  FZ;
++                        Modulus  : in  FZ;
++                        Result   : out FZ) is
++      
++      -- Working register for the squaring
++      B : FZ(Base'Range)     := Base;
++      
++      -- Register for cycling through the bits of E
++      E : FZ(Exponent'Range) := Exponent;
++      
++      -- Register for the Mux operation
++      T : FZ(Result'Range);
++      
++   begin
++      -- Result := 1
++      WBool_To_FZ(1, Result);
++      
++      -- For each bit of Result width:
++      for i in 1 .. FZ_Bitness(Result) loop
++         
++         -- T := Result * B mod Modulus
++         FZ_Mod_Mul(X => Result, Y => B, Modulus => Modulus,
++                    Product => T);
++         
++         -- Sel is the current low bit of E;
++         --    When Sel=0 -> Result := Result;
++         --    When Sel=1 -> Result := T
++         FZ_Mux(X => Result, Y => T, Result => Result,
++                Sel => FZ_OddP(E));
++         
++         -- Advance to the next bit of E
++         FZ_ShiftRight(E, E, 1);
++         
++         -- B := B*B mod Modulus
++         FZ_Mod_Mul(X => B, Y => B, Modulus => Modulus,
++                    Product => B);
++         
++      end loop;
++      
++   end FZ_Mod_Exp;
++   pragma Inline_Always(FZ_Mod_Exp);
++   
++end FZ_ModEx;
+diff -uNr a/ffa/libffa/fz_modex.ads b/ffa/libffa/fz_modex.ads
+--- a/ffa/libffa/fz_modex.ads false
++++ b/ffa/libffa/fz_modex.ads 7271e109fdfad61859fabd2cccaca71a7baf037467e29db9b82ff29ecf68ffaeac3ebebdff7af690087acc97f3106a4c1f74ecb82e0d46a206a3318a71018315
+@@ -0,0 +1,45 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++package FZ_ModEx is
++   
++   pragma Pure;
++   
++   -- Modular Multiply: Product := X*Y mod Modulus
++   procedure FZ_Mod_Mul(X        : in  FZ;
++                        Y        : in  FZ;
++                        Modulus  : in  FZ;
++                        Product  : out FZ);
++   pragma Precondition(X'Length = Y'Length and
++                         Modulus'Length = X'Length and
++                         Product'Length = Modulus'Length);
++   
++   -- Modular Exponent: Result := Base^Exponent mod Modulus
++   procedure FZ_Mod_Exp(Base     : in  FZ;
++                        Exponent : in  FZ;
++                        Modulus  : in  FZ;
++                        Result   : out FZ);
++   pragma Precondition(Base'Length = Exponent'Length and
++                         Base'Length = Result'Length and
++                         Base'Length = Modulus'Length);
++   
++end FZ_ModEx;

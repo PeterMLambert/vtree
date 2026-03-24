@@ -1,0 +1,484 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 9978e108265b404ac834322c0111a2cb518aef3cf514339b7f1e95bb7df97ff0b02183b15901dd1e5ec8b5bc7580026501755ebff476c5473e76de64f3fb9a1b
++++ b/ffa/MANIFEST.TXT 1a6410aaf0afeeec5f62dfb6120ab51df6467d5c370fea8dd517f186d61ac0b07c0425d03f3a47e7c81450961f76b23ef51087255af88ce3899b1b966240d643
+@@ -18,3 +18,4 @@
+  567223 ffa_ch17_peh                   "Introduction to Peh."
+  569234 ffa_ch18_subroutines           "Subroutines in Peh."
+  578827 ffa_ch19_peh_tuning_and_demos  "Peh Tuning and Demo Tapes."
++ 611618 ffa_ch20_litmus                "A Peh-powered verifier for traditional GPG signatures."
+diff -uNr a/ffa/contrib/litmus/asciilifeform.peh b/ffa/contrib/litmus/asciilifeform.peh
+--- a/ffa/contrib/litmus/asciilifeform.peh false
++++ b/ffa/contrib/litmus/asciilifeform.peh 71ec2ba584b0af53b70be753dde0f09ee0c62f44d66734af0fc25162a58f1cd856c0ef214125fa0980707e5b74ab352ffdd87d45a5aee303a688b515f50e1936
+@@ -0,0 +1,30 @@
++(----------------------------------------------------------------------------)
++( Public key converted from GPG key 17215D118B7239507FAFED98B98228A001ABFFC7 )
++(----------------------------------------------------------------------------)
++@RSA-Public-Modulus@
++        .
++        CDD49A674BAF76D3B73E25BC6DF66EF3ABEDDCA461D3CCB6416793E3437C7806562694
++        73C2212D5FD5EED17AA067FEC001D8E76EC901EDEDF960304F891BD3CAD7F9A335D1A2
++        EC37EABEFF3FBE6D3C726DC68E599EBFE5456EF19813398CD7D548D746A30AA47D4293
++        968BFBAFCBF65A90DFFC87816FEE2A01E1DC699F4DDABB84965514C0D909D54FDA7062
++        A2037B50B771C153D5429BA4BA335EAB840F9551E9CD9DF8BB4A6DC3ED1318FF3969F7
++        B99D9FB90CAB968813F8AD4F9A069C9639A74D70A659C69C29692567CE863B88E191CC
++        9535B91B417D0AF14BE09C78B53AF9C5F494BCF2C60349FFA93C81E817AC682F0055A6
++        07BB56D6A281C1A04CEFE1
++;
++(----------------------------------------------------------------------------)
++@RSA-Public-Exponent@
++        .
++        10001
++;
++LC
++(----------------------------------------------------------------------------)
++@Public-Op@
++        (N is on stack) @RSA-Public-Exponent! @RSA-Public-Modulus! MX
++;
++(----------------------------------------------------------------------------)
++@Algo@[GPG RSA];
++(----------------------------------------------------------------------------)
++@Owner@[asciilifeform <stas@loper-os.org>];
++(----------------------------------------------------------------------------)
++RC
+diff -uNr a/ffa/contrib/litmus/litmus.sh b/ffa/contrib/litmus/litmus.sh
+--- a/ffa/contrib/litmus/litmus.sh false
++++ b/ffa/contrib/litmus/litmus.sh 846f886e12e3e1d467d315b666917f6177038986280f655f19cc5ea61873a6c7f9517718963c294ad00f77b7ba507c39ab8e2402588f8aac7511a8960eef3292
+@@ -0,0 +1,438 @@
++#!/bin/sh
++
++############################################################################
++# 'Litmus' Utility. Verifies traditional GPG RSA signatures using Peh.     #
++#                                                                          #
++# Usage: ./litmus.sh publickey.peh signature.sig datafile                  #
++#                                                                          #
++# Currently, supports only RSA 'detached' signatures that use SHA512 hash. #
++# See instructions re: converting traditional GPG public keys for use with #
++# this program.                                                            #
++#                                                                          #
++# Peh, xxd, hexdump, shasum, and a number of common utils (see EXTERNALS)  #
++# must be present on your machine.                                         #
++#                                                                          #
++# (C) 2020 Stanislav Datskovskiy ( www.loper-os.org )                      #
++# http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     #
++#                                                                          #
++# You do not have, nor can you ever acquire the right to use, copy or      #
++# distribute this software ; Should you use this software for any purpose, #
++# or copy and distribute it to anyone or in any manner, you are breaking   #
++# the laws of whatever soi-disant jurisdiction, and you promise to         #
++# continue doing so for the indefinite future. In any case, please         #
++# always : read and understand any software ; verify any PGP signatures    #
++# that you use - for any purpose.                                          #
++############################################################################
++
++# External programs that are required (if not found, will eggog) :
++EXTERNALS="peh xxd hexdump base64 shasum cut tr sed wc grep printf"
++
++
++# Return Codes:
++
++# Signature is VALID for given Sig, Data File, and Public Key:
++RET_VALID_SIG=0
++
++# Signature is INVALID:
++RET_BAD_SIG=1
++
++# All Other Cases:
++RET_EGGOG=-1
++
++
++# Terminations:
++
++# Success (Valid RSA signature) :
++done_sig_valid() {
++    echo "VALID $pubkey_algo signature from $pubkey_owner"
++    exit $RET_VALID_SIG
++}
++
++# Failure (INVALID RSA signature) :
++done_sig_bad() {
++    echo "Signature is INVALID for this public key and input file!"
++    exit $RET_BAD_SIG
++}
++
++# Failure in decoding 'GPG ASCII armour' :
++eggog_sig_armour() {
++    echo "$SIGFILE could not decode as a GPG ASCII-Armoured Signature!" >&2
++    exit $RET_EGGOG
++}
++
++# Failure from corrupt signature :
++eggog_sig_corrupt() {
++    echo "$SIGFILE is corrupt!" >&2
++    exit $RET_EGGOG
++}
++
++
++# Failure from bad Peh :
++eggog_peh() {
++    echo "EGGOG in executing Peh tape! Please check Public Key." >&2
++    exit $RET_EGGOG
++}
++
++
++# Number of Arguments required by this program:
++REQD_ARGS=3
++
++# If invalid arg count, print usage and abort:
++if [ "$#" -ne $REQD_ARGS ]; then
++    echo "Usage: $0 publickey.peh signature.sig datafile"
++    exit $RET_EGGOG
++fi
++
++
++# We only support SHA512. Parameters for it:
++HASHER="shasum -a 512 -b"
++
++# For 'PKCS' encoding, the ASN magic turd corresponding to SHA512:
++ASN="3051300D060960864801650304020305000440"
++ASN_LEN=$((${#ASN} / 2))
++MD_LEN=64 # 512 / 8 == 64 bytes
++
++
++# Minimal Peh Width (used for non-arithmetical ops, e.g. 'Owner')
++MIN_PEH_WIDTH=256
++
++
++# The given public key file (a Peh tape, see docs)
++PUBFILE=$1
++
++# The given Detached GPG Signature file to be verified
++SIGFILE=$2
++
++# The given Data file to be verified against the Signature
++DATAFILE=$3
++
++# Verify that each of the given input files exists:
++FILES=($PUBFILE $SIGFILE $DATAFILE)
++for f in ${FILES[@]}; do
++    if ! [ -f $f ]; then
++        echo "$f does not exist!" >&2
++        exit $RET_EGGOG
++    fi
++done
++
++# Calculate length of the pubkey file:
++PUBFILE_LEN=$(wc -c $PUBFILE | cut -d ' ' -f1)
++
++
++# Peh's Return Codes
++PEH_YES=1
++PEH_NO=0
++PEH_MU=255
++PEH_EGGOG=254
++
++# Execute given Peh tape, with given FFA Width and Height,
++# on top of the pubkey tape; returns output in $peh_res and $peh_code.
++run_peh_tape() {
++    # The tape itself
++    tape=$1
++
++    # FFA Width for the tape
++    peh_width=$2
++    
++    # FFA Stack Height for the tape
++    peh_height=$3
++
++    # Compute the length of the given tape
++    tape_len=${#tape}
++    
++    # Add the length of the Public Key tape to the above
++    tape_len=$(($tape_len + $PUBFILE_LEN))
++
++    # Max Peh Life for all such tapes
++    peh_life=$(($tape_len * 2))
++    
++    # Execute the tape:
++    peh_res=$((cat $PUBFILE; echo $tape) | \
++        peh $peh_width $peh_height $tape_len $peh_life);
++    peh_code=$?
++
++    # # If Peh returned PEH_EGGOG:
++    if [ $peh_code -eq $PEH_EGGOG ]
++    then
++        # Abort: likely, coarse error of pilotage in the public key tape.
++        eggog_peh
++    fi
++}
++
++# Ask the public key about the Owner:
++run_peh_tape "@Algo!QY" $MIN_PEH_WIDTH 1
++pubkey_algo=$peh_res
++
++# Ask the public key about Algo Type:
++run_peh_tape "@Owner!QY" $MIN_PEH_WIDTH 1
++pubkey_owner=$peh_res
++
++# The only supported algo is GPG RSA:
++if [ "$pubkey_algo" != "GPG RSA" ]
++then
++    echo "This public key specifies algo '$pubkey_algo';" >&2
++    echo "The only algo supported is 'GPG RSA' !" >&2
++    exit $RET_EGGOG
++fi
++
++# Verify that all of the necessary external programs in fact exist:
++for i in $EXTERNALS
++do
++    command -v $i >/dev/null && continue || \
++        { echo "$i is required but was not found! Please install it."; \
++        exit $RET_EGGOG; }
++done
++
++# 'ASCII-Armoured' PGP signatures have mandatory start and end markers:
++START_MARKER="\-\-\-\-\-BEGIN PGP SIGNATURE\-\-\-\-\-"
++END_MARKER="\-\-\-\-\-END PGP SIGNATURE\-\-\-\-\-"
++
++# Determine start and end line positions for payload:
++start_ln=$(grep -m 1 -n "$START_MARKER" $SIGFILE | cut -d ':' -f1)
++end_ln=$(grep -m 1 -n "$END_MARKER" $SIGFILE | cut -d ':' -f1)
++
++# Both start and end markers must exist :
++if [ "$start_ln" == "" ] || [ "$end_ln" == "" ]
++then
++    echo "$SIGFILE does not contain ASCII-armoured PGP Signature!" >&2
++    exit $RET_EGGOG
++fi
++
++# Discard the markers:
++start_ln=$(($start_ln + 1))
++end_ln=$(($end_ln - 1))
++
++# If there is no payload, or the markers are misplaced, abort:
++if [ $start_ln -ge $end_ln ]
++then
++    eggog_sig_armour
++fi
++
++# Extract sig payload:
++sig_payload=$(sed -n "$start_ln,$end_ln p" < $SIGFILE | \
++    sed -n "/^Version/!p" | sed -n "/^=/!p" | tr -d " \t\n\r")
++
++# If eggog -- abort:
++if [ $? -ne 0 ]
++then
++    eggog_sig_armour
++fi
++
++# Obtain the sig bytes:
++sig_bytes=($(echo $sig_payload | base64 -d | hexdump -ve '1/1 "%.2x "'))
++
++# If eggog -- abort:
++if [ $? -ne 0 ]
++then
++    eggog_sig_armour
++fi
++
++# Number of bytes in the sig file
++sig_len=${#sig_bytes[@]}
++
++
++# Test that certain fields in the Sig have their mandatory value
++sig_field_mandatory() {
++    f_name=$1
++    f_value=$2
++    f_mandate=$3
++    if [ "$f_value" != "$f_mandate" ]
++    then
++        reason="$f_name must equal $f_mandate; instead is $f_value."
++        echo "$SIGFILE is UNSUPPORTED : $reason" >&2
++        echo "Only RSA and SHA512 hash are supported !" >&2
++        exit $RET_EGGOG
++    fi
++}
++
++
++# Starting Position for get_sig_bytes()
++sig_pos=0
++
++# Extract given # of sig bytes from the current sig_pos; advance sig_pos.
++get_sig_bytes() {
++    # Number of bytes requested
++    count=$1
++
++    # Result: $count bytes from current $sig_pos (contiguous hex string)
++    r=$(echo ${sig_bytes[@]:$sig_pos:$count} | sed "s/ //g" | tr 'a-z' 'A-Z')
++
++    # Advance $sig_pos by $count:
++    sig_pos=$(($sig_pos + $count))
++    
++    # If more bytes were requested than were available in sig_bytes:
++    if [ $sig_pos -gt $sig_len ]
++    then
++        # Abort. The signature was mutilated somehow.
++        eggog_sig_corrupt
++    fi
++}
++
++# Convert the current sig component to integer
++hex_to_int() {
++    r=$((16#$r))
++}
++
++# Turd to be composed of certain values from the sig, per RFC4880.
++# Final hash will run on the concatenation of DATAFILE and this turd.
++turd=""
++
++## Parse all of the necessary fields in the GPG Signature:
++
++# CTB (must equal 0x89)
++get_sig_bytes 1
++sig_ctb=$r
++sig_field_mandatory "Version" $sig_ctb 89
++
++# Length
++get_sig_bytes 2
++hex_to_int
++sig_length=$r
++
++# Version (only Version 4 -- what GPG 1.4.x outputs -- is supported)
++get_sig_bytes 1
++turd+=$r
++sig_version=$r
++sig_field_mandatory "Version" $sig_version 04
++
++# Class (only class 0 is supported)
++get_sig_bytes 1
++turd+=$r
++sig_class=$r
++sig_field_mandatory "Class" $sig_class 00
++
++# Public Key Algo (only RSA is supported)
++get_sig_bytes 1
++turd+=$r
++sig_pk_algo=$r
++sig_field_mandatory "Public Key Algo" $sig_pk_algo 01
++
++# Digest Algo (only SHA512 is supported)
++get_sig_bytes 1
++turd+=$r
++sig_digest_algo=$r
++sig_field_mandatory "Digest Algo" $sig_digest_algo 0A
++
++# Hashed Section Length
++get_sig_bytes 2
++turd+=$r
++hex_to_int
++sig_hashed_len=$r
++
++# Hashed Section (typically: timestamp)
++get_sig_bytes $sig_hashed_len
++turd+=$r
++sig_hashed=$r
++
++# Unhashed Section Length
++get_sig_bytes 1
++hex_to_int
++sig_unhashed_len=$r
++
++# Unhashed Section (discard)
++get_sig_bytes $sig_unhashed_len
++
++# Compute Byte Length of Hashed Header (for last field)
++hashed_header_len=$((${#turd} / 2))
++
++# Final section of the hashed turd (not counted in hashed_header_len)
++turd+=$sig_version
++turd+="FF"
++turd+=$(printf "%08x" $hashed_header_len)
++
++# Compute the hash of data file and the hashed appendix from sig :
++hash=$((cat $DATAFILE; xxd -r -p <<< $turd) | $HASHER | cut -d ' ' -f1)
++# Convert to upper case
++hash=$(echo $hash | tr 'a-z' 'A-Z')
++
++# Parse the RSA Signature portion of the Sig file:
++
++# RSA Packet Length (how many bytes to read)
++get_sig_bytes 1
++hex_to_int
++rsa_packet_len=$r
++
++# The RSA Packet itself
++get_sig_bytes $rsa_packet_len
++rsa_packet=$r
++
++# Digest Prefix (2 bytes)
++get_sig_bytes 2
++digest_prefix=$r
++
++# See whether it matches the first two bytes of the actual computed hash :
++computed_prefix=$(printf "%.4s" $hash)
++
++if [ "$digest_prefix" != "$computed_prefix" ]
++then
++    # It didn't match, so we can return 'bad signature' immediately:
++    done_sig_bad
++fi
++
++# If prefix matched, we will proceed to do the actual RSA operation.
++
++# RSA Bitness given in Sig
++get_sig_bytes 2
++hex_to_int
++rsa_bitness=$r
++
++# Compute RSA Byteness from the above
++rsa_byteness=$((($rsa_bitness + 7) / 8))
++
++# RSA Bitness for use in determining required Peh width:
++rsa_width=$(($rsa_byteness * 8))
++
++# Only traditional GPG RSA widths are supported:
++if [ $rsa_width != 2048 ] && [ $rsa_width != 4096 ] && [ $rsa_width != 8192 ]
++then
++    reason="Only 2048, 4096, and 8192-bit RSA are supported."
++    echo "$SIGFILE is UNSUPPORTED : $reason" >&2
++    exit $RET_EGGOG
++fi
++
++# RSA Signature per se (final item read from sig file)
++get_sig_bytes $rsa_byteness
++rsa_sig=$r
++
++# Per RFC4880, 'PKCS' encoding of hash is as follows:
++# 0 1 [PAD] 0 [ASN] [MD]
++
++# First two bytes of PKCS-encoded hash will always be 00 01 :
++pkcs="0001"
++
++# Compute necessary number of padding FF bytes :
++pkcs_pad_bytes=$(($rsa_byteness - $MD_LEN - $ASN_LEN - 3))
++
++# Attach the padding bytes:
++for ((x=1; x<=$pkcs_pad_bytes; x++)); do
++    pkcs+="FF"
++done
++
++# Attach the 00 separator between the padding and the ASN:
++pkcs+="00"
++
++# Attach the ASN ('magic' corresponding to the hash algo) :
++pkcs+=$ASN
++
++# Finally, attach the computed (from Data file) hash itself :
++pkcs+=$hash
++
++# Generate a Peh tape which will attempt to verify $rsa_sig against the pubkey,
++# computing the expression $rsa_sig ^ PUB_E mod PUB_M and comparing to $pkcs.
++# Outputs 'Valid' and returns Yes_Code (1) if and only if signature is valid.
++tape=".$rsa_sig@Public-Op!.$pkcs={[Valid]QY}{[Invalid]QN}_"
++
++# Execute the tape:
++run_peh_tape $tape $rsa_width 3
++
++# 'Belt and suspenders' -- test both output and return code:
++# If verification succeeded, return code will be 1, and output 'Valid':
++if [ $peh_code -eq $PEH_YES ] && [ "$peh_res" == "Valid" ]
++then
++    # Valid RSA signature:
++    done_sig_valid
++else
++    # Signature was not valid:
++    done_sig_bad
++fi
++# The end.

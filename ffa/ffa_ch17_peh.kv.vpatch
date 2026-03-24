@@ -1,0 +1,1146 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 590da100178588e299522d64788d4c3c2732b7645d5a967db505ea91f3b08d5933c3e0642423a7e1e889b3f10a8be3275922cde27d63b1c0e6f25c9f11c4d2f1
++++ b/ffa/MANIFEST.TXT a1e4c898a5a315d2e55058f9de23a81c95d63a0671a52906975e47723413445b020f06c95e611af45b3b15f6c0ab3795e76d4d05bf7acdb85c3a05641bd4000b
+@@ -15,3 +15,4 @@
+  555788 ffa_ch14_barrett               "Barrett's Modular Reduction."
+  557938 ffa_ch15_gcd                   "Greatest Common Divisor."
+  560516 ffa_ch16_miller_rabin          "Miller-Rabin Method."
++ 567223 ffa_ch17_peh                   "Introduction to Peh."
+diff -uNr a/ffa/ffacalc/README b/ffa/ffacalc/README
+--- a/ffa/ffacalc/README 04c162662701740cecad1575c604eeccc461336e6e75dde17595fdd266194fe3b408593e2f44b1c2f9af7b2495153fac3c7cda0fdac7786afaef34c121499ff6
++++ b/ffa/ffacalc/README a0fad6e06c4c14d704085539728fa1900087fcaf56da0ba882c2714325347fae4f83036c4d15eb8dc2734ea8214df779423200459ec0cad2b918c6ee71ea5ce0
+@@ -30,7 +30,9 @@
+ 'libffa' will build recursively.
+ 
+ to run:
+-./bin/ffa_calc WIDTH HEIGHT
++./bin/peh WIDTH HEIGHT TAPESPACE LIFE [RNG]
+ 
+ WIDTH  must be a... see libffa/fz_lim.ads.
+ HEIGHT must be equal to or great than 1.
++TAPESPACE must be at or below the maximum set in limits.ads.
++LIFE may be any bus-width integer (0 gives "immortal" run.)
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 772aaaf953790fbb7d7fe6afd0bf2deaf77988b1376a7c169fbd21f47f5aaff6df87b2c333b90e8cd373c11379ba4830cedc3a48b36c26767ac7303889ef6a69
++++ b/ffa/ffacalc/ffa_calc.adb c8dca28206fada4cca7369f0429dc4cbe3b5e75702c701f84256f2a6e04df33ef6557cd427bf2a486306675943215445982e21cea9caedbccde0049ac9c39be1
+@@ -20,7 +20,6 @@
+ -- Basics
+ with Version;  use Version;
+ with OS;       use OS;
+-with CmdLine;  use CmdLine;
+ 
+ -- FFA
+ with FFA;      use FFA;
+@@ -32,115 +31,170 @@
+ with FFA_RNG;  use FFA_RNG;
+ 
+ 
+-procedure FFA_Calc is
++package body FFA_Calc is
+    
+-   Width   : Positive;   -- Desired FFA Width
+-   Height  : Positive;   -- Desired Height of Stack
+-   RNG     : RNG_Device; -- The active RNG device.
+-   
+-begin
+-   if Arg_Count < 3 or Arg_Count > 4 then
+-      Eggog("Usage: ./ffa_calc WIDTH HEIGHT [/dev/rng]");
+-   end if;
+-   
+-   declare
+-      Arg1 : CmdLineArg;
+-      Arg2 : CmdLineArg;
++   -- Ensure that requested Peh Dimensions are permissible.  Terminate if not.
++   procedure Validate_Peh_Dimensions(Dimensions : in Peh_Dimensions) is
+    begin
+-      -- Get commandline args:
+-      Get_Argument(1, Arg1); -- First arg
+-      Get_Argument(2, Arg2); -- Second arg
+-      
+-      if Arg_Count = 4 then
+-         -- RNG was specified:
+-         declare
+-            Arg3 : CmdLineArg;
+-         begin
+-            Get_Argument(3, Arg3); -- Third arg (optional)
+-            
+-            -- Ada.Sequential_IO chokes on paths with trailing whitespace!
+-            -- So we have to give it a trimmed path. But we can't use
+-            -- Ada.Strings.Fixed.Trim, because it suffers from
+-            -- SecondaryStackism-syphilis. Instead we are stuck doing this:
+-            Init_RNG(RNG, Arg3(Arg3'First .. Len_Arg(3)));
+-         end;
+-      else
+-         -- RNG was NOT specified:
+-         Init_RNG(RNG); -- Use the machine default then
++      
++      -- Test if proposed Width is permissible:
++      if not FFA_FZ_Valid_Bitness_P(Dimensions.Width) then
++         Eggog("Requested Invalid FZ Width, " & FFA_Validity_Rule_Doc);
++      end if;
++      
++      -- Warn the operator if an unbounded Peh run has been requested:
++      if Dimensions.Life = 0 then
++         Achtung("WARNING: Life=0 enables UNBOUNDED run time;" &
++                   " halting cannot be guaranteed!");
+       end if;
+       
+-      -- Parse into Positives:
+-      Width  := Positive'Value(Arg1);
+-      Height := Positive'Value(Arg2);
+-   exception
+-      when others =>
+-         Eggog("Invalid arguments!");
+-   end;
++   end Validate_Peh_Dimensions;
+    
+-   -- Test if proposed Width is permissible:
+-   if not FFA_FZ_Valid_Bitness_P(Width) then
+-      Eggog("Invalid Width: " & FFA_Validity_Rule_Doc);
+-   end if;
+    
+-   -- The Calculator itself:
+-   declare
++   -- Start a Peh Machine with the given Dimensions and Tape; return a Verdict.
++   function Peh_Machine(Dimensions : in Peh_Dimensions;
++                        Tape       : in Peh_Tapes;
++                        RNG        : in RNG_Device) return Peh_Verdicts is
+       
+       -- The number of Words required to make a FZ of the given Bitness.
+-      Wordness : Indices := Indices(Width / Bitness);
++      Wordness : Indices := Indices(Dimensions.Width / Bitness);
+       
+       --------------------------------------------------------
+       -- State --
+       --------------------------------------------------------
+-      -- The Stack:
+-      subtype Stack_Positions is Natural range 0 .. Height;
++      -- The Data Stack:
++      subtype Stack_Positions is Natural range 0 .. Dimensions.Height;
+       type Stacks is array(Stack_Positions range <>) of FZ(1 .. Wordness);
+-      Stack      : Stacks(Stack_Positions'Range);
++      Stack         : Stacks(Stack_Positions'Range);
++      
++      -- Current top of the Data Stack:
++      SP            : Stack_Positions := Stack_Positions'First;
++      
++      -- Valid indices into the Tape:
++      subtype Tape_Positions is Peh_Tape_Range range Tape'First .. Tape'Last;
++      
++      -- Position of the CURRENT Op on the Tape:
++      IP            : Tape_Positions;
++      
++      -- After an Op, will contain position of NEXT op (if = to IP -> halt)
++      IP_Next       : Tape_Positions;
++      
++      -- Control Stack; permits bidirectional motion across the Tape:
++      Control_Stack : array(ControlStack_Range) of Tape_Positions
++        := (others => Tape_Positions'First);
+       
+-      -- Stack Pointer:
+-      SP         : Stack_Positions := Stack_Positions'First;
++      -- Current top of the Control Stack:
++      CSP           : ControlStack_Range := ControlStack_Range'First;
++      
++      -- Registers:
++      subtype RegNames is Character range 'g' .. 'z';
++      type RegTables is array(RegNames range <>) of FZ(1 .. Wordness);
++      Registers     : RegTables(RegNames'Range);
+       
+       -- Carry/Borrow Flag:
+-      Flag       : WBool   := 0;
++      Flag          : WBool        := 0;
+       
+       -- Odometer:
+-      Pos        : Natural := 0;
++      Ticks         : Natural      := 0;
+       
+       -- The current levels of the three types of nestedness:
+-      QuoteLevel : Natural := 0;
+-      CommLevel  : Natural := 0;
+-      CondLevel  : Natural := 0;
++      QuoteLevel    : Natural      := 0;
++      CommLevel     : Natural      := 0;
++      CondLevel     : Natural      := 0;
+       
+       -- Prefixed Operators
+-      PrevC      : Character := ' ';
+-      HavePrefix : Boolean   := False;
++      PrevC         : Character    := ' ';
++      HavePrefix    : Boolean      := False;
+       
++      -- Current Verdict. We run while 'Mu', tape remains, and Ticks under max.
++      Verdict       : Peh_Verdicts := Mu;
+       --------------------------------------------------------
+       
+       
+-      -- Clear the stack and set SP to bottom.
++      -- Determine whether we have reached the given limit of Life:
++      function Exhausted_Life return Boolean is
++         -- If Life = 0, we are in "immortal" mode. Otherwise mortal:
++         MustDie : Boolean := 
++           (Dimensions.Life /= 0) and (Ticks = Dimensions.Life);
++      begin
++         if MustDie then
++            Achtung("WARNING: Exhausted Life ("
++                      & Natural'Image(Ticks) & " ticks )");
++         end if;
++         return MustDie;
++      end Exhausted_Life;
++      
++      
++      -- Clear all state, other than blocks, Control Stack, Tape and Verdict:
+       procedure Zap is
+       begin
+-         -- Clear the stack
++         -- Clear the Data Stack:
+          for i in Stack'Range loop
+             FFA_FZ_Clear(Stack(i));
+          end loop;
+-         -- Set SP to bottom
+-         SP   := Stack_Positions'First;
+-         -- Clear Overflow flag
+-         Flag := 0;
+-         -- Clear prefix
+-         HavePrefix := False;
+-         PrevC      := ' ';
++         -- Set SP to bottom:
++         SP            := Stack_Positions'First;
++         -- Clear all Registers:
++         for r in RegNames'Range loop
++            FFA_FZ_Clear(Registers(r));
++         end loop;
++         -- Clear Overflow flag:
++         Flag          := 0;
++         -- Clear prefix:
++         HavePrefix    := False;
++         PrevC         := ' ';
+       end Zap;
+       
+       
+-      -- Report a fatal error condition at the current symbol
++      -- Report a fatal error condition at the current symbol.
++      -- On Unixlikes, this will also end the process and return control to OS.
+       procedure E(S : in String) is
+       begin
+-         Eggog("Pos:" & Natural'Image(Pos) & ": " & S);
++         Zap; -- Jettison all resettable state!
++         Eggog("FATAL: Tick:" & Natural'Image(Ticks) &
++                 " IP:" & Tape_Positions'Image(IP) & " : " & S);
+       end E;
+       
+       
++      -------------------
++      -- Control Stack --
++      -------------------
++      
++      -- Push a given Tape Position to the Control Stack:
++      procedure Control_Push(Position : in Tape_Positions) is
++      begin
++         -- First, test for Overflow of Control Stack:
++         if CSP = Control_Stack'Last then
++            E("Control Stack Overflow!");
++         end if;
++         
++         -- Push given Tape Position to Control Stack:
++         CSP                := CSP + 1;
++         Control_Stack(CSP) := Position;
++      end Control_Push;
++      
++      
++      -- Pop a Tape Position from the Control Stack:
++      function Control_Pop return Tape_Positions is
++         Position : Tape_Positions;
++      begin
++         -- First, test for Underflow of Control Stack:
++         if CSP = Control_Stack'First then
++            E("Control Stack Underflow!");
++         end if;
++         
++         -- Pop a Tape Position from Control Stack:
++         Position           := Control_Stack(CSP);
++         Control_Stack(CSP) := Tape_Positions'First;
++         CSP                := CSP - 1;
++         return Position;
++      end Control_Pop;
++      
++      
++      ----------------
++      -- Data Stack --
++      ----------------
++      
+       -- Move SP up
+       procedure Push is
+       begin
+@@ -206,11 +260,40 @@
+       end Print_FZ;
+       
+       
+-      -- Denote that the given op is a prefix
+-      procedure IsPrefix is
++      -- Print a Debug Trace (used in 'QD')
++      procedure Print_Trace is
+       begin
+-         HavePrefix := True;
+-      end IsPrefix;
++         -- Print Data Stack Trace:
++         Write_String("Data Stack:");
++         Write_Newline;
++         for i in reverse Stack'First + 1 .. SP loop
++            Write_String("   " & Stack_Positions'Image(i) & " : ");
++            Print_FZ(Stack(i));
++         end loop;
++         
++         -- Print Control Stack Trace:
++         Write_String("Control Stack:");
++         Write_Newline;
++         for i in reverse Control_Stack'First + 1 .. CSP loop
++            Write_String("   " & ControlStack_Range'Image(i) & " :"
++                           & Tape_Positions'Image(Control_Stack(i)));
++            Write_Newline;
++         end loop;
++         
++         -- Print All Registers:
++         Write_String("Registers:");
++         Write_Newline;
++         for r in RegNames'Range loop
++            Write_String("    " & r & " : ");
++            Print_FZ(Registers(r));
++         end loop;
++         
++         -- Print Ticks and IP:
++         Write_String("Ticks :" & Natural'Image(Ticks));
++         Write_Newline;
++         Write_String("IP    :" & Tape_Positions'Image(IP));
++         Write_Newline;
++      end Print_Trace;
+       
+       
+       -- Execute a Normal Op
+@@ -275,6 +358,13 @@
+                Want(1);
+                Ins_Hex_Digit(10 + Character'Pos(C) - Character'Pos('a'));
+                
++               -------------------------
++               -- Fetch from Register --
++               -------------------------
++            when 'g' .. 'z' =>
++               Push;
++               Stack(SP) := Registers(C); -- Put value of Register on stack
++               
+                ------------------
+                -- Stack Motion --
+                ------------------
+@@ -490,25 +580,18 @@
+                Print_FZ(Stack(SP));
+                Drop;
+                
+-               -- Zap (reset)
++               -- Zap (reset all resettables)
+             when 'Z' =>
+                Zap;
+                
+-               -- Quit with Stack Trace
+-            when 'Q' =>
+-               for I in reverse Stack'First + 1 .. SP loop
+-                  Print_FZ(Stack(I));
+-               end loop;
+-               Quit(0);
+-               
+-               -- Put the FFACalc Program Version on the stack,
++               -- Put the Peh Program Version on the stack,
+                -- followed by FFA Program Version.
+             when 'V' =>
+                Push;
+                Push;
+-               -- FFACalc Version:
++               -- Peh Version:
+                FFA_FZ_Clear(Stack(SP - 1));
+-               FFA_FZ_Set_Head(Stack(SP - 1), Word(FFACalc_K_Version));
++               FFA_FZ_Set_Head(Stack(SP - 1), Word(Peh_K_Version));
+                -- FFA Version:
+                FFA_FZ_Clear(Stack(SP));
+                FFA_FZ_Set_Head(Stack(SP), Word(FFA_K_Version));
+@@ -540,24 +623,50 @@
+                -- Prefixes --
+                --------------
+                
+-               -- 'Left...'    :
+-            when 'L' =>
+-               IsPrefix;
+-               
+-               -- 'Right...'   :
+-            when 'R' =>
+-               IsPrefix;
++            when
++              'Q' -- 'Quit...'
++              |
++              'L' -- 'Left...'
++              |
++              'R' -- 'Right...'
++              |
++              'M' -- 'Modular...'
++              |
++              '$' -- Pop top of Stack into the following Register...
++              =>
++               HavePrefix := True;
++               
++               -------------------
++               -- Control Stack --
++               -------------------
++               
++               -- Push current IP (i.e. of THIS Op) to Control Stack.
++            when ':' =>
++               Control_Push(IP);
++               
++               -- Conditional Return: Pop top of Stack, and...
++               -- ... if ZERO:    simply discard the top of the Control Stack.
++               -- ... if NONZERO: pop top of Control Stack and make it next IP.
++            when ',' =>
++               Want(1);
++               declare
++                  Position : Tape_Positions := Control_Pop;
++               begin
++                  if FFA_FZ_NZeroP(Stack(SP)) = 1 then
++                     IP_Next := Position;
++                  end if;
++               end;
++               Drop;
+                
+-               -- 'Modular...' :
+-            when 'M' =>
+-               IsPrefix;
++               -- UNconditional Return: Control Stack top popped into IP_Next.
++            when ';' =>
++               IP_Next := Control_Pop;
+                
+                ---------------------------------------------------------
+-               -- Reserved Ops, i.e. ones we have not defined yet:   --
++               -- Reserved Ops, i.e. ones we have not defined yet:    --
+                ---------------------------------------------------------
+-            when '!' | '@' | '$' | ':' | ';' | ',' |
+-                 'H' | 'I' | 'J' | 'K' | 'N' |
+-                 'T' | 'X' | 'Y' =>
++            when '!' | '@' |
++                 'H' | 'I' | 'J' | 'K' | 'N' | 'T' | 'X' | 'Y' =>
+                
+                E("This Operator is not defined yet: " & C);
+                ---------------------------------------------------------
+@@ -578,12 +687,81 @@
+       -- Execute a Prefixed Op
+       procedure Op_Prefixed(Prefix : in Character;
+                             O      : in Character) is
++         
++         -- Report an attempt to execute an undefined Prefix Op:
++         procedure Undefined_Prefix_Op is
++         begin
++            E("Undefined Prefix Op: " & Prefix & O);
++         end Undefined_Prefix_Op;
++         
+       begin
+          
+-         -- The Prefixed Op:
++         -- Which Prefix Op?
+          case Prefix is
+             
+             ---------------------------------------------------------
++            -- Quit...
++            when 'Q' =>
++               
++               -- .. Quit how?
++               case O is
++                  
++                  -- ... with a 'Yes' Verdict:
++                  when 'Y' =>
++                     Verdict := Yes;
++                     
++                  -- ... with a 'No' Verdict:
++                  when 'N' =>
++                     Verdict := No;
++                     
++                  -- ... with a 'Mu' Verdict: (permitted, but discouraged)
++                  when 'M' =>
++                     IP_Next := IP; -- Force a 'Mu' Termination
++                     
++                  -- ... with Debug Trace, and a 'Mu' Verdict:
++                  when 'D' =>
++                     Print_Trace;
++                     IP_Next := IP; -- Force a 'Mu' Termination
++                     
++                     -- ... with an explicit Tape-triggered fatal EGGOG!
++                     -- The 'QE' curtain call is intended strictly to signal
++                     -- catastrophic (e.g. iron) failure from within a Tape
++                     -- program ('cosmic ray' scenario) where a ~hardwired
++                     -- mechanism~ of any kind appears to have done something
++                     -- unexpected; or to abort on a failed test of the RNG;
++                     -- or similar hard-stop scenarios, where either physical
++                     -- iron, or basic FFA routine must be said to have failed,
++                     -- and the continued use of the system itself - dangerous.
++                     -- The use of 'QE' for any other purpose is discouraged;
++                     -- please do not use it to indicate failed decryption etc.
++                  when 'E' =>
++                     -- Hard-stop with this eggog:
++                     E("Tape-triggered CATASTROPHIC ERROR! " &
++                         "Your iron and/or your build of Peh, " &
++                         "may be defective! Please consult " & 
++                         "the author of this Tape.");
++                     
++                     -- ... Unknown (Eggog):
++                  when others =>
++                     Undefined_Prefix_Op;
++                     
++               end case;
++               
++            ---------------------------------------------------------
++            -- Write into Register...
++            when '$' =>
++               
++               -- Eggog if operator gave us a garbage Register name:
++               if O not in RegNames then
++                  E("There is no Register '" & O & "' !");
++               end if;
++               
++               -- Selected Register exists; move top FZ on stack into it:
++               Want(1);
++               Registers(O) := Stack(SP);
++               Drop;
++            
++            ---------------------------------------------------------
+             -- Left...
+             when 'L' =>
+                
+@@ -608,9 +786,9 @@
+                   when 'R' =>
+                      E("Left-Rotate not yet defined!");
+                      
+-                  -- ... Unknown:
++                  -- ... Unknown (Eggog):
+                   when others =>
+-                     E("Undefined Op: L" & O);
++                     Undefined_Prefix_Op;
+                      
+                end case;
+             ---------------------------------------------------------
+@@ -646,9 +824,9 @@
+                                          XY => Stack(SP - 1));
+                      Drop;
+                      
+-                  -- ... Unknown:
++                  -- ... Unknown (Eggog):
+                   when others =>
+-                     E("Undefined Op: R" & O);
++                     Undefined_Prefix_Op;
+                      
+                end case;
+             ---------------------------------------------------------
+@@ -689,9 +867,9 @@
+                      Drop;
+                      Drop;
+                      
+-                  -- ... Unknown:
++                  -- ... Unknown (Eggog):
+                   when others =>
+-                     E("Undefined Op: M" & O);
++                     Undefined_Prefix_Op;
+                      
+                end case;
+             ---------------------------------------------------------
+@@ -769,29 +947,77 @@
+             Op_Normal(C);
+          end if;
+          
++         -- In all cases, save the current symbol as possible prefix:
++         PrevC := C;
++         
+       end Op;
+       
+-      
+-      -- Current Character
+-      C : Character;
+-      
+    begin
+-      -- Reset the Calculator      
++      -- Reset all resettable state:
+       Zap;
+-      -- Process characters until EOF:
++      
++      -- Execution begins with the first Op on the Tape:
++      IP := Tape_Positions'First;
++      
+       loop
+-         if Read_Char(C) then
+-            -- Execute Op:
+-            Op(C);
+-            -- Advance Odometer
+-            Pos := Pos + 1;
+-            -- Save the op for use in prefixed ops
+-            PrevC := C;
++         
++         -- If current Op is NOT the last Op on the Tape:
++         if IP /= Tape_Positions'Last then
++            
++            -- ... then default successor of the current Op is the next one:
++            IP_Next := IP + 1;
++            
+          else
+-            Zap;
+-            Quit(0); -- if EOF, we're done
++            
++            -- ... but if no 'next' Op exists, or quit-with-Mu, we stay put:
++            IP_Next := IP; -- ... this will trigger an exit from the loop.
++            
+          end if;
++         
++         -- Advance Odometer for every Op (incl. prefixes, in comments, etc) :
++         Ticks := Ticks + 1;
++         
++         -- Execute the Op at the current IP:
++         Op(Tape(IP));
++         
++         -- Halt when...
++         exit when
++           Verdict /= Mu or -- Got a Verdict, or...
++           IP_Next  = IP or -- Reached the end of the Tape, or...
++           Exhausted_Life;  -- Exhausted Life.
++         
++         -- We did not halt yet, so select the IP of the next Op to fetch:
++         IP := IP_Next;
++         
+       end loop;
+-   end;
++      
++      -- Warn operator about any unclosed blocks:
++      if CommLevel > 0 then
++         Achtung("WARNING: Tape terminated with an unclosed Comment!");
++      end if;
++      
++      if QuoteLevel > 0 then
++         Achtung("WARNING: Tape terminated with an unclosed Quote!");
++      end if;
++      
++      if CondLevel > 0 then
++         Achtung("WARNING: Tape terminated with an unclosed Conditional!");
++      end if;
++      
++      -- Warn operator if we terminated with a non-empty Control Stack.
++      -- This situation ought to be considered poor style in a Peh Tape;
++      -- for clarity, Verdicts should be returned from a place near
++      -- the visually-apparent end of a Tape. However, this is not mandatory.
++      if CSP /= Control_Stack'First then
++         Achtung("WARNING: Tape terminated with a non-empty Control Stack!");
++      end if;
++      
++      -- We're done with the Tape, so clear the state:
++      Zap;
++      
++      -- Return the Verdict:
++      return Verdict;
++      
++   end Peh_Machine;
+    
+ end FFA_Calc;
+diff -uNr a/ffa/ffacalc/ffa_calc.ads b/ffa/ffacalc/ffa_calc.ads
+--- a/ffa/ffacalc/ffa_calc.ads false
++++ b/ffa/ffacalc/ffa_calc.ads d190ce3aeb4c78d22671e7d960508560e04fa0aae61b1e84b9486b32183dbee0c829ae81af30c277f5ec395ec268386640f0486c6113bca9b96f72be3d0341c9
+@@ -0,0 +1,55 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Limits;   use Limits;
++with FFA_RNG;  use FFA_RNG;
++
++
++package FFA_Calc is
++   
++   -- Peh Tapes:
++   subtype Peh_Tape_Range is Positive range 1 .. Max_Peh_TapeSpace;
++   type Peh_Tapes is array(Peh_Tape_Range range <>) of Character;
++   
++   -- Possible Verdicts of a non-erroneous Peh Tape run:
++   type Peh_Verdicts is (Yes, No, Mu);
++   
++   -- Operator-Selectable Spatial and Time Dimensions of a Peh Machine:
++   type Peh_Dimensions is
++      record
++         Width     : Positive;
++         Height    : Positive;
++         TapeSpace : Peh_Tape_Range;
++         Life      : Natural;
++      end record;
++   
++   -- Valid indices into the Control Stack:
++   subtype ControlStack_Range is Natural range 0 .. Peh_Control_Stack_Size;
++   -- The 'zero' position, as with the Data Stack, indicates 'emptiness'
++   -- when pointed to by CSP ( see ffa_calc.adb ) and is never accessed.
++   
++   -- Ensure that requested Peh Dimensions are permissible. Terminate if not.
++   procedure Validate_Peh_Dimensions(Dimensions : in Peh_Dimensions);
++   
++   -- Start a Peh Machine with the given Dimensions and Tape; return a Verdict.
++   function Peh_Machine(Dimensions : in Peh_Dimensions;
++                        Tape       : in Peh_Tapes;
++                        RNG        : in RNG_Device) return Peh_Verdicts;
++   
++end FFA_Calc;
+diff -uNr a/ffa/ffacalc/ffa_calc.gpr b/ffa/ffacalc/ffa_calc.gpr
+--- a/ffa/ffacalc/ffa_calc.gpr a09ec660d5c3f45b6277db4ca2b27f92b5b83c40a25dd030ba87c1966db92ad0bb0d8fb06489807c47c755b5768be490cde04d841ffac4c97d817d8c47607d02
++++ b/ffa/ffacalc/ffa_calc.gpr false
+@@ -1,69 +0,0 @@
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+--- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+---                                                                          --
+--- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+--- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+---                                                                          --
+--- You do not have, nor can you ever acquire the right to use, copy or      --
+--- distribute this software ; Should you use this software for any purpose, --
+--- or copy and distribute it to anyone or in any manner, you are breaking   --
+--- the laws of whatever soi-disant jurisdiction, and you promise to         --
+--- continue doing so for the indefinite future. In any case, please         --
+--- always : read and understand any software ; verify any PGP signatures    --
+--- that you use - for any purpose.                                          --
+---                                                                          --
+--- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+-
+-with "../libffa/ffa.gpr";
+-
+-project FFA_Calc is
+-  
+-  for Object_Dir use "obj";
+-  
+-  type Mode_Type is ("debug", "release");
+-  Mode : Mode_Type := external ("mode", "release");
+-  
+-  for Languages   use ("Ada");
+-  for Source_Dirs use (".");
+-  for Exec_Dir    use "bin";
+-  for Main        use ("ffa_calc.adb");
+-  
+-  package Compiler is
+-     case Mode is
+-        when "debug" =>
+-           for Switches ("Ada")
+-             use ("-g");
+-        when "release" =>
+-           for Switches ("Ada")
+-             use ("-O2", "-fdump-scos", "-gnata", "-fstack-check",
+-                  "-gnatyd", "-gnatym",
+-                  "-fdata-sections", "-ffunction-sections");
+-     end case;
+-  end Compiler;
+-  
+-  package Binder is
+-     case Mode is
+-        when "debug" =>
+-           for Switches ("Ada")
+-             use ();
+-        when "release" =>
+-           for Switches ("Ada")
+-             use ("-static");
+-     end case;
+-  end Binder;
+-
+-  package Linker is
+-     case Mode is
+-        when "debug" =>
+-           for Switches ("Ada")
+-             use ();
+-        when "release" =>
+-           for Switches ("Ada")
+-             use ("-Wl,--gc-sections", "-static");
+-     end case;
+-  end Linker;
+-  
+-end FFA_Calc;
+diff -uNr a/ffa/ffacalc/limits.ads b/ffa/ffacalc/limits.ads
+--- a/ffa/ffacalc/limits.ads false
++++ b/ffa/ffacalc/limits.ads c1545ba38d991624749345a5ae24336fca2d3ca04e06f3e4f9b77aeea15a717a1eb4f1b5b6e2d7f14229335706fdf94770e2f5cbe13471d6e93750a8dc3c5a2f
+@@ -0,0 +1,32 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package Limits is
++   
++   -- Maximum permitted length of a Peh Tape.
++   -- Peh Tapes live on the iron stack, like everything else,
++   -- so it is not possible to promise "infinite" storage space for them.
++   Max_Peh_TapeSpace      : constant Positive := 1048576; -- 1MB
++   -- Operator may enlarge this constant, but may have to adjust OS stack cap.
++   -- On small/embedded systems, it can be made smaller, as appropriate.
++   
++   -- The exact height of the Peh Control Stack. This is an invariant.
++   Peh_Control_Stack_Size : constant Positive := 256;
++   
++end Limits;
+diff -uNr a/ffa/ffacalc/os.adb b/ffa/ffacalc/os.adb
+--- a/ffa/ffacalc/os.adb cb36806df5808e2f409446f3ffc170c3c50285dc5b7864504a5617a617215a18cc372f74ca28f583e44a43102c61b640b55b0c6f2ae40074f6716ffac94fe6a0
++++ b/ffa/ffacalc/os.adb 05940de6b9b69ff1479bee3ef9bf100edb3cff903a3ec4a014d6b238643c576f1136fd5c0a48ed43c3c5234e576f317ccb2db45f21d0e2465320fb5cd1f2bd47
+@@ -69,7 +69,18 @@
+       To_Stderr(Character'Val(16#A#));
+       
+       -- Exit
+-      Quit(Sadness_Code);
+-   end;
++      Quit(Sad_Code);
++   end Eggog;
++   
++   -- Warn operator re: potentially-dangerous condition.
++   procedure Achtung(M : String) is
++   begin
++      for i in 1 .. M'Length loop
++         To_Stderr(M(I));
++      end loop;
++      
++      -- Emit LF
++      To_Stderr(Character'Val(16#A#));
++   end Achtung;
+    
+ end OS;
+diff -uNr a/ffa/ffacalc/os.ads b/ffa/ffacalc/os.ads
+--- a/ffa/ffacalc/os.ads 023e91ef60d6d2fd98f527db1cf90fd181473dd5b621e40ba9ce550e7923537dedac9b2f29271de4be0035eb34cc67424285e5e8bffc2e2f322f01cf208d2ecb
++++ b/ffa/ffacalc/os.ads 43131dac54edfdfa3f300e333375a6080b331ccf51104f5ffd1648e1d17ef7b8a3925a101238cdc183557061e0e9b8340e91da20583c029ca9d1304ca0f40702
+@@ -38,12 +38,21 @@
+    -- Exit with an error condition report.
+    procedure Eggog(M : String);
+    
++   -- Warn operator re: potentially-dangerous condition.
++   procedure Achtung(M : String);
++   
+    procedure Quit(Return_Code : Integer);
+    pragma Import
+      (Convention    => C,
+       Entity        => Quit,
+       External_Name => "exit");
+    
++   -- Result Codes for Termination
++   Yes_Code : constant Integer :=  1;
++   No_Code  : constant Integer :=  0;
++   Mu_Code  : constant Integer := -1;
++   Sad_Code : constant Integer := -2;
++   
+ private
+    
+    -- POSIX stdio:   
+@@ -59,6 +68,4 @@
+    procedure To_Stderr(C : Character);
+    pragma Import(Ada, To_Stderr, "__gnat_to_stderr_char");
+    
+-   Sadness_Code : constant Integer := -1;
+-   
+ end OS;
+diff -uNr a/ffa/ffacalc/peh.adb b/ffa/ffacalc/peh.adb
+--- a/ffa/ffacalc/peh.adb false
++++ b/ffa/ffacalc/peh.adb dfe0396cae073dabbbfb280a5075344b9cd5149f062004db94d849558575af12c61a992bb68133968e76a864065186714e97c146373ffcc769e20b4ef50a4859
+@@ -0,0 +1,173 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with OS;       use OS;
++with CmdLine;  use CmdLine;
++with FFA_RNG;  use FFA_RNG;
++with FFA_Calc; use FFA_Calc;
++
++
++-- This is the 'main' procedure of Peh for all Unixlike OS.
++procedure Peh is
++   
++   PehDim  : Peh_Dimensions; -- Operator-specified spacetime footprint.
++   
++   RNG     : RNG_Device;     -- The selected RNG device. Peh requires a RNG.
++   
++begin
++   
++   -- If a valid number of command line params was NOT given, print a likbez :
++   if Arg_Count < 5 or Arg_Count > 6 then
++      Eggog("Usage: ./peh WIDTH HEIGHT TAPESPACE LIFE [/dev/rng]");
++   end if;
++   
++   declare
++      Arg1 : CmdLineArg;
++      Arg2 : CmdLineArg;
++      Arg3 : CmdLineArg;
++      Arg4 : CmdLineArg;
++   begin
++      
++      -- Get commandline args:
++      Get_Argument(1, Arg1); -- First  mandatory arg : Width
++      Get_Argument(2, Arg2); -- Second mandatory arg : Height
++      Get_Argument(3, Arg3); -- Third  mandatory arg : TapeSpace
++      Get_Argument(4, Arg4); -- Fourth mandatory arg : Life
++      
++      if Arg_Count = 6 then
++         
++         -- A RNG was specified (Arg_Count includes program name itself)
++         declare
++            Arg5 : CmdLineArg;
++         begin
++            Get_Argument(5, Arg5); -- Fifth arg (optional) : RNG device
++            
++            -- Ada.Sequential_IO chokes on paths with trailing whitespace!
++            -- So we have to give it a trimmed path. But we can't use
++            -- Ada.Strings.Fixed.Trim, because it suffers from
++            -- SecondaryStackism-syphilis. Instead we are stuck doing this:
++            Init_RNG(RNG, Arg5(Arg5'First .. Len_Arg(5)));
++         end;
++         
++      else
++         
++         -- If RNG was NOT explicitly specified:
++         Init_RNG(RNG); -- Use the machine default. The '?' Op requires a RNG.
++         
++         -- Warn the operator that we are going to use the default system RNG:
++         Achtung("WARNING: The '?' command will use DEFAULT entropy source : "
++                   & Default_RNG_Path & " !");
++         -- Generally, you do NOT want this, outside of noob exploration/tests.
++         
++      end if;
++      
++      -- Parse the four mandatory arguments into Positives:
++      PehDim.Width     := Positive'Value(       Arg1 );
++      PehDim.Height    := Positive'Value(       Arg2 );
++      PehDim.TapeSpace := Peh_Tape_Range'Value( Arg3 );
++      PehDim.Life      := Natural'Value(        Arg4 );
++      
++   exception
++      
++      -- There was an attempt to parse garbage in the init parameters:
++      when others =>
++         Eggog("Invalid arguments!");
++         
++   end;
++   
++   -- Validate requested Peh Dimensions. If invalid, program will terminate.
++   Validate_Peh_Dimensions(PehDim);
++   
++   -- Read, from Unix 'standard input' , and then execute, the Tape:
++   declare
++      
++      -- The current Tape input symbol
++      Tape_Read_Char  : Character;
++      
++      -- The TapeSpace
++      TapeSpace       : Peh_Tapes(1 .. PehDim.TapeSpace) := (others => ' ');
++      
++      -- 'End of File' condition when reading :
++      EOF             : Boolean := False;
++      
++      -- Will contain the Verdict produced by the Tape:
++      Verdict         : Peh_Verdicts;
++      
++   begin
++      
++      -- Attempt to read the entire expected Tapespace length, and no more:
++      for TapePosition in TapeSpace'Range loop
++         
++         -- Attempt to receive a symbol from the standard input:
++         if Read_Char(Tape_Read_Char) then
++            
++            -- Save the successfully-read symbol to the TapeSpace:
++            TapeSpace(TapePosition) := Tape_Read_Char;
++            
++         else
++            
++            -- Got an EOF instead of a symbol:
++            EOF := True;
++            if TapePosition /= TapeSpace'Length then
++               Achtung("WARNING: Short Tape: Tapespace filled to position:" &
++                         Peh_Tape_Range'Image(TapePosition) & " of" &
++                         Peh_Tape_Range'Image(TapeSpace'Last) & ".");
++            end if;
++            
++         end if;
++         
++         exit when EOF; -- When EOF, halt reading, and proceed to execution.
++         
++      end loop;
++      
++      -- Execute Peh over the given Tape, on Peh Machine with given dimensions:
++      Verdict := Peh_Machine(Dimensions => PehDim,
++                             Tape       => TapeSpace,
++                             RNG        => RNG);
++      
++      -- A correctly-written Peh Tape is expected to produce a Verdict.
++      -- On Unix, we will give it to the caller process via the usual means:
++      case Verdict is
++         
++         -- Tape produced a Verdict of 'Yes' :
++         when Yes =>
++            Quit(Yes_Code);
++            
++         -- Tape produced a Verdict of 'No'  :
++         when No =>
++            Quit(No_Code);
++            
++            -- Tape ran to completion without producing any Verdict at all.
++            -- Outside of simple test scenarios, noob explorations, etc.,
++            -- this usually means that there is a logical mistake in the
++            -- Tape somewhere, and we will warn the operator:
++         when Mu =>
++            Achtung("WARNING: Tape terminated without a Verdict.");
++            Quit(Mu_Code);
++            
++      end case;
++      
++      -- If the Tape aborted on account of a fatal error condition (e.g. div0)
++      -- Peh will Quit(Sad_Code) (see E(..) in ffa_calc.adb .)
++      -- Therefore, Peh ALWAYS returns one of FOUR possible Unix return-codes:
++      -- -2, -1, 0, 1. (see os.ads .)
++      
++   end;
++   
++end Peh;
+diff -uNr a/ffa/ffacalc/peh.gpr b/ffa/ffacalc/peh.gpr
+--- a/ffa/ffacalc/peh.gpr false
++++ b/ffa/ffacalc/peh.gpr 49b8c0ba83c82375365bc0edcf9d69113d1a3abbcdb577c118171bbdb6245c68fd29e182a0a6b11d7d76b4742a28fa81909c99996ed9f6e4e1fbae195c3f6952
+@@ -0,0 +1,69 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with "../libffa/ffa.gpr";
++
++project Peh is
++  
++  for Object_Dir use "obj";
++  
++  type Mode_Type is ("debug", "release");
++  Mode : Mode_Type := external ("mode", "release");
++  
++  for Languages   use ("Ada");
++  for Source_Dirs use (".");
++  for Exec_Dir    use "bin";
++  for Main        use ("peh.adb");
++  
++  package Compiler is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ("-g");
++        when "release" =>
++           for Switches ("Ada")
++             use ("-O2", "-fdump-scos", "-gnata", "-fstack-check",
++                  "-gnatyd", "-gnatym",
++                  "-fdata-sections", "-ffunction-sections");
++     end case;
++  end Compiler;
++  
++  package Binder is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-static");
++     end case;
++  end Binder;
++
++  package Linker is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-Wl,--gc-sections", "-static");
++     end case;
++  end Linker;
++  
++end Peh;
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads 7863511153daaf0b1940927701245ecc7ec8aff31c79b80cc6d8d90852f88fede9458d678b0ae8bc6c09a5d57465ca9ce4c699b3212ebd863bb41d9170e2c08f
++++ b/ffa/ffacalc/version.ads 80480cca4fdf0cc6f56afc761a32b2257259eefa83755773d16058f4c13ad58293740a4f0a1dfe863860a7ad51c5a10fc9b8b1faf859c79108455a85fe7b32b1
+@@ -21,10 +21,10 @@
+    
+    pragma Pure;
+    
+-   ----------------------------------------------
+-   -- Current 'deg. Kelvin' Version of FFACalc --
+-   ----------------------------------------------
+-   FFACalc_K_Version : constant Natural := 253;
+-   ----------------------------------------------
++   --------------------------------------------
++   -- Current 'deg. Kelvin' Version of Peh   --
++   --------------------------------------------
++   Peh_K_Version : constant Natural := 252;
++   --------------------------------------------
+    
+ end Version;
+diff -uNr a/ffa/libffa/fz_prime.adb b/ffa/libffa/fz_prime.adb
+--- a/ffa/libffa/fz_prime.adb 78d4c49ffca81897f9e4832f272a46df2dd8258bcd4502fff7c716e4d8b7e67f5c96aea13e193d44374ffadc7bf3487ae14c512257875d95c3414fd37c69f03a
++++ b/ffa/libffa/fz_prime.adb 690acdd6451fc4e1c2263ca60e7240357c5438334c009521a1e32f12bbfb02370b9e68f6b66c00470a5bf440ca80827f82e090a5f72d447877542e6d9c09c7b8
+@@ -194,7 +194,7 @@
+       -- Generate Barrettoid(X) to use in all of the modulo-X operations:
+       FZ_Make_Barrettoid(Modulus => X, Result => XBar);
+       
+-      -- Find R >= 1, and odd K, where X − 1 = 2^R * K :
++      -- Find R >= 1, and odd K, where X - 1 = 2^R * K :
+       
+       -- ... first, find R, the largest power of two which divides X - 1 :
+       R := FZ_Count_Bottom_Zeros(X_Minus_One);

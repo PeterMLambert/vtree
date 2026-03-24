@@ -1,0 +1,230 @@
+diff -uNr a/ffa/libffa/fz_divis.adb b/ffa/libffa/fz_divis.adb
+--- a/ffa/libffa/fz_divis.adb 449d20be8ce3646757dcd06d68baf7fc83a5b32c085b5d617d30500c7eb4377caa2e74b3679c2751f5277660b5e9c8c2955608c696b3268c7d294caffa99e442
++++ b/ffa/libffa/fz_divis.adb 0934af47e0703889b29836ca23503eddfbdedf1548fb43315e76a2651c88d9f5742a1d957a2a6d6052ac77f2e260d380131149289f30ea11dce018a9c0342285
+@@ -19,6 +19,7 @@
+ 
+ with Words;    use Words;
+ with W_Pred;   use W_Pred;
++with W_Shifts; use W_Shifts;
+ with FZ_Basic; use FZ_Basic;
+ with FZ_Arith; use FZ_Arith;
+ with FZ_BitOp; use FZ_BitOp;
+@@ -82,15 +83,92 @@
+    pragma Inline_Always(FZ_Div);
+    
+    
+-   -- Exactly same thing as IDiv, but keep only the Remainder
++   -- Modulus. Permits the asymmetric Dividend and Divisor in FZ_Mod_Exp.
+    procedure FZ_Mod(Dividend  : in FZ;
+                     Divisor   : in FZ;
+                     Remainder : out FZ) is
+-      Quotient : FZ(Dividend'Range);
+-      pragma Unreferenced(Quotient);
++      
++      -- Length of Divisor and Remainder; <= Dividend'Length
++      L : constant Indices := Divisor'Length;
++      
++      -- Remainder register, starts as zero
++      R : FZ(1 .. L) := (others => 0);
++      
++      -- Indices into the words of Dividend
++      subtype Dividend_Index is Word_Index range Dividend'Range;
++      
++      -- Permissible 'cuts' for the Slice operation
++      subtype Divisor_Cuts   is Word_Index range 2 .. Divisor'Length;
++      
++      -- Performs Restoring Division on a given segment of Dividend:Divisor
++      procedure Slice(Index : Dividend_Index;
++                      Cut   : Divisor_Cuts) is
++      begin
++         
++         declare
++            
++            -- Borrow, from comparator
++            C   : WBool;
++            
++            -- Left-Shift Overflow
++            LsO : WBool;
++            
++            -- Current cut of Remainder register
++            Rs  : FZ renames R(1 .. Cut);
++            
++            -- Current cut of Divisor
++            Ds  : FZ renames Divisor(1 .. Cut);
++            
++            -- Current word of Dividend, starting from the highest
++            W   : Word  := Dividend(Dividend'Last + 1 - Index);
++            
++         begin
++            
++            -- For each bit in the current Dividend word:
++            for b in 1 .. Bitness loop
++               
++               -- Send top bit of current Dividend word to the bottom of W
++               W := Rotate_Left(W, 1);
++               
++               -- Advance Rs, shifting in the current Dividend bit
++               FZ_ShiftLeft_O_I(N => Rs, ShiftedN => Rs, Count => 1,
++                                OF_In => W and 1,
++                                Overflow => LsO);
++               
++               -- Subtract Divisor-Cut from R-Cut; Underflow goes into C
++               FZ_Sub(X => Rs, Y => Ds, Difference => Rs, Underflow => C);
++               
++               -- If C=1, subtraction underflowed, and we must undo it:
++               FZ_Add_Gated(X => Rs, Y => Ds, Sum => Rs,
++                            Gate => C and W_Not(LsO));
++               
++            end loop;
++            
++         end;
++         
++      end Slice;
++      
+    begin
+-      FZ_IDiv(Dividend, Divisor, Quotient, Remainder);
++      
++      -- Process bottom half of dividend:
++      for i in 1 .. L - 1 loop
++         
++         Slice(i, i + 1); -- stay ahead by a word to handle carry
++         
++      end loop;
++      
++      -- Process top half of dividend
++      for i in L .. Dividend'Length loop
++         
++         Slice(i, L);
++         
++      end loop;
++      
++      -- Output the Remainder.
++      Remainder := R;
++      
+    end FZ_Mod;
+    pragma Inline_Always(FZ_Mod);
+    
++   
+ end FZ_Divis;
+diff -uNr a/ffa/libffa/fz_divis.ads b/ffa/libffa/fz_divis.ads
+--- a/ffa/libffa/fz_divis.ads cf9e5bbcd7dd4df94dd9a95f52b631cb5c9d29eb6ec7eeec1ed40e06b7a80019f55206d3c3c0e210bc5a056e12203360c9f51ec2fe060542805a1be2e68949a9
++++ b/ffa/libffa/fz_divis.ads ba309013077bbf7e96260bb5f45ab8ae14aa3a520265d1ec7880e7c8f4db24ba8628766465ba214d9f63bc02e44e7588b6ecc26e2cb376c6d2c7b85ed5314882
+@@ -41,11 +41,11 @@
+    pragma Precondition(Dividend'Length = Divisor'Length and
+                          Dividend'Length = Quotient'Length);
+    
+-   -- Exactly same thing as IDiv, but keep only the Remainder
++   -- Modulus. Permits the asymmetric Dividend and Divisor in FZ_Mod_Exp.
+    procedure FZ_Mod(Dividend  : in FZ;
+                     Divisor   : in FZ;
+                     Remainder : out FZ);
+-   pragma Precondition(Dividend'Length = Divisor'Length and
+-                         Dividend'Length = Remainder'Length);
++   pragma Precondition(Dividend'Length >= Divisor'Length and
++                         Divisor'Length = Remainder'Length);
+    
+ end FZ_Divis;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb 3236467e5470ca5b3b1384473445491ee52c0151d36a450ca1b9e496a9fe53a5afe490b065fcddd7a6e7dc6bbbdd902643b7c3bc4cfe5984f84e69ae5d8a7b2e
++++ b/ffa/libffa/fz_modex.adb b9880001cd7a0adc289e3f1ebc71b48eff6cb1079eeb5a21bf32a81ba4e0e0f3f9917fffdd02e0c1ac2f06553610fa0f396408680c411c8db3b6a80a8e1e978d
+@@ -42,22 +42,14 @@
+       XY_Lo : FZ renames XY(1     .. L);
+       XY_Hi : FZ renames XY(L + 1 .. XY'Last);
+       
+-      -- A zero-padded double-wide copy of Modulus, to satisfy Ch.5's FZ_Mod
+-      M     : FZ(XY'Range);
+-      
+    begin
+-      -- Place the Modulus in a double-width M, as FZ_Mod currently demands
+-      M(Modulus'Range)   := Modulus;
+-      M(L + 1 .. M'Last) := (others => 0);
+       
+       -- XY_Lo:XY_Hi := X * Y
+       FZ_Mul_Egyptian(X, Y, XY_Lo, XY_Hi);
+       
+-      -- XY := XY mod M
+-      FZ_Mod(XY, M, XY);
++      -- Product := XY mod M
++      FZ_Mod(XY, Modulus, Product);
+       
+-      -- The bottom half of XY is our modular product; top half is always 0
+-      Product := XY_Lo;
+    end FZ_Mod_Mul;
+    pragma Inline_Always(FZ_Mod_Mul);
+    
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb 81335cbf5970684e89c61b7a37bff32f747027a72251d88f2980d21e52d41b88d05503613e11404d55be9c5dea3170a7a069cdd32fc4df64500164bcee844af9
++++ b/ffa/libffa/fz_mul.adb 20b94e2b0260dd90aeda5e987c038348070fa29afff8fd41a84bda53cf6bfc15638809387a6c9c44c6f9fcbdc28c5e5afd7e1efa43b0da72f89b9c198f603670
+@@ -18,8 +18,8 @@
+ ------------------------------------------------------------------------------
+ 
+ with Words;    use Words;
++with W_Shifts; use W_Shifts;
+ with FZ_Basic; use FZ_Basic;
+-with FZ_Pred;  use FZ_Pred;
+ with FZ_Arith; use FZ_Arith;
+ with FZ_Shift; use FZ_Shift;
+ 
+@@ -32,15 +32,14 @@
+                              XY_Lo : out FZ;
+                              XY_Hi : out FZ) is
+       
++      L : constant Indices := X'Length;
++      
+       -- Register holding running product
+       XY : FZ(1 .. X'Length + Y'Length);
+       
+       -- X-Slide
+       XS : FZ(1 .. X'Length + Y'Length);
+       
+-      -- Y-Slide
+-      YS : FZ(Y'Range) := Y;
+-      
+    begin
+       -- Product register begins empty
+       FZ_Clear(XY);
+@@ -49,18 +48,33 @@
+       XS(1            .. X'Length) := X;
+       XS(X'Length + 1 .. XS'Last)  := (others => 0);
+       
+-      -- For each bit of Y:
+-      for i in 1 .. FZ_Bitness(Y) loop
+-         
+-         -- If lowest bit of Y-Slide is 1, X-Slide is added into XY
+-         FZ_Add_Gated(X    => XY, Y => XS, Sum => XY,
+-                      Gate => FZ_OddP(YS));
+-         
+-         -- X-Slide := X-Slide * 2
+-         FZ_ShiftLeft(XS, XS, 1);
++      -- For each word of Y:
++      for i in Y'Range loop
+          
+-         -- Y-Slide := Y-Slide / 2
+-         FZ_ShiftRight(YS, YS, 1);
++         declare
++            -- Current word of Y
++            W : Word  := Y(i);
++            
++            -- Current cut of XY and XS. Stay ahead by a word to handle carry.
++            Cut : constant Indices := L + i;
++            XYc : FZ renames XY(1 .. Cut);
++            XSc : FZ renames XS(1 .. Cut);
++            
++         begin
++            for b in 1 .. Bitness loop
++               
++               -- If current Y bit is 1, X-Slide Cut is added into XY Cut
++               FZ_Add_Gated(X    => XYc, Y => XSc, Sum => XYc,
++                            Gate => W and 1);
++               
++               -- Crank the next bit of Y into the bottom position of W
++               W := Shift_Right(W, 1);
++               
++               -- X-Slide := X-Slide * 2
++               FZ_ShiftLeft(XSc, XSc, 1);
++               
++            end loop;
++         end;
+          
+       end loop;
+       

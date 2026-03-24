@@ -1,0 +1,784 @@
+diff -uNr a/ffa/README b/ffa/README
+--- a/ffa/README 33552678f5519339c5beaec7c62a4f43d2d32ff9620090a6866c056a13c369ee4689263c306102d675622ef9742fa3943698533c3a6407a65ec6036992e8df96
++++ b/ffa/README 88d2c0487e367264f3b1f041ce0c0f95656350824f39b69c86168f45df4f8e4c1626d44c49aa2434460ec62b399867e5e11225383e26f7421a33d51bca0b3524
+@@ -19,6 +19,7 @@
+ 
+ See contents of 'demo'.
+ 
++See also project WWW: http://www.loper-os.org/?cat=49
+ 
+ Questions?
+ 
+diff -uNr a/ffa/ffademo/demo_ch1.adb b/ffa/ffademo/demo_ch1.adb
+--- a/ffa/ffademo/demo_ch1.adb 5220f733b82acdcd95b2806401322ed4657325e6d3d4f1264cfd390c304b900f6a8b1555eb48ddd966ece7ef91bd120e54972873817a8e8e94b84bd62dd7196a
++++ b/ffa/ffademo/demo_ch1.adb 20e5fd1db56fbedccad21587fe6d6ad44c6d7208cd5632a12e364b81217acf68b1b92bc1d82e29e5c16e6caebb5b8dce8c275a2e21691f5b355314b0aac2be7d
+@@ -43,6 +43,8 @@
+       C : WBool := 0;
+       
+    begin
++      Put_Line("~~~ Ch. 1 : Add, Sub ~~~");
++      New_Line;
+       
+       Put_Line("X         =");
+       Dump(X);
+@@ -63,6 +65,7 @@
+       Dump(Z);
+       New_Line;
+       Put_Line("C         = " & WBool'Image(C));
++      New_Line;
+       
+    end Demo_Add_Sub;
+       
+diff -uNr a/ffa/ffademo/demo_ch2.adb b/ffa/ffademo/demo_ch2.adb
+--- a/ffa/ffademo/demo_ch2.adb false
++++ b/ffa/ffademo/demo_ch2.adb ab686f59589863ab3efe9e97c9ae2ecc3be0d3457d010326afffeaca6ff42a662f1b05feb8c08492ef77392edde5abf26e8ee6cabc75bc0f2391663ae77ebb16
+@@ -0,0 +1,236 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++-- From Ada:
++with Ada.Text_IO; use Ada.Text_IO;
++
++-- From FFA:
++with Words;    use Words;
++with FZ_Type;  use FZ_Type;
++with FZ_Arith; use FZ_Arith;
++
++-- FFA Ch. 2
++with W_Pred;   use W_Pred;
++with FZ_Basic; use FZ_Basic;
++with FZ_Pred;  use FZ_Pred;
++with FZ_BitOp; use FZ_BitOp;
++with FZ_Cmp;   use FZ_Cmp;
++
++-- From the Demo:
++with FFA_IO;   use FFA_IO;
++
++
++package body Demo_Ch2 is
++   
++   procedure Demo_Word_Preds is
++      
++   begin
++      
++      Put_Line("~~~ Ch. 2 : Word Predicates ~~~");
++      New_Line;
++      
++      Put_Line("W_ZeroP(0) :");
++      Dump(W_ZeroP(0));
++      New_Line;
++      New_Line;
++      
++      Put_Line("W_ZeroP(1) :");
++      Dump(W_ZeroP(1));
++      New_Line;
++      New_Line;
++      
++      Put_Line("W_NZeroP(1) :");
++      Dump(W_NZeroP(1));
++      New_Line;
++      New_Line;
++      
++      Put_Line("W_OddP(3) :");
++      Dump(W_OddP(3));
++      New_Line;
++      New_Line;
++      
++      Put_Line("W_EqP(1, 1) :");
++      Dump(W_EqP(1, 1));
++      New_Line;
++      New_Line;
++      
++      Put_Line("W_EqP(1, 0) :");
++      Dump(W_EqP(1, 0));
++      New_Line;
++      New_Line;
++      
++   end Demo_Word_Preds;
++   
++   
++   procedure Demo_FZ_Basics is
++      
++      X : FZ(1 .. 4) := ( 0,  0,  0,  0);
++      
++      -- Shorthand for 'maxint'
++      Y : FZ(1 .. 4) := (-1, -1, -1, -1);
++      
++      Z : FZ(1 .. 4) := ( 0,  0,  0,  0);
++      
++      -- Flag.
++      F : WBool := 0;
++      
++   begin
++      
++      Put_Line("~~~ Ch. 2 : FZ Basics ~~~");
++      New_Line;
++      
++      Put_Line("X         =");
++      Dump(X);
++      New_Line;
++      New_Line;
++      
++      Put_Line("Y         =");
++      Dump(Y);
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_ZeroP(X) :");
++      Dump(FZ_ZeroP(X));
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_ZeroP(Y) :");
++      Dump(FZ_ZeroP(Y));
++      New_Line;
++      New_Line;
++      
++      FZ_Swap(X, Y);
++      Put_Line("After FZ_Swap(X, Y) :");
++      Put_Line("X         =");
++      Dump(X);
++      New_Line;
++      New_Line;
++      
++      Put_Line("Y         =");
++      Dump(Y);
++      New_Line;
++      New_Line;
++      
++      F := 0;
++      FZ_Mux(X, Y, Z, F);
++      Put_Line("After F := 0 , FZ_Mux(X, Y, Z, F) : ");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++      F := 1;
++      FZ_Mux(X, Y, Z, F);
++      Put_Line("After F := 1 , FZ_Mux(X, Y, Z, F) : ");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++   end Demo_FZ_Basics;
++   
++   
++   procedure Demo_FZ_Various_Ops is
++      
++      X : FZ(1 .. 4) := ( 16#083e16f27091f65f#,  16#74c01a9c3ce54f80#,
++                          16#9fd0913737c3fcbe#,  16#fa55f3f5459a9e79# );
++      
++      Y : FZ(1 .. 4) := ( 16#d16b9d65bf3991d0#,  16#8a509a858786b366#,
++                          16#d39d23682728f4f8#,  16#6c571dbc646bf513# );
++      
++      Z : FZ(1 .. 4) := ( 0,  0,  0,  0 );
++      
++   begin
++      
++      Put_Line("~~~ Ch. 2 : FZ Bit Ops ~~~");
++      New_Line;
++      New_Line;
++      
++      Put_Line("X         =");
++      Dump(X);
++      New_Line;
++      New_Line;
++      
++      Put_Line("Y         =");
++      Dump(Y);
++      New_Line;
++      New_Line;
++      
++      FZ_Neg(X, Z);
++      Put_Line("After FZ_Neg(X, Z):");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++      FZ_And(X, Y, Z);
++      Put_Line("After FZ_And(X, Y, Z) :");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++      FZ_Or(X, Y, Z);
++      Put_Line("After FZ_Or(X, Y, Z) :");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++      FZ_Xor(X, Y, Z);
++      Put_Line("After FZ_Xor(X, Y, Z) :");
++      Put_Line("Z         =");
++      Dump(Z);
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_EqP(X, X) :");
++      Dump(FZ_EqP(X, X));
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_EqP(X, Y) :");
++      Dump(FZ_EqP(X, Y));
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_LessThanP(X, Y) :");
++      Dump(FZ_LessThanP(X, Y));
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_LessThanP(Y, X) :");
++      Dump(FZ_LessThanP(Y, X));
++      New_Line;
++      New_Line;
++
++      Put_Line("FZ_GreaterThanP(X, Y) :");
++      Dump(FZ_GreaterThanP(X, Y));
++      New_Line;
++      New_Line;
++      
++      Put_Line("FZ_GreaterThanP(Y, X) :");
++      Dump(FZ_GreaterThanP(Y, X));
++      New_Line;
++      New_Line;
++      
++   end Demo_FZ_Various_Ops;
++   
++   
++end Demo_Ch2;
+diff -uNr a/ffa/ffademo/demo_ch2.ads b/ffa/ffademo/demo_ch2.ads
+--- a/ffa/ffademo/demo_ch2.ads false
++++ b/ffa/ffademo/demo_ch2.ads d0ec9ed3535a120a612d261b779ec88a02ea7be5a683399e8c49e2d1e8833897dd8b84f1e517dc570de17e4ca6752b5654e5ade3d3974d94842bcebf57ab65be
+@@ -0,0 +1,26 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package Demo_Ch2 is
++   
++   procedure Demo_Word_Preds;
++   procedure Demo_FZ_Basics;
++   procedure Demo_FZ_Various_Ops;
++   
++end Demo_Ch2;
+diff -uNr a/ffa/ffademo/ffa_demo.adb b/ffa/ffademo/ffa_demo.adb
+--- a/ffa/ffademo/ffa_demo.adb 1e4b961e54fbfcea9605a60c667b7f88bfa5c81481a765e9d256592542bf7e7c4f9a831a4702e4a8cf324ddb04b1ed106e76be33fcc6d6cc05bd5238150184e2
++++ b/ffa/ffademo/ffa_demo.adb 929cd7fd79c21425923705bd800100dd2405068bc84b5e8c9f3cb425bd7dc3a3c453a3016614b4dbc62aa05a5cdff70fdb1812a25fff2101a5bcf382ba574382
+@@ -18,10 +18,17 @@
+ ------------------------------------------------------------------------------
+ 
+ with Demo_Ch1; use Demo_Ch1;
++with Demo_Ch2; use Demo_Ch2;
+ 
+ procedure FFA_Demo is
+ begin
+    
++   -- Ch. 1
+    Demo_Add_Sub;
+    
++   -- Ch. 2
++   Demo_Word_Preds;
++   Demo_FZ_Basics;
++   Demo_FZ_Various_Ops;
++   
+ end FFA_Demo;
+diff -uNr a/ffa/libffa/fz_basic.adb b/ffa/libffa/fz_basic.adb
+--- a/ffa/libffa/fz_basic.adb false
++++ b/ffa/libffa/fz_basic.adb 00f1170667a8787008530f64e8648158edbbec88dc26d7d7fc78dc796405a300f450e8ff290a66ff874dc2fda5a3293012f4e1260e54e7bd421389ff908fd959
+@@ -0,0 +1,54 @@
++with Word_Ops; use Word_Ops;
++
++
++package body FZ_Basic is
++   
++   ---------------------------------------------------------------------------
++   -- Fundamental Operations on FZ (finite integers)
++   ---------------------------------------------------------------------------
++   
++   -- N := 0
++   procedure FZ_Clear(N : out FZ) is
++   begin
++      N := (others => 0);
++   end FZ_Clear;
++   pragma Inline_Always(FZ_Clear);
++   
++   
++   -- First word of N := Source
++   procedure FZ_Set_Head(N : out FZ; Source : in Word) is
++   begin
++      N(N'First) := Source;
++   end FZ_Set_Head;
++   pragma Inline_Always(FZ_Set_Head);
++   
++   
++   -- First word of N
++   function FZ_Get_Head(N : in FZ) return Word is
++   begin
++      return N(N'First);
++   end FZ_Get_Head;
++   pragma Inline_Always(FZ_Get_Head);
++   
++   
++   -- Exchange X and Y
++   procedure FZ_Swap(X : in out FZ; Y : in out FZ) is
++      T : FZ(X'Range) := X;
++   begin
++      T := X;
++      X := Y;
++      Y := T;
++   end FZ_Swap;
++   pragma Inline_Always(FZ_Swap);
++   
++   
++   -- Constant-time MUX: Sel = 0: Result := X; Sel = 1: Result := Y
++   procedure FZ_Mux(X : in FZ; Y : in FZ; Result : out FZ; Sel : in WBool) is
++   begin
++      for i in X'Range loop
++         Result(i) := W_Mux(X(i), Y(i), Sel);
++      end loop;
++   end FZ_Mux;
++   pragma Inline_Always(FZ_Mux);
++   
++end FZ_Basic;
+diff -uNr a/ffa/libffa/fz_basic.ads b/ffa/libffa/fz_basic.ads
+--- a/ffa/libffa/fz_basic.ads false
++++ b/ffa/libffa/fz_basic.ads c41300d143792a5d7c9f2fe4f9eb94324e99a91eb2ba164504acf37137802ac0b00b5f3bbd00a9d23a9043b3b8731db50b763e0b23ce061093abd436a6b2b286
+@@ -0,0 +1,26 @@
++with Words; use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Basic is
++   
++   pragma Pure;
++   
++   -- N := 0
++   procedure FZ_Clear(N : out FZ);
++   
++   -- First word of N := Source
++   procedure FZ_Set_Head(N : out FZ; Source : in Word);
++   
++   -- First word of N
++   function FZ_Get_Head(N : in FZ) return Word;
++   
++   -- Exchange X and Y
++   procedure FZ_Swap(X : in out FZ; Y : in out FZ);
++   pragma Precondition(X'Length = Y'Length);
++   
++   -- Constant-time MUX: Sel = 0: Result := X; Sel = 1: Result := Y
++   procedure FZ_Mux(X : in FZ; Y : in FZ; Result : out FZ; Sel : in WBool);
++   pragma Precondition(X'Length = Y'Length and X'Length = Result'Length);
++   
++end FZ_Basic;
+diff -uNr a/ffa/libffa/fz_bitop.adb b/ffa/libffa/fz_bitop.adb
+--- a/ffa/libffa/fz_bitop.adb false
++++ b/ffa/libffa/fz_bitop.adb 00e146d70bdf4bc40b8e5b4687470f7a35132eaba708c8f04494121572e9675852087d2869faa5759749dd3d2f14aede6259a115c1c2dfdf2d1551a49df2c176
+@@ -0,0 +1,67 @@
++package body FZ_BitOp is
++   
++   -- Result := X & Y
++   procedure FZ_And(X : in FZ; Y : in FZ; Result : out FZ) is
++   begin
++      for i in X'Range loop
++         Result(i) := X(i) and Y(i);
++      end loop;
++   end FZ_And;
++   pragma Inline_Always(FZ_And);
++   
++   
++   -- N := N & W, W is a word
++   procedure FZ_And_W(N : in out FZ; W : in Word) is
++   begin
++      N(N'First) := N(N'First) and W;
++   end FZ_And_W;
++   pragma Inline_Always(FZ_And_W);
++   
++   
++   -- Result := X | Y
++   procedure FZ_Or(X : in FZ; Y : in FZ; Result : out FZ) is
++   begin
++      for i in X'Range loop
++         Result(i) := X(i) or Y(i);
++      end loop;
++   end FZ_Or;
++   pragma Inline_Always(FZ_Or);
++   
++   
++   -- N := N | W, W is a word
++   procedure FZ_Or_W(N : in out FZ; W : in Word) is
++   begin
++      N(N'First) := N(N'First) or W;
++   end FZ_Or_W;
++   pragma Inline_Always(FZ_Or_W);
++   
++   
++   -- Result := X ^ Y
++   procedure FZ_Xor(X : in FZ; Y : in FZ; Result : out FZ) is
++   begin
++      for i in X'Range loop
++         Result(i) := X(i) xor Y(i);
++      end loop;
++   end FZ_Xor;
++   pragma Inline_Always(FZ_Xor);
++   
++   
++   -- N := N ^ W, W is a word
++   procedure FZ_Xor_W(N : in out FZ; W : in Word) is
++   begin
++      N(N'First) := N(N'First) xor W;
++   end FZ_Xor_W;
++   pragma Inline_Always(FZ_Xor_W);
++   
++   
++   -- NotN := ~N
++   procedure FZ_Neg(N    : in FZ;
++                    NotN : out FZ) is
++   begin
++      for i in N'Range loop
++         NotN(i) := not N(i);
++      end loop;
++   end FZ_Neg;
++   pragma Inline_Always(FZ_Neg);
++   
++end FZ_BitOp;
+diff -uNr a/ffa/libffa/fz_bitop.ads b/ffa/libffa/fz_bitop.ads
+--- a/ffa/libffa/fz_bitop.ads false
++++ b/ffa/libffa/fz_bitop.ads 27eeadfdb34526dc90f3facc0c01fa3ea2be7353abbddda0ad19255ce22ac25fa5118478ccd379bb6db072735e23ec7ecf90b3973be017878ccfb3581b8e16f2
+@@ -0,0 +1,34 @@
++with FZ_Type; use FZ_Type;
++with Words; use Words;
++
++
++package FZ_BitOp is
++   
++   pragma Pure;
++   
++   -- Result := X & Y
++   procedure FZ_And(X : in FZ; Y : in FZ; Result : out FZ);
++   pragma Precondition(X'Length = Y'Length and X'Length = Result'Length);
++   
++   -- N := N & W, W is a word
++   procedure FZ_And_W(N : in out FZ; W : in Word);
++   
++   -- Result := X | Y
++   procedure FZ_Or(X : in FZ; Y : in FZ; Result : out FZ);
++   pragma Precondition(X'Length = Y'Length and X'Length = Result'Length);
++   
++   -- N := N | W, W is a word
++   procedure FZ_Or_W(N : in out FZ; W : in Word);
++   
++   -- Result := X ^ Y
++   procedure FZ_Xor(X : in FZ; Y : in FZ; Result : out FZ);
++   pragma Precondition(X'Length = Y'Length and X'Length = Result'Length);
++   
++   -- N := N ^ W, W is a word
++   procedure FZ_Xor_W(N : in out FZ; W : in Word);
++   
++   -- NotN := ~N
++   procedure FZ_Neg(N : in FZ; NotN : out FZ);
++   pragma Precondition(N'Length = NotN'Length);
++   
++end FZ_BitOp;
+diff -uNr a/ffa/libffa/fz_cmp.adb b/ffa/libffa/fz_cmp.adb
+--- a/ffa/libffa/fz_cmp.adb false
++++ b/ffa/libffa/fz_cmp.adb 2354c226b429a80777a4731f2300f13ea59e023bdd6c33e17fd65f5c22c1d2ed84a17cc6624d1fd00d5d1cbd6b69913f32faef626070488c800bfac29991a4c4
+@@ -0,0 +1,44 @@
++with W_Pred;   use W_Pred;
++with FZ_Arith; use FZ_Arith;
++
++
++package body FZ_Cmp is
++   
++   ---------------------------------------------
++   -- Arithmetical Predicate Operations on FZ --
++   ---------------------------------------------
++   
++   -- 1 iff X == Y (branch-free); else 0
++   function FZ_EqP(X : in FZ; Y : in FZ) return WBool is
++      A : WBool := 1;
++   begin
++      for i in X'Range loop
++         A := A and W_EqP(X(i), Y(i));
++      end loop;
++      return A;
++   end FZ_EqP;
++   pragma Inline_Always(FZ_EqP);
++   
++   
++   -- 1 iff X < Y (branch-free); else 0
++   function FZ_LessThanP(X : in FZ; Y : in FZ) return WBool is
++      Scratch : FZ(X'Range);
++      Borrow  : WBool := 0;
++   begin
++      FZ_Sub(X, Y, Scratch, Borrow);
++      return Borrow;
++   end FZ_LessThanP;
++   pragma Inline_Always(FZ_LessThanP);
++   
++   
++   -- 1 iff X > Y (branch-free); else 0
++   function FZ_GreaterThanP(X : in FZ; Y: in FZ) return WBool is
++      Scratch : FZ(X'Range);
++      Borrow  : WBool := 0;
++   begin
++      FZ_Sub(Y, X, Scratch, Borrow);
++      return Borrow;
++   end FZ_GreaterThanP;
++   pragma Inline_Always(FZ_GreaterThanP);
++   
++end FZ_Cmp;
+diff -uNr a/ffa/libffa/fz_cmp.ads b/ffa/libffa/fz_cmp.ads
+--- a/ffa/libffa/fz_cmp.ads false
++++ b/ffa/libffa/fz_cmp.ads a0af30915ddf0a84f4eca02a13f1c607bcd01b2a49998b4002a40f50a436cc4a61aa25922ebece99a837662d76f0950fe63695ed1cc424792fe00b81e3e98e82
+@@ -0,0 +1,25 @@
++with Words; use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Cmp is
++   
++   pragma Pure;
++   
++   -------------------------------------------
++   -- Comparison Predicate Operations on FZ --
++   -------------------------------------------
++   
++   -- 1 iff X == Y (branch-free); else 0
++   function FZ_EqP(X : in FZ; Y: in FZ) return WBool;
++   pragma Precondition(X'Length = Y'Length);
++   
++   -- 1 iff X < Y (branch-free); else 0
++   function FZ_LessThanP(X : in FZ; Y : in FZ) return WBool;
++   pragma Precondition(X'Length = Y'Length);
++   
++   -- 1 iff X > Y (branch-free); else 0
++   function FZ_GreaterThanP(X : in FZ; Y : in FZ) return WBool;
++   pragma Precondition(X'Length = Y'Length);
++   
++end FZ_Cmp;
+diff -uNr a/ffa/libffa/fz_pred.adb b/ffa/libffa/fz_pred.adb
+--- a/ffa/libffa/fz_pred.adb false
++++ b/ffa/libffa/fz_pred.adb ef003dd5035581c12d242fa697e39248a2b1e26ce2eb0713f4bac79816fe602174c3280840b698593456fae2983d249493570fc86c5bc9b1e80fd715e1e44438
+@@ -0,0 +1,29 @@
++with W_Pred; use W_Pred;
++
++
++package body FZ_Pred is
++   
++   ---------------------------------------------------------------------------
++   -- Fundamental Predicate Operations on FZ (finite integers)
++   ---------------------------------------------------------------------------
++   
++   -- 1 iff N == 0 (branch-free); else 0
++   function FZ_ZeroP(N : in FZ) return WBool is
++      A : WBool := 1;
++   begin
++      for i in N'Range loop
++         A := A and W_ZeroP(N(i));
++      end loop;
++      return A;
++   end FZ_ZeroP;
++   pragma Inline_Always(FZ_ZeroP);
++   
++   
++   -- 1 iff N is odd
++   function FZ_OddP(N : in FZ) return WBool is
++   begin
++      return W_OddP(N(N'First));
++   end FZ_OddP;
++   pragma Inline_Always(FZ_OddP);
++   
++end FZ_Pred;
+diff -uNr a/ffa/libffa/fz_pred.ads b/ffa/libffa/fz_pred.ads
+--- a/ffa/libffa/fz_pred.ads false
++++ b/ffa/libffa/fz_pred.ads 618a69a4bbb18555c26135cdfb3279183d88d47495f89d601670dfe911524078bf7ab5c3025712ad4cc1448b302d11ab3e47cd74e870401faadab6303831a5b9
+@@ -0,0 +1,19 @@
++with Words; use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Pred is
++   
++   pragma Pure;
++   
++   --------------------------------------------
++   -- Fundamental Predicate Operations on FZ --
++   --------------------------------------------
++   
++   -- 1 iff N == 0 (branch-free); else 0
++   function FZ_ZeroP(N : in FZ) return WBool;
++   
++   -- 1 iff N is odd
++   function FZ_OddP(N : in FZ) return WBool;
++   
++end FZ_Pred;
+diff -uNr a/ffa/libffa/w_pred.adb b/ffa/libffa/w_pred.adb
+--- a/ffa/libffa/w_pred.adb false
++++ b/ffa/libffa/w_pred.adb 5d4d9aa640f4415dcf8e18dfaf299fce4fa2c5deda3b22c851d67f54423814f035ccf4ae9184d4933bb90e0ea35e70f71a19b12da905584a374986618026e1a8
+@@ -0,0 +1,56 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Word_Ops; use Word_Ops;
++
++-- Elementary Predicates on Words:
++package body W_Pred is
++   
++   -- Return 1 if N is equal to 0; otherwise return 0.
++   function W_ZeroP(N : in Word) return WBool is
++   begin
++      return W_Borrow(N, 1, N - 1);
++   end W_ZeroP;
++   pragma Inline_Always(W_ZeroP);
++   
++   
++   -- Return 1 if N is unequal to 0; otherwise return 0.
++   function W_NZeroP(N : in Word) return WBool is
++   begin
++      return 1 xor W_ZeroP(N);
++   end W_NZeroP;
++   pragma Inline_Always(W_NZeroP);
++   
++   
++   -- Return 1 if N is odd; otherwise return 0.
++   function W_OddP(N : in Word) return WBool is
++   begin
++      return 1 and N;
++   end W_OddP;
++   pragma Inline_Always(W_OddP);
++   
++   
++   -- Return 1 if A is equal to B ; otherwise return 0.
++   function W_EqP(A : in Word; B : in Word) return WBool is
++   begin
++      return W_ZeroP(A xor B);
++   end W_EqP;
++   pragma Inline_Always(W_EqP);
++   
++end W_Pred;
+diff -uNr a/ffa/libffa/w_pred.ads b/ffa/libffa/w_pred.ads
+--- a/ffa/libffa/w_pred.ads false
++++ b/ffa/libffa/w_pred.ads a8b74fcf54f88ee08e1f4760729ea54088c2d21db24083e695fd1c7bf0b17eec9a4d614045bb337fd0f5c7f8bf30d7bd80063f7dfe7fe28e2e49078ba52e8250
+@@ -0,0 +1,39 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words; use Words;
++
++-- Elementary Predicates on Words:
++package W_Pred is
++   
++   pragma Pure;
++   
++   -- Return 1 if N is equal to 0; otherwise return 0.
++   function W_ZeroP(N : in Word) return WBool;
++   
++   -- Return 1 if N is unequal to 0; otherwise return 0.
++   function W_NZeroP(N : in Word) return WBool;
++   
++   -- Return 1 if N is odd; otherwise return 0.
++   function W_OddP(N : in Word) return WBool;
++   
++   -- Return 1 if A is equal to B ; otherwise return 0.
++   function W_EqP(A : in Word; B : in Word) return WBool;
++   
++end W_Pred;
+diff -uNr a/ffa/libffa/word_ops.adb b/ffa/libffa/word_ops.adb
+--- a/ffa/libffa/word_ops.adb 7ca5191747d159092841af1d29a5779075ab1c74f3ccaa94b187dc135d76819034ca9666ae01abc3212d47a2bddf06a56dad178591646225b17e11801cdeebac
++++ b/ffa/libffa/word_ops.adb 0431d4e5164d5119f81331e3a7ef2f69a397d4a35655274d79a809b69cd10324beff9359194a503dbc5ab085b2214e96afee97db984e6625233bb975d9407fab
+@@ -88,14 +88,4 @@
+    end W_Mux;
+    pragma Inline_Always(W_Mux);
+    
+-   
+-   -- Exchange A and B.
+-   procedure W_Swap(A : in out Word; B : in out Word) is
+-   begin
+-      A := A xor B;
+-      B := A xor B;
+-      A := A xor B;
+-   end W_Swap;
+-   pragma Inline_Always(W_Swap);
+-   
+ end Word_Ops;
+diff -uNr a/ffa/libffa/word_ops.ads b/ffa/libffa/word_ops.ads
+--- a/ffa/libffa/word_ops.ads 991563401e923b6d1448644d1ad8fe238e79f5154f98d7317d38227c5856d6cfb55fcee27c5dda316e70464a3f234831358b58d9b409cf2d5db90aa1f38d9e92
++++ b/ffa/libffa/word_ops.ads eedc4547993abf2b50486519d32d6ac22a798f2acf8959ad80f5877be406b1d02cea313f7a1b718f029011b31a5db36c5472e99ed3c4c837b17c613d915ba4cf
+@@ -36,7 +36,4 @@
+    function W_Mux(A : in Word; B : in Word; Sel : in WBool)
+                  return Word;
+    
+-   -- Exchange A and B.
+-   procedure W_Swap(A : in out Word; B : in out Word);
+-   
+ end Word_Ops;

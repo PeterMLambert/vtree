@@ -1,0 +1,170 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 1a6410aaf0afeeec5f62dfb6120ab51df6467d5c370fea8dd517f186d61ac0b07c0425d03f3a47e7c81450961f76b23ef51087255af88ce3899b1b966240d643
++++ b/ffa/MANIFEST.TXT f744632a28817fdbb938352b58b697341fcd593afec07b8c22b5e332145a212bc0f19784d8b876ebad15446814191297b469733fa151750b4894129a23259278
+@@ -19,3 +19,4 @@
+  569234 ffa_ch18_subroutines           "Subroutines in Peh."
+  578827 ffa_ch19_peh_tuning_and_demos  "Peh Tuning and Demo Tapes."
+  611618 ffa_ch20_litmus                "A Peh-powered verifier for traditional GPG signatures."
++ 611775 ffa_ch20b_litmus_legacy_hashes "Support for certain ancient hash algos in Litmus."
+diff -uNr a/ffa/contrib/litmus/litmus.sh b/ffa/contrib/litmus/litmus.sh
+--- a/ffa/contrib/litmus/litmus.sh 846f886e12e3e1d467d315b666917f6177038986280f655f19cc5ea61873a6c7f9517718963c294ad00f77b7ba507c39ab8e2402588f8aac7511a8960eef3292
++++ b/ffa/contrib/litmus/litmus.sh e53145647493dd0343293f522c93fe9668147dd05b5ad4c3af763856126ed03bd6a53c51ed76ceb233678eb480e73175ada59af4a71a0d3da4fbc32392f2c5bd
+@@ -5,7 +5,9 @@
+ #                                                                          #
+ # Usage: ./litmus.sh publickey.peh signature.sig datafile                  #
+ #                                                                          #
+-# Currently, supports only RSA 'detached' signatures that use SHA512 hash. #
++# Currently, supports only RSA 'detached' sigs made with the following     #
++# hashes: SHA1 (warns: known-breakable!), SHA224, SHA256, SHA384, SHA512.  #
++#                                                                          #
+ # See instructions re: converting traditional GPG public keys for use with #
+ # this program.                                                            #
+ #                                                                          #
+@@ -66,6 +68,12 @@
+     exit $RET_EGGOG
+ }
+ 
++# If Sig was made with an unsupported hash algo:
++eggog_unsupported_hash() {
++    algo=$1
++    echo "This sig uses an unsupported Digest Algo: $1 !" >&2
++    exit $RET_EGGOG
++}
+ 
+ # Failure from bad Peh :
+ eggog_peh() {
+@@ -73,6 +81,11 @@
+     exit $RET_EGGOG
+ }
+ 
++# Warnings:
++achtung() {
++    echo "WARNING: $1" >&2
++}
++
+ 
+ # Number of Arguments required by this program:
+ REQD_ARGS=3
+@@ -84,18 +97,11 @@
+ fi
+ 
+ 
+-# We only support SHA512. Parameters for it:
+-HASHER="shasum -a 512 -b"
+-
+-# For 'PKCS' encoding, the ASN magic turd corresponding to SHA512:
+-ASN="3051300D060960864801650304020305000440"
+-ASN_LEN=$((${#ASN} / 2))
+-MD_LEN=64 # 512 / 8 == 64 bytes
+-
+-
+ # Minimal Peh Width (used for non-arithmetical ops, e.g. 'Owner')
+ MIN_PEH_WIDTH=256
+ 
++# Peh RNG (NOT USED in verifications, but needed to silence warning)
++PEH_RNG_DEV="/dev/random"
+ 
+ # The given public key file (a Peh tape, see docs)
+ PUBFILE=$1
+@@ -148,7 +154,7 @@
+     
+     # Execute the tape:
+     peh_res=$((cat $PUBFILE; echo $tape) | \
+-        peh $peh_width $peh_height $tape_len $peh_life);
++        peh $peh_width $peh_height $tape_len $peh_life $PEH_RNG_DEV);
+     peh_code=$?
+ 
+     # # If Peh returned PEH_EGGOG:
+@@ -159,11 +165,11 @@
+     fi
+ }
+ 
+-# Ask the public key about the Owner:
++# Ask the public key about Algo Type:
+ run_peh_tape "@Algo!QY" $MIN_PEH_WIDTH 1
+ pubkey_algo=$peh_res
+ 
+-# Ask the public key about Algo Type:
++# Ask the public key about the Owner:
+ run_peh_tape "@Owner!QY" $MIN_PEH_WIDTH 1
+ pubkey_owner=$peh_res
+ 
+@@ -240,7 +246,6 @@
+     then
+         reason="$f_name must equal $f_mandate; instead is $f_value."
+         echo "$SIGFILE is UNSUPPORTED : $reason" >&2
+-        echo "Only RSA and SHA512 hash are supported !" >&2
+         exit $RET_EGGOG
+     fi
+ }
+@@ -307,11 +312,68 @@
+ sig_pk_algo=$r
+ sig_field_mandatory "Public Key Algo" $sig_pk_algo 01
+ 
+-# Digest Algo (only SHA512 is supported)
++# Digest Algo (only certain hash algos are supported)
+ get_sig_bytes 1
+ turd+=$r
++hex_to_int
+ sig_digest_algo=$r
+-sig_field_mandatory "Digest Algo" $sig_digest_algo 0A
++
++# If hash algo is supported, get ASN turd and MD_LEN; and if not, eggog:
++case $sig_digest_algo in
++    1)  ## MD5 -- NOT SUPPORTED ##
++        eggog_unsupported_hash "MD5"
++        ;;
++    
++    2)  ## SHA1 ##
++        achtung "This sig was made with SHA-1, which is cheaply breakable!"
++        achtung "Please contact the signer ($pubkey_owner) !"
++        HASHER="shasum -a 1 -b"
++        ASN="3021300906052b0e03021a05000414"
++        MD_LEN=20
++        ;;
++    
++    3)  ## RIPE-MD/160 -- NOT SUPPORTED ##
++        eggog_unsupported_hash "RIPE-MD/160"
++        ;;
++    
++    8)  ## SHA256 ##
++        achtung "This sig was made with SHA-256; GPG supports SHA-512."
++        achtung "Please contact the signer ($pubkey_owner) !"
++        HASHER="shasum -a 256 -b"
++        ASN="3031300d060960864801650304020105000420"
++        MD_LEN=32
++        ;;
++    
++    9)  ## SHA384 ##
++        achtung "This sig was made with SHA-384; GPG supports SHA-512."
++        achtung "Please contact the signer ($pubkey_owner) !"
++        HASHER="shasum -a 384 -b"
++        ASN="3041300d060960864801650304020205000430"
++        MD_LEN=48
++        ;;
++    
++    10) ## SHA512 ##
++        HASHER="shasum -a 512 -b"
++        ASN="3051300D060960864801650304020305000440"
++        MD_LEN=64 # 512 / 8 == 64 bytes
++        ;;
++    
++    11) ## SHA224 ##
++        achtung "This sig was made with SHA-224; GPG supports SHA-512."
++        achtung "Please contact the signer ($pubkey_owner) !"
++        HASHER="shasum -a 224 -b"
++        ASN="302D300d06096086480165030402040500041C"
++        MD_LEN=28
++        ;;
++    
++    *)  ## Unknown Digest Type ##
++        eggog_unsupported_hash "UNKNOWN (type $sig_digest_algo)"
++        ;;
++esac
++
++# Calculate length (bytes) of the ASN turd for the digest used in the sig:
++ASN_LEN=$((${#ASN} / 2))
++
+ 
+ # Hashed Section Length
+ get_sig_bytes 2

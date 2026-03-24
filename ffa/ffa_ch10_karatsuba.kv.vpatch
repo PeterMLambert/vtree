@@ -1,0 +1,535 @@
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb f614bff382bd7805f2c3510e3d9a5564a153786b3dbe322456c022ec5b4b9dbae202d27504ce213cbc2da9f311fe668164a1d0a6ce34f77a831d716a22236abd
++++ b/ffa/ffacalc/ffa_calc.adb ca1ded1102a88d8097cafd58fca38f21c1b8500b936868dd036fa2446f78fc467a2c90058504cb04af542e5925a3270f34a0b96b38deb584868f52d608d6b460
+@@ -380,11 +380,10 @@
+                -- Multiply, give bottom and top halves
+             when '*' =>
+                Want(2);
+-               -- Ch9: Comba's algorithm
+-               FZ_Mul_Comba(X     => Stack(SP - 1),
+-                            Y     => Stack(SP),
+-                            XY_Lo => Stack(SP - 1),
+-                            XY_Hi => Stack(SP));
++               FZ_Mult(X     => Stack(SP - 1),
++                       Y     => Stack(SP),
++                       XY_Lo => Stack(SP - 1),
++                       XY_Hi => Stack(SP));
+                
+                -- Modular Multiplication
+             when 'M' =>
+diff -uNr a/ffa/libffa/fz_arith.adb b/ffa/libffa/fz_arith.adb
+--- a/ffa/libffa/fz_arith.adb 27a59f78f058fcd385ec1b2e7edef7d2a8936ee3bf81338a64c786bc5b208befa8fb424eabd630f4042e4b32ffc5d6222778837bd04ead9bff096ba12bc32ea1
++++ b/ffa/libffa/fz_arith.adb a207afcff3ed13797843ca0f376e2e78404e8a2d695e06f4c8c1d3346fdafb75b6bd507aeeb85cfd93d9cff955fcd312c60bafa2aa869eab10500bbd6cb800ee
+@@ -19,9 +19,52 @@
+ 
+ with Word_Ops; use Word_Ops;
+ 
++
+ -- Fundamental Arithmetic operators on FZ:
+ package body FZ_Arith is
+    
++   -- Destructive Add: X := X + Y; Overflow := Carry; optional OF_In
++   procedure FZ_Add_D(X          : in out FZ;
++                      Y          : in     FZ;
++                      Overflow   : out    WBool;
++                      OF_In      : in     WBool := 0) is
++      Carry : WBool := OF_In;
++   begin
++      for i in 0 .. Word_Index(X'Length - 1) loop
++         declare
++            A : constant Word := X(X'First + i);
++            B : constant Word := Y(Y'First + i);
++            S : constant Word := A + B + Carry;
++         begin
++            X(X'First + i) := S;
++            Carry          := W_Carry(A, B, S);
++         end;
++      end loop;
++      Overflow := Carry;
++   end FZ_Add_D;
++   pragma Inline_Always(FZ_Add_D);
++   
++   
++   -- Destructive Add: X := X + W; Overflow := Carry
++   procedure FZ_Add_D_W(X        : in out FZ;
++                        W        : in     Word;
++                        Overflow : out    WBool) is
++      Carry : Word := W;
++   begin
++      for i in X'Range loop
++         declare
++            A : constant Word := X(I);
++            S : constant Word := A + Carry;
++         begin
++            X(i)  := S;
++            Carry := W_Carry(A, 0, S);
++         end;
++      end loop;
++      Overflow := Carry;
++   end FZ_Add_D_W;
++   pragma Inline_Always(FZ_Add_D_W);
++
++   
+    -- Sum := X + Y; Overflow := Carry
+    procedure FZ_Add(X          : in  FZ;
+                     Y          : in  FZ;
+@@ -29,13 +72,13 @@
+                     Overflow   : out WBool) is
+       Carry : WBool := 0;
+    begin
+-      for i in X'Range loop
++      for i in 0 .. Word_Index(X'Length - 1) loop
+          declare
+-            A : constant Word := X(I);
+-            B : constant Word := Y(I);
++            A : constant Word := X(X'First + i);
++            B : constant Word := Y(Y'First + i);
+             S : constant Word := A + B + Carry;
+          begin
+-            Sum(i) := S;
++            Sum(Sum'First + i) := S;
+             Carry  := W_Carry(A, B, S);
+          end;
+       end loop;
+@@ -103,4 +146,49 @@
+    end FZ_Sub;
+    pragma Inline_Always(FZ_Sub);
+    
++   
++   -- Destructive: If Cond is 1, NotN := ~N; otherwise NotN := N.
++   procedure FZ_Not_Cond_D(N    : in out FZ;
++                           Cond : in     WBool)is
++      
++      -- The inversion mask
++      Inv : constant Word := 0 - Cond;
++      
++   begin
++      
++      for i in N'Range loop
++         
++         -- Invert (or, if Cond is 0, do nothing)
++         N(i) := N(i) xor Inv;
++         
++      end loop;
++      
++   end FZ_Not_Cond_D;
++   pragma Inline_Always(FZ_Not_Cond_D);
++   
++   
++   -- Subtractor that gets absolute value if underflowed, in const. time
++   procedure FZ_Sub_Abs(X          : in FZ;
++                        Y          : in FZ;
++                        Difference : out FZ;
++                        Underflow  : out WBool) is
++      
++      O : Word := 0;
++      pragma Unreferenced(O);
++      
++   begin
++      
++      -- First, we subtract normally
++      FZ_Sub(X, Y, Difference, Underflow);
++      
++      -- If borrow - negate,
++      FZ_Not_Cond_D(Difference, Underflow);
++      
++      -- ... and also increment.
++      FZ_Add_D_W(Difference, Underflow, O);
++      
++   end FZ_Sub_Abs;
++   pragma Inline_Always(FZ_Sub_Abs);
++   
++   
+ end FZ_Arith;
+diff -uNr a/ffa/libffa/fz_arith.ads b/ffa/libffa/fz_arith.ads
+--- a/ffa/libffa/fz_arith.ads 384fbd4d5207234d75acfd11e7c62891ecfcb1c1cbd0205ff71e1b24846e43126538dbe6cdf63a3b78fd660bbe1671fa598c359703680e3aecb5144895893c31
++++ b/ffa/libffa/fz_arith.ads 438a4d222ed5f2fdff3f3e4b5e5b5e1bc0017635f455658fe655f9706d77516468dbf3f9086c5bb0ea4e1911f68d6fdb858e0c3c276586028e24654704869428
+@@ -20,11 +20,24 @@
+ with Words;   use Words;
+ with FZ_Type; use FZ_Type;
+ 
++
+ -- Fundamental Arithmetic operators on FZ:
+ package FZ_Arith is
+    
+    pragma Pure;
+    
++   -- Destructive Add: X := X + Y; Overflow := Carry; optional OF_In
++   procedure FZ_Add_D(X          : in out FZ;
++                      Y          : in     FZ;
++                      Overflow   : out    WBool;
++                      OF_In      : in     WBool := 0);
++   pragma Precondition(X'Length = Y'Length);
++   
++      -- Destructive Add: X := X + W; Overflow := Carry
++   procedure FZ_Add_D_W(X        : in out FZ;
++                        W        : in     Word;
++                        Overflow : out    WBool);
++   
+    -- Sum := X + Y; Overflow := Carry
+    procedure FZ_Add(X          : in    FZ;
+                     Y          : in    FZ;
+@@ -55,4 +68,15 @@
+                     Underflow  : out WBool);
+    pragma Precondition(X'Length = Y'Length and X'Length = Difference'Length);
+    
++   -- Destructive: If Cond is 1, NotN := ~N; otherwise NotN := N.
++   procedure FZ_Not_Cond_D(N    : in out FZ;
++                           Cond : in     WBool);
++   
++   -- Subtractor that gets absolute value if underflowed, in const. time
++   procedure FZ_Sub_Abs(X          : in FZ;
++                        Y          : in FZ;
++                        Difference : out FZ;
++                        Underflow  : out WBool);
++   pragma Precondition(X'Length = Y'Length and X'Length = Difference'Length);
++   
+ end FZ_Arith;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb f32407a408190634cc0976d939aa12e74a4a20eefcb2f8bf77694c3d4e9b1d64f22283f1eea5b0b219ec84b760b1138d6bac2b96a2b7315255780e8463d1fd0f
++++ b/ffa/libffa/fz_modex.adb 1c3d48c34543b5c044b9713e23d424c02ecf8bf9b914f3504b3bb2c50ea610865a4343164a6e22256ea80e6fb9a386ebcf13e67f1df76b954c2114b91e22b01d
+@@ -45,7 +45,7 @@
+    begin
+       
+       -- XY_Lo:XY_Hi := X * Y
+-      FZ_Mul_Comba(X, Y, XY_Lo, XY_Hi);
++      FZ_Mult(X, Y, XY_Lo, XY_Hi);
+       
+       -- Product := XY mod M
+       FZ_Mod(XY, Modulus, Product);
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb 5cb9ecb938f842b7c34ca7edf99fb92502986d7f660b223659c9b19c6008a24c3be6de8135db37e29e7ff278a451b68c61f6b57d8e404372dcd3fd6d4320ea0a
++++ b/ffa/libffa/fz_mul.adb 98a9315badac1530d96e214873be3efced853c4a1d922ca1d707d93e62993addffe906a64525204c9fb83b38c9ac04a170711d8d10d33d3ee2699953dded18b9
+@@ -20,15 +20,15 @@
+ with Words;    use Words;
+ with Word_Ops; use Word_Ops;
+ with W_Mul;    use W_Mul;
++with FZ_Arith; use FZ_Arith;
+ 
+ 
+ package body FZ_Mul is
+-   
+-   -- Comba's multiplier.
++      
++   -- Comba's multiplier. (CAUTION: UNBUFFERED)
+    procedure FZ_Mul_Comba(X     : in  FZ;
+                           Y     : in  FZ;
+-                          XY_Lo : out FZ;
+-                          XY_Hi : out FZ) is
++                          XY    : out FZ) is
+       
+       -- Words in each multiplicand
+       L : constant Word_Index := X'Length;
+@@ -39,11 +39,8 @@
+       -- 3-word Accumulator
+       A2, A1, A0 : Word := 0;
+       
+-      -- Register holding Product; indexed from zero
+-      XY : FZ(0 .. LP - 1);
+-      
+       -- Type for referring to a column of XY
+-      subtype ColXY is Word_Index range XY'Range;
++      subtype ColXY is Word_Index range 0 .. LP - 1;
+       
+       -- Compute the Nth (indexed from zero) column of the Product
+       procedure Col(N : in ColXY; U : in ColXY; V : in ColXY) is
+@@ -86,7 +83,7 @@
+          end loop;
+          
+          -- We now have the Nth (indexed from zero) word of XY
+-         XY(N) := A0;
++         XY(XY'First + N) := A0;
+          
+          -- Right-Shift the Accumulator by one Word width:
+          A0 := A1;
+@@ -115,11 +112,163 @@
+       -- The very last Word of the Product:
+       XY(XY'Last) := A0;
+       
+-      -- Output the Product's lower and upper FZs:
+-      XY_Lo := XY(0 .. L - 1);
+-      XY_Hi := XY(L .. XY'Last);
+-      
+    end FZ_Mul_Comba;
+    pragma Inline_Always(FZ_Mul_Comba);
+    
++   
++   -- Karatsuba's Multiplier. (CAUTION: UNBUFFERED)
++   procedure Mul_Karatsuba(X  : in  FZ;
++                           Y  : in  FZ;
++                           XY : out FZ) is
++      
++      -- L is the wordness of a multiplicand. Guaranteed to be a power of two.
++      L : constant Word_Count := X'Length;
++      
++      -- An 'LSeg' is the same length as either multiplicand.
++      subtype LSeg is FZ(1 .. L);
++      
++      -- K is HALF of the length of a multiplicand.
++      K : constant Word_Index := L / 2;
++      
++      -- A 'KSeg' is the same length as HALF of a multiplicand.
++      subtype KSeg is FZ(1 .. K);
++      
++      -- The three L-sized variables of the product equation, i.e.:
++      -- XY = LL + 2^(K*Bitness)(LL + HH + (-1^DD_Sub)*DD) + 2^(2*K*Bitness)HH
++      LL, DD, HH : LSeg;
++      
++      -- K-sized terms of Dx * Dy = DD
++      Dx, Dy     : KSeg;  -- Dx = abs(XLo - XHi) , Dy = abs(YLo - YHi)
++      
++      -- Subtraction borrows, signs of (XL - XH) and (YL - YH),
++      Cx, Cy     : WBool; -- so that we can calculate (-1^DD_Sub)
++      
++      -- Bottom and Top K-sized halves of the multiplicand X.
++      XLo        : KSeg  renames    X(  X'First       ..   X'Last - K );
++      XHi        : KSeg  renames    X(  X'First + K   ..   X'Last     );
++      
++      -- Bottom and Top K-sized halves of the multiplicand Y.
++      YLo        : KSeg  renames    Y(  Y'First       ..   Y'Last - K );
++      YHi        : KSeg  renames    Y(  Y'First + K   ..   Y'Last     );
++      
++      -- L-sized middle segment of the product XY (+/- K from the midpoint).
++      XYMid      : LSeg  renames   XY( XY'First + K   ..  XY'Last - K );
++      
++      -- Bottom and Top L-sized halves of the product XY.
++      XYLo       : LSeg  renames   XY( XY'First       ..  XY'Last - L );
++      XYHi       : LSeg  renames   XY( XY'First + L   ..  XY'Last     );
++      
++      -- Topmost K-sized quarter segment of the product XY, or 'tail'
++      XYHiHi     : KSeg  renames XYHi( XYHi'First + K .. XYHi'Last    );
++      
++      -- Whether the DD term is being subtracted.
++      DD_Sub     : WBool;
++      
++      -- Carry from individual term additions.
++      C          : WBool;
++      
++      -- Tail-Carry accumulator, for the final ripple
++      TC         : Word;
++      
++   begin
++      
++      -- Recurse: LL := XL * YL
++      FZ_Multiply(XLo, YLo, LL);
++      
++      -- Recurse: HH := XH * YH
++      FZ_Multiply(XHi, YHi, HH);
++      
++      -- Dx := |XL - XH| , Cx := Borrow (i.e. 1 iff XL < XH)
++      FZ_Sub_Abs(X => XLo, Y => XHi, Difference => Dx, Underflow => Cx);
++      
++      -- Dy := |YL - YH| , Cy := Borrow (i.e. 1 iff YL < YH)
++      FZ_Sub_Abs(X => YLo, Y => YHi, Difference => Dy, Underflow => Cy);
++      
++      -- Recurse: DD := Dx * Dy
++      FZ_Multiply(Dx, Dy, DD);
++      
++      -- Whether (XL - XH)(YL - YH) is positive, and so DD must be subtracted:
++      DD_Sub := 1 - (Cx xor Cy);
++      
++      -- XY := LL + 2^(2 * K * Bitness) * HH
++      XYLo := LL;
++      XYHi := HH;
++      
++      -- XY += 2^(K * Bitness) * HH, but carry goes in Tail Carry accum.
++      FZ_Add_D(X => XYMid, Y => HH, Overflow => TC);
++      
++      -- XY += 2^(K * Bitness) * LL, ...
++      FZ_Add_D(X => XYMid, Y => LL, Overflow => C);
++      
++      -- ... but the carry goes into the Tail Carry accumulator.
++      TC := TC + C;
++      
++      -- XY += 2^(K * Bitness) * (-1^DD_Sub) * DD
++      FZ_Not_Cond_D(N => DD, Cond => DD_Sub); -- invert DD if 2s-complementing
++      FZ_Add_D(OF_In    => DD_Sub,            -- ... and then must increment
++               X        => XYMid,
++               Y        => DD,
++               Overflow => C); -- carry will go in Tail Carry accumulator
++      
++      -- Compute the final Tail Carry for the ripple
++      TC := TC + C - DD_Sub;
++      
++      -- Barring a cosmic ray, 0 <= TC <= 2 .
++      pragma Assert(TC <= 2);
++      
++      -- Ripple the Tail Carry into the tail.
++      FZ_Add_D_W(X => XYHiHi, W => TC, Overflow => C);
++      
++      -- Barring a cosmic ray, the tail ripple will NOT overflow.
++      pragma Assert(C = 0);
++
++   end Mul_Karatsuba;
++   -- CAUTION: Inlining prohibited for Mul_Karatsuba !
++   
++   
++   -- Multiplier. (CAUTION: UNBUFFERED)
++   procedure FZ_Multiply(X     : in  FZ;
++                         Y     : in  FZ;
++                         XY    : out FZ) is
++      
++      -- The length of either multiplicand
++      L : constant Word_Count := X'Length;
++      
++   begin
++      
++      if L <= Karatsuba_Thresh then
++         
++         -- Base case:
++         FZ_Mul_Comba(X, Y, XY);
++         
++      else
++         
++         -- Recursive case:
++         Mul_Karatsuba(X, Y, XY);
++         
++      end if;
++      
++   end FZ_Multiply;
++   pragma Inline_Always(FZ_Multiply);
++   
++   
++   -- Multiplier. Preserves the inputs.
++   procedure FZ_Mult(X     : in  FZ;
++                     Y     : in  FZ;
++                     XY_Lo : out FZ;
++                     XY_Hi : out FZ) is
++      
++      -- Product buffer.
++      P : FZ(1 .. 2 * X'Length);
++      
++   begin
++      
++      FZ_Multiply(X, Y, P);
++      
++      XY_Lo := P(P'First            .. P'First + X'Length - 1);
++      XY_Hi := P(P'First + X'Length .. P'Last);
++      
++   end FZ_Mult;
++   pragma Inline_Always(FZ_Mult);
++   
+ end FZ_Mul;
+diff -uNr a/ffa/libffa/fz_mul.ads b/ffa/libffa/fz_mul.ads
+--- a/ffa/libffa/fz_mul.ads bb9f9d07462f2b8d71ccc7ff3d3ec92f0b1bc1c59306d2d9130462e32d4a4fc4c0f89c22404c7b6bb09b08a772053e1582bdff8d2bc2e5a24ddea2ca78b01223
++++ b/ffa/libffa/fz_mul.ads 79e6526e650e729ce3925e841085f515e2d57f4b1b629af5f39f9a0eef61aaa30a4c67bfc40d222fb4919b22bcbd62d238f2ca36500163aa02d40a8f8fa5672b
+@@ -24,11 +24,37 @@
+    
+    pragma Pure;
+    
+-   -- Comba's multiplier.
++   -- Karatsuba Threshhold - at or below this many words, we use Comba mult.
++   Karatsuba_Thresh : constant Indices := 8;
++   
++   -- Multiply. (CAUTION: UNBUFFERED)
++   procedure FZ_Multiply(X     : in  FZ;
++                         Y     : in  FZ;
++                         XY    : out FZ);
++   pragma Precondition(X'Length = Y'Length and
++                         XY'Length = (X'Length + Y'Length));
++   
++   -- Comba's multiplier. (CAUTION: UNBUFFERED)
+    procedure FZ_Mul_Comba(X     : in  FZ;
+                           Y     : in  FZ;
+-                          XY_Lo : out FZ;
+-                          XY_Hi : out FZ);
++                          XY    : out FZ);
++   pragma Precondition(X'Length = Y'Length and
++                         XY'Length = (X'Length + Y'Length));
++   
++   -- Karatsuba's Multiplier. (CAUTION: UNBUFFERED)
++   procedure Mul_Karatsuba(X  : in  FZ;
++                           Y  : in  FZ;
++                           XY : out FZ);
++   pragma Precondition(X'Length = Y'Length and
++                         XY'Length = (X'Length + Y'Length) and
++                         X'Length mod 2 = 0);
++   -- CAUTION: Inlining prohibited for Mul_Karatsuba !
++   
++   -- Multiplier. Preserves the inputs.
++   procedure FZ_Mult(X     : in  FZ;
++                     Y     : in  FZ;
++                     XY_Lo : out FZ;
++                     XY_Hi : out FZ);
+    pragma Precondition(X'Length = Y'Length and
+                          XY_Lo'Length = XY_Hi'Length and
+                          XY_Lo'Length = ((X'Length + Y'Length) / 2));
+diff -uNr a/ffa/libffa/w_mul.adb b/ffa/libffa/w_mul.adb
+--- a/ffa/libffa/w_mul.adb 5cb7abb0ae6c0c5d83d867da564c67c84bd775f7f5089219eef842df04f5390c94df546bfc48735e9965a3c363591c97167b99299ee94046c55714b83555e9e0
++++ b/ffa/libffa/w_mul.adb 9e7db7601c084048496d7d67fad5b7efdb69490ba98785a33f041cf6497ebd954ac8a539cf1c0f22cbb538bbaf8c544e6772205a541646ac22eb0da31883643c
+@@ -22,8 +22,16 @@
+ 
+ package body W_Mul is
+    
++   function Mul_HalfWord_Iron(X : in HalfWord;
++                              Y : in HalfWord) return Word is
++   begin
++      return X * Y;
++   end Mul_HalfWord_Iron;
++   pragma Inline_Always(Mul_HalfWord_Iron);
++   
++   
+    -- Multiply half-words X and Y, producing a Word-sized product
+-   function Mul_HalfWord(X : in HalfWord; Y : in HalfWord) return Word is
++   function Mul_HalfWord_Soft(X : in HalfWord; Y : in HalfWord) return Word is
+       
+       -- X-Slide
+       XS : Word := X;
+@@ -68,8 +76,8 @@
+       -- Return the Product
+       return XY;
+       
+-   end Mul_HalfWord;
+-   pragma Inline_Always(Mul_HalfWord);
++   end Mul_HalfWord_Soft;
++   pragma Inline_Always(Mul_HalfWord_Soft);
+    
+    
+    -- Get the bottom half of a Word
+@@ -107,16 +115,16 @@
+       YH : constant HalfWord := TopHW(Y);
+       
+       -- XL * YL
+-      LL : constant Word := Mul_HalfWord(XL, YL);
++      LL : constant Word := Mul_HalfWord_Iron(XL, YL);
+       
+       -- XL * YH
+-      LH : constant Word := Mul_HalfWord(XL, YH);
++      LH : constant Word := Mul_HalfWord_Iron(XL, YH);
+       
+       -- XH * YL
+-      HL : constant Word := Mul_HalfWord(XH, YL);
++      HL : constant Word := Mul_HalfWord_Iron(XH, YL);
+       
+       -- XH * YH
+-      HH : constant Word := Mul_HalfWord(XH, YH);
++      HH : constant Word := Mul_HalfWord_Iron(XH, YH);
+       
+       -- Carry
+       CL : constant Word := TopHW(TopHW(LL) + BottomHW(LH) + BottomHW(HL));
+diff -uNr a/ffa/libffa/w_mul.ads b/ffa/libffa/w_mul.ads
+--- a/ffa/libffa/w_mul.ads 0a3c652def28676a7be3a8c8a76c1bf1542c42c993718d9b72ca7b74f87c41ba4491609560f2980d3db266ed00fa3ace57a1d7be43f6bf6837beed880d5b9460
++++ b/ffa/libffa/w_mul.ads 0b95a8d43df2253dd2677a8d52dadb5673a6089ff5c745fe57fa46c58cb1fba62681973db9ee76ae7828c9bb4df98378f2da8928097f787825e025d5c5665335
+@@ -31,8 +31,11 @@
+    -- The number of bytes in a Half-Word
+    HalfByteness : constant Positive := Byteness / 2;
+    
+-   -- Multiply half-words X and Y, producing a Word-sized product
+-   function Mul_HalfWord(X : in HalfWord; Y : in HalfWord) return Word;
++   -- Multiply half-words X and Y, producing a Word-sized product (Iron)
++   function Mul_HalfWord_Iron(X : in HalfWord; Y : in HalfWord) return Word;
++   
++   -- Multiply half-words X and Y, producing a Word-sized product (Egyptian)
++   function Mul_HalfWord_Soft(X : in HalfWord; Y : in HalfWord) return Word;
+    
+    -- Get the bottom half of a Word
+    function BottomHW(W : in Word) return HalfWord;
+@@ -40,7 +43,7 @@
+    -- Get the top half of a Word
+    function TopHW(W : in Word) return HalfWord;
+    
+-   -- Carry out X*Y mult, return lower word XY_LW and upper word XY_HW.
++   -- Carry out X*Y mult, return lower word XY_LW and upper word XY_HW (Iron)
+    procedure Mul_Word(X : in Word; Y : in Word; XY_LW : out Word; XY_HW : out Word);
+    
+ end W_Mul;

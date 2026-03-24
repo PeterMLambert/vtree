@@ -1,0 +1,683 @@
+diff -uNr a/ffa/HISTORY.TXT b/ffa/HISTORY.TXT
+--- a/ffa/HISTORY.TXT e47ab3f867f34ff2d307bf328d9fd39d51e3c0c93cfa4e328997b9322a642542f66e623a658d5f2fc87acfd2a72555790bd08f25948d9cb227866c7a24853985
++++ b/ffa/HISTORY.TXT false
+@@ -1,47 +0,0 @@
+-###############
+-### HISTORY ###
+-###############
+-
+-"Chapter 1: Genesis."
+-ffa_ch1_genesis.vpatch
+-http://www.loper-os.org/?p=1913
+-
+-"Chapter 2: Logical and Bitwise Operations."
+-ffa_ch2_logicals.vpatch
+-http://www.loper-os.org/?p=2026
+-
+-"Chapter 3: Shifts."
+-ffa_ch3_shifts.vpatch
+-http://www.loper-os.org/?p=2032
+-
+-"Chapter 4: Interlude: FFACalc."
+-ffa_ch4_ffacalc.vpatch
+-http://www.loper-os.org/?p=2051
+-
+-"Chapter 5: "Egyptological" Multiplication and Division."
+-ffa_ch5_egypt.vpatch
+-http://www.loper-os.org/?p=2071
+-
+-"Chapter 6: "Geological" RSA."
+-ffa_ch6_simplest_rsa.vpatch
+-http://www.loper-os.org/?p=2105
+-
+-"Chapter 7: "Turbo Egyptians.""
+-ffa_ch7_turbo_egyptians.vpatch
+-http://www.loper-os.org/?p=2118
+-
+-"Chapter 8: Interlude: Randomism."
+-ffa_ch8_randomism.vpatch
+-http://www.loper-os.org/?p=2175
+-
+-"Chapter 9: "Exodus from Egypt" with Comba’s Algorithm."
+-ffa_ch9_exodus.vpatch
+-http://www.loper-os.org/?p=2186
+-
+-"Chapter 10: Introducing Karatsuba’s Multiplication."
+-ffa_ch10_karatsuba.vpatch
+-http://www.loper-os.org/?p=2238
+-
+-"Chapter 11: Tuning and Unified API."
+-ffa_ch11_tuning_and_api.vpatch
+-### YOU ARE HERE ###
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT false
++++ b/ffa/MANIFEST.TXT e5b1858f8d2c3ad2aeb9c4ba9e1fe28b5c79588305357385db3ac1afe50796268014b8480ca0c48508dcdb3416172e478b1291ef8a62b584b41cd6f9d6bcf988
+@@ -0,0 +1,12 @@
++xxxxxxx ffa_ch1_genesis                "Genesis."
++xxxxxxx ffa_ch2_logicals               "Logical and Bitwise Operations."
++xxxxxxx ffa_ch3_shifts                 "Shifts."
++xxxxxxx ffa_ch4_ffacalc                "Interlude: FFACalc."
++xxxxxxx ffa_ch5_egypt                  ""Egyptological" Multiplication and Division."
++xxxxxxx ffa_ch6_simplest_rsa           ""Geological" RSA."
++xxxxxxx ffa_ch7_turbo_egyptians        ""Turbo Egyptians.""
++xxxxxxx ffa_ch8_randomism              "Interlude: Randomism."
++xxxxxxx ffa_ch9_exodus                 ""Exodus from Egypt" with Comba’s Algorithm."
++xxxxxxx ffa_ch10_karatsuba             "Introducing Karatsuba's Multiplication."
++xxxxxxx ffa_ch11_tuning_and_api        "Tuning and Unified API."
++ 551091 ffa_ch12_karatsuba_redux       "Karatsuba Redux."
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 74dce12dc3fa30b4fd9e60ae209c1deba564b19dd95b413f02fa9a0e45120242cd9682a079c92b7e5a2eb19941a7eec6f0f3ec9c2b88058f88cf891828496d58
++++ b/ffa/ffacalc/ffa_calc.adb 4a851245719704af35888e2d1bc00b4cec16e66093e7d79408e98e8a2eaba0e0f5a7ed1eee26d0f75fa651dbe4bddd48c31722a2b9b98464362b681f5d7b4c8a
+@@ -474,6 +474,17 @@
+                end loop;
+                Quit(0);
+                
++               ---------------------------------------------------------
++               -- Ch. 12B:
++               -- Square, give bottom and top halves
++            when 'S' =>
++               Want(1);
++               Push;
++               FFA_FZ_Square(X     => Stack(SP - 1),
++                             XX_Lo => Stack(SP - 1),
++                             XX_Hi => Stack(SP));
++               ---------------------------------------------------------
++               
+                ----------
+                -- NOPs --
+                ----------
+diff -uNr a/ffa/libffa/ffa.adb b/ffa/libffa/ffa.adb
+--- a/ffa/libffa/ffa.adb 9bd9383546e9b4e6ebd42f6e4dc7bb07a449487cea22ae1d5efac8d74af48907d827295e6e388a1912d964e3a6d5c818a4250bfcb95505ca6e5310f2ca0fe355
++++ b/ffa/libffa/ffa.adb 720237083e8d484b06d432529e8547d78adb2eb1f72cf0934f7596ce8ca7aec883c43f0951e133294b5139d4386e749c0939efe3715ec46bc2515e3b23493a7b
+@@ -20,6 +20,7 @@
+ with FZ_Arith;
+ with FZ_Shift;
+ with FZ_Mul;
++with FZ_Sqr;
+ 
+ 
+ -- Wrapper bodies for routines that we inline, but must enforce preconditions
+@@ -107,4 +108,13 @@
+                                   XY_Lo => XY_Lo, XY_Hi => XY_Hi);
+    end FFA_FZ_Multiply;
+    
++   
++   -- Square. Preserves the inputs.
++   procedure FFA_FZ_Square(X     : in  FZ;
++                           XX_Lo : out FZ;
++                           XX_Hi : out FZ) is
++   begin
++      FZ_Sqr.FZ_Square_Buffered(X => X, XX_Lo => XX_Lo, XX_Hi => XX_Hi);
++   end FFA_FZ_Square;
++   
+ end FFA;
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads 98eaa2028c09d5abfdbeb11c8665906e67392bd4e25cd0434565d0e350a9211eedb31ee4327793ba9678722c15868c249e6ceaa06616f9ce27918375ee6bd69a
++++ b/ffa/libffa/ffa.ads aa1b855dffa6fb750cf1778f0dfb532328fc555dfa0c1fab99b3d9dd85b6c5bc16508a1422273f9706acc917e1b873a38ae9b358fb9a070f25f5403195cac01c
+@@ -256,6 +256,14 @@
+      XY_Lo'Length = XY_Hi'Length and
+      XY_Lo'Length = ((X'Length + Y'Length) / 2);
+    
++   -- Square. Preserves the inputs.
++   procedure FFA_FZ_Square(X     : in  FZ;
++                           XX_Lo : out FZ;
++                           XX_Hi : out FZ)
++     with Pre => XX_Lo'Length = X'Length and
++     XX_Hi'Length = X'Length and
++     X'Length mod 2 = 0;
++   
+    ----------------------------------------------------------------------------
+    --- Modular Operations on FZ
+    ----------------------------------------------------------------------------
+diff -uNr a/ffa/libffa/fz_arith.adb b/ffa/libffa/fz_arith.adb
+--- a/ffa/libffa/fz_arith.adb 990abd54e1786da34415cde07148189077b5ad6a36e527b1de4fb22dde308d1ba505fc6923af2f7affcc9846a59cb6c465de9f02f215cfbe59696cfd3b036b2f
++++ b/ffa/libffa/fz_arith.adb 118a03b1beab9bfc7c517c193f333b5f9a1169cd7b3364ca7b10b7050f8aa8f85e4323b925f6534041f0f02de5242a72cc3a9829bf9e5cf25a075aa162cb1244
+@@ -120,6 +120,26 @@
+    end FZ_Add_Gated;
+    
+    
++   -- Destructive Sub: X := X - Y; Underflow := Borrow
++   procedure FZ_Sub_D(X          : in out FZ;
++                      Y          : in     FZ;
++                      Underflow  : out    WBool) is
++      Borrow : WBool := 0;
++   begin
++      for i in 0 .. Word_Index(X'Length - 1) loop
++         declare
++            A : constant Word := X(X'First + i);
++            B : constant Word := Y(Y'First + i);
++            S : constant Word := A - B - Borrow;
++         begin
++            X(X'First + i) := S;
++            Borrow         := W_Borrow(A, B, S);
++         end;
++      end loop;
++      Underflow := Borrow;
++   end FZ_Sub_D;
++   
++   
+    -- Difference := X - Y; Underflow := Borrow
+    procedure FZ_Sub(X          : in  FZ;
+                     Y          : in  FZ;
+diff -uNr a/ffa/libffa/fz_arith.ads b/ffa/libffa/fz_arith.ads
+--- a/ffa/libffa/fz_arith.ads 23437d66c7048dadb0d307d41a30d3de3c879a107d4804c6c95766ca62ca7f875c7c4cc98efefd1ee085d6c2ad7844a3c7cd15dd61ed79f5f7ed0017f8f90262
++++ b/ffa/libffa/fz_arith.ads 1be9e99c85140fdbcaa506ea97de7b3e469ed5f0d30a252cca92dc74c0f8d77ddea63f7552907cd0705879984cb74259a228982504c441286c56bbf1d18a14be
+@@ -62,6 +62,12 @@
+                           Sum        : out FZ);
+    pragma Inline_Always(FZ_Add_Gated);
+    
++   -- Destructive Sub: X := X - Y; Underflow := Borrow
++   procedure FZ_Sub_D(X          : in out FZ;
++                      Y          : in     FZ;
++                      Underflow  : out    WBool);
++   pragma Inline_Always(FZ_Sub_D);
++   
+    -- Difference := X - Y; Underflow := Borrow
+    procedure FZ_Sub(X          : in  FZ;
+                     Y          : in  FZ;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb ed92bd76ae835f0c692eddabe634adad968c4b698f70716192b3156c3f28f7c41d5859c05b7337f6990576b0a8c5964b9f39d84c074f7763acae3253ddcee771
++++ b/ffa/libffa/fz_modex.adb 84c9976aa492f507f8f21c8bbeb3b7dc671f8aa45c9479808dffda6b62fd23a1891f08740937d5d61b8d5fad9da7ad9e890aaa79059c0a1ee69096d877a93577
+@@ -21,6 +21,7 @@
+ with FZ_Pred;  use FZ_Pred;
+ with FZ_Shift; use FZ_Shift;
+ with FZ_Mul;   use FZ_Mul;
++with FZ_Sqr;   use FZ_Sqr;
+ with FZ_Divis; use FZ_Divis;
+ 
+ 
+@@ -53,6 +54,32 @@
+    end FZ_Mod_Mul;
+    
+    
++   -- Modular Squaring: Product := X*X mod Modulus
++   procedure FZ_Mod_Sqr(X        : in  FZ;
++                        Modulus  : in  FZ;
++                        Product  : out FZ) is
++      
++      -- The wordness of both operands is equal:
++      L     : constant Indices := X'Length;
++      
++      -- Double-width register for squaring and modulus operations
++      XX    : FZ(1 .. L * 2);
++      
++      -- To refer to the lower and upper halves of the working register:
++      XX_Lo : FZ renames XX(1     .. L);
++      XX_Hi : FZ renames XX(L + 1 .. XX'Last);
++   
++   begin
++      
++      -- XX_Lo:XX_Hi := X^2
++      FZ_Square_Buffered(X, XX_Lo, XX_Hi);
++      
++      -- Product := XX mod M
++      FZ_Mod(XX, Modulus, Product);
++      
++   end FZ_Mod_Sqr;
++   
++   
+    -- Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FZ_Mod_Exp(Base     : in  FZ;
+                         Exponent : in  FZ;
+@@ -89,8 +116,8 @@
+          -- Advance to the next bit of E
+          FZ_ShiftRight(E, E, 1);
+          
+-         -- B := B*B mod Modulus
+-         FZ_Mod_Mul(X => B, Y => B, Modulus => Modulus, Product => B);
++         -- B := B^2 mod Modulus
++         FZ_Mod_Sqr(X => B, Modulus => Modulus, Product => B);
+          
+       end loop;
+       
+diff -uNr a/ffa/libffa/fz_modex.ads b/ffa/libffa/fz_modex.ads
+--- a/ffa/libffa/fz_modex.ads afc76cf7ae5fd7f854e19546e2c6a7804c613c3cd60be68ec4f8c7da8c5b0e33e656017b4c402b8b668b7ef021bb3db3dc861b54cf3a2b836d2a3d2b4f9d454b
++++ b/ffa/libffa/fz_modex.ads 4d75a96582c1897f5a85da8983033487653b0b0678d88bc3c7f895fcbb4a0a63b9019426d119cb3eddf959856959cbba295bc1d46ae36b0c4b7f4a6f9e2a00a7
+@@ -33,6 +33,13 @@
+      Modulus'Length = X'Length and
+      Product'Length = Modulus'Length;
+    
++   -- Modular Square: Product := X*X mod Modulus
++   procedure FZ_Mod_Sqr(X        : in  FZ;
++                        Modulus  : in  FZ;
++                        Product  : out FZ)
++     with Pre => Modulus'Length = X'Length and
++     Product'Length = Modulus'Length;
++   
+    -- Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FZ_Mod_Exp(Base     : in  FZ;
+                         Exponent : in  FZ;
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb a819415bc60308fe0b550eee13da2d6d4819064e4d336e9766e65a63768aef24ac7db9f5ac238725587f4660c2992ae17abc85ef5047d62beb04ba2c12d1172a
++++ b/ffa/libffa/fz_mul.adb 92bd5f707cebadbabc29f5f02a452f8d223b640ad39bf3b08cea613caa9ca92a7ae91096812ffc09e895c97bcc5aba5054e89c30a6d550926d9cc4814b3180a7
+@@ -166,8 +166,14 @@
+       -- Carry from individual term additions.
+       C          : WBool;
+       
+-      -- Tail-Carry accumulator, for the final ripple
+-      TC         : Word;
++      -- Barring a cosmic ray, 0 <= TC <= 2
++      subtype TailCarry is Word range 0 .. 2;
++      
++      -- Tail-Carry accumulator, for the final ripple-out into XXHiHi
++      TC         : TailCarry := 0;
++      
++      -- Barring a cosmic ray, the tail ripple will NOT overflow.
++      FinalCarry : WZeroOrDie := 0;
+       
+    begin
+       
+@@ -212,15 +218,9 @@
+       -- Compute the final Tail Carry for the ripple
+       TC := TC + C - DD_Sub;
+       
+-      -- Barring a cosmic ray, 0 <= TC <= 2 .
+-      pragma Assert(TC <= 2);
+-      
+       -- Ripple the Tail Carry into the tail.
+-      FZ_Add_D_W(X => XYHiHi, W => TC, Overflow => C);
++      FZ_Add_D_W(X => XYHiHi, W => TC, Overflow => FinalCarry);
+       
+-      -- Barring a cosmic ray, the tail ripple will NOT overflow.
+-      pragma Assert(C = 0);
+-
+    end Mul_Karatsuba;
+    -- CAUTION: Inlining prohibited for Mul_Karatsuba !
+    
+diff -uNr a/ffa/libffa/fz_sqr.adb b/ffa/libffa/fz_sqr.adb
+--- a/ffa/libffa/fz_sqr.adb false
++++ b/ffa/libffa/fz_sqr.adb 8f0062ed157d9eb9910c160640f3f6da391d6724a0023da3b21b6bb00f5391e53a35569073ea698d82a259a26f910de0803fb8eabac6b2694f3d43ac709ae76e
+@@ -0,0 +1,261 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;    use Words;
++with Word_Ops; use Word_Ops;
++with W_Mul;    use W_Mul;
++with FZ_Arith; use FZ_Arith;
++
++
++package body FZ_Sqr is
++   
++   -- Square case of Comba's multiplier. (CAUTION: UNBUFFERED)
++   procedure FZ_Sqr_Comba(X  : in  FZ;
++                          XX : out FZ) is
++      
++      -- Words in each multiplicand
++      L : constant Word_Index := X'Length;
++      
++      -- Length of Product, i.e. double the length of X
++      LP : constant Word_Index := 2 * L;
++      
++      -- 3-word Accumulator
++      A2, A1, A0 : Word := 0;
++      
++      Lo, Hi  : Word; -- Output of WxW multiply/square
++      
++      -- Type for referring to a column of XX
++      subtype ColXX is Word_Index range 0 .. LP - 1;
++      
++      procedure Accum is
++         C      : WBool; -- Carry for the Accumulator addition
++         Sum    : Word;  -- Sum for Accumulator addition
++      begin
++         -- Now add add double-Word Hi:Lo to accumulator A2:A1:A0:
++         -- A0 += Lo; C := Carry
++         Sum := A0 + Lo;
++         C   := W_Carry(A0, Lo, Sum);
++         A0  := Sum;
++         -- A1 += Hi + C; C := Carry
++         Sum := A1 + Hi + C;
++         C   := W_Carry(A1, Hi, Sum);
++         A1  := Sum;
++         -- A2 += A2 + C
++         A2  := A2 + C;
++      end Accum;
++      pragma Inline_Always(Accum);
++      
++      procedure SymmDigits(N : in ColXX; From : in ColXX; To : in ColXX) is
++      begin
++         for j in From .. To loop
++            -- Hi:Lo := j-th * (N - j)-th Word, and then,
++            Mul_Word(X(X'First + j),
++                     X(X'First - j + N),
++                     Lo, Hi);
++            Accum;
++            Accum; -- Accum += 2 * (Hi:Lo)
++         end loop;
++      end SymmDigits;
++      pragma Inline_Always(SymmDigits);
++      
++      procedure SqrDigit(N : in ColXX) is
++      begin
++         Sqr_Word(X(X'First + N), Lo, Hi); -- Hi:Lo := Square(N-th digit)
++         Accum;                            -- Accum += Hi:Lo
++      end SqrDigit;
++      pragma Inline_Always(SqrDigit);
++      
++      procedure HaveDigit(N : in ColXX) is
++      begin
++         -- Save the Nth (indexed from zero) word of XX:
++         XX(XX'First + N) := A0;
++         -- Right-Shift the Accumulator by one Word width:
++         A0 := A1;
++         A1 := A2;
++         A2 := 0;
++      end HaveDigit;
++      pragma Inline_Always(HaveDigit);
++      
++      -- Compute the Nth (indexed from zero) column of the Product
++      procedure Col(N : in ColXX; U : in ColXX; V : in ColXX) is
++      begin
++         -- The branch pattern depends only on FZ wordness
++         if N mod 2 = 0 then         -- If we're doing an EVEN-numbered column:
++            SymmDigits(N, U, V - 1); --   Stop before V: it is the square case
++            SqrDigit(V);             --   Compute the square case at V
++         else                        -- If we're doing an ODD-numbered column:
++            SymmDigits(N, U, V);     --   All of them are the symmetric case
++         end if;                     -- After either even or odd column:
++         HaveDigit(N);               --   We have the N-th digit of the result.
++      end Col;
++      pragma Inline_Always(Col);
++      
++   begin
++      -- First col always exists:
++      SqrDigit(ColXX'First);
++      HaveDigit(ColXX'First);
++      
++      -- Compute the lower half of the Product:
++      for i in 1 .. L - 1 loop
++         Col(i, 0, i / 2);
++      end loop;
++      
++      -- Compute the upper half (sans last Word) of the Product:
++      for i in L .. LP - 2 loop
++         Col(i, i - L + 1, i / 2);
++      end loop;
++      
++      -- The very last Word of the Product:
++      XX(XX'Last) := A0; -- Equiv. of XX(XX'First + 2*L - 1) := A0;
++   end FZ_Sqr_Comba;
++   
++   
++   -- Karatsuba's Squaring. (CAUTION: UNBUFFERED)
++   procedure Sqr_Karatsuba(X  : in  FZ;
++                           XX : out FZ) is
++      
++      -- L is the wordness of X. Guaranteed to be a power of two.
++      L : constant Word_Count := X'Length;
++      
++      -- An 'LSeg' is the same length as X.
++      subtype LSeg is FZ(1 .. L);
++      
++      -- K is HALF of the length of X.
++      K : constant Word_Index := L / 2;
++      
++      -- A 'KSeg' is the same length as HALF of X.
++      subtype KSeg is FZ(1 .. K);
++      
++      -- The three L-sized variables of the product equation, i.e.:
++      -- XX = LL + 2^(K*Bitness)(LL + HH - DD) + 2^(2*K*Bitness)HH
++      LL, DD, HH : LSeg;
++      
++      -- K-sized term Dx, Dx := abs(XLo - XHi) to then get DD := Dx^2
++      Dx         : KSeg;
++      
++      -- IGNORED Subtraction borrow, sign of (XL - XH)
++      Cx         : WBool; -- given as DD := Dx^2, DD is always positive
++      pragma Unreferenced(Cx);
++      
++      -- Bottom and Top K-sized halves of X.
++      XLo        : KSeg  renames    X(    X'First       ..    X'Last - K );
++      XHi        : KSeg  renames    X(    X'First + K   ..    X'Last     );
++      
++      -- L-sized middle segment of the product XX (+/- K from the midpoint).
++      XXMid      : LSeg  renames   XX(   XX'First + K   ..   XX'Last - K );
++      
++      -- Bottom and Top L-sized halves of the product XX.
++      XXLo       : LSeg  renames   XX(   XX'First       ..   XX'Last - L );
++      XXHi       : LSeg  renames   XX(   XX'First + L   ..   XX'Last     );
++      
++      -- Topmost K-sized quarter segment of the product XX, or 'tail'
++      XXHiHi     : KSeg  renames XXHi( XXHi'First + K   .. XXHi'Last     );
++      
++      -- Carry from addition of HH and LL terms; borrow from subtraction of DD
++      C          : WBool;
++      
++      -- Barring a cosmic ray, 0 <= TC <= 2
++      subtype TailCarry is Word range 0 .. 2;
++      
++      -- Tail-Carry accumulator, for the final ripple-out into XXHiHi
++      TC         : TailCarry := 0;
++      
++      -- Barring a cosmic ray, the tail ripple will NOT overflow.
++      FinalCarry : WZeroOrDie := 0;
++      
++   begin
++      
++      -- Recurse: LL := XLo^2
++      FZ_Square_Unbuffered(XLo, LL);
++      
++      -- Recurse: HH := XHi^2
++      FZ_Square_Unbuffered(XHi, HH);
++      
++      -- Dx := |XLo - XHi| , and we don't care about the borrow
++      FZ_Sub_Abs(X => XLo, Y => XHi, Difference => Dx, Underflow => Cx);
++      
++      -- Recurse: DD := Dx^2 (always positive, which is why we don't need Cx)
++      FZ_Square_Unbuffered(Dx, DD);
++      
++      -- XX := LL + 2^(2 * K * Bitness) * HH
++      XXLo := LL;
++      XXHi := HH;
++      
++      -- XX += 2^(K * Bitness) * HH, carry goes into Tail Carry accumulator.
++      FZ_Add_D(X => XXMid, Y => HH, Overflow => TC);
++      
++      -- XX += 2^(K * Bitness) * LL, ...
++      FZ_Add_D(X => XXMid, Y => LL, Overflow => C);
++      
++      -- ... add the carry from LL addition into the Tail Carry accumulator.
++      TC := TC + C;
++      
++      -- XX -= 2^(K * Bitness) * DD
++      FZ_Sub_D(X         => XXMid, -- Because DD is always positive,
++               Y         => DD,    -- this term is always subtractive.
++               Underflow => C); -- C is the borrow from DD term subtraction
++      
++      -- Get final Tail Carry for the ripple by subtracting DD term's borrow
++      TC := TC - C;
++      
++      -- Ripple the Tail Carry into the tail.
++      FZ_Add_D_W(X => XXHiHi, W => TC, Overflow => FinalCarry);
++      
++   end Sqr_Karatsuba;
++   -- CAUTION: Inlining prohibited for Sqr_Karatsuba !
++   
++   
++   -- Squaring. (CAUTION: UNBUFFERED)
++   procedure FZ_Square_Unbuffered(X     : in  FZ;
++                                  XX    : out FZ) is
++   begin
++      
++      if X'Length <= Sqr_Karatsuba_Thresh then
++         
++         -- Base case:
++         FZ_Sqr_Comba(X, XX);
++         
++      else
++         
++         -- Recursive case:
++         Sqr_Karatsuba(X, XX);
++         
++      end if;
++      
++   end FZ_Square_Unbuffered;
++   
++   
++   -- Squaring. Preserves the inputs.
++   procedure FZ_Square_Buffered(X     : in  FZ;
++                                XX_Lo : out FZ;
++                                XX_Hi : out FZ) is
++      
++      -- Product buffer.
++      P : FZ(1 .. 2 * X'Length);
++      
++   begin
++      
++      FZ_Square_Unbuffered(X, P);
++      
++      XX_Lo := P(P'First            .. P'First + X'Length - 1);
++      XX_Hi := P(P'First + X'Length .. P'Last);
++      
++   end FZ_Square_Buffered;
++   
++end FZ_Sqr;
+diff -uNr a/ffa/libffa/fz_sqr.ads b/ffa/libffa/fz_sqr.ads
+--- a/ffa/libffa/fz_sqr.ads false
++++ b/ffa/libffa/fz_sqr.ads eb5cbe08505a865fdbec2d54434b3c1a2460d1bbf78b0cc90499b198b57be364844baa8a8921056a13b6f0ebc35c281e5021d7d60d931ff42f9bbca8ef253575
+@@ -0,0 +1,53 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Sqr is
++   
++   pragma Pure;
++   
++   -- Karatsuba Threshhold - at or below this many Words, we use Comba mult.
++   Sqr_Karatsuba_Thresh : constant Indices := 8;
++   
++   -- Square. (CAUTION: UNBUFFERED)
++   procedure FZ_Square_Unbuffered(X     : in  FZ;
++                                  XX    : out FZ);
++   pragma Inline_Always(FZ_Square_Unbuffered);
++   
++   -- Comba's squaring. (CAUTION: UNBUFFERED)
++   procedure FZ_Sqr_Comba(X     : in  FZ;
++                          XX    : out FZ);
++   pragma Inline_Always(FZ_Sqr_Comba);
++   
++   -- Karatsuba's Squaring. (CAUTION: UNBUFFERED)
++   procedure Sqr_Karatsuba(X  : in  FZ;
++                           XX : out FZ)
++     with Pre => XX'Length = 2 * X'Length and
++     X'Length mod 2 = 0;
++   -- CAUTION: Inlining prohibited for Sqr_Karatsuba !
++   
++   -- Squaring. Preserves the inputs.
++   procedure FZ_Square_Buffered(X     : in  FZ;
++                                XX_Lo : out FZ;
++                                XX_Hi : out FZ);
++   pragma Inline_Always(FZ_Square_Buffered);
++   
++end FZ_Sqr;
+diff -uNr a/ffa/libffa/w_mul.adb b/ffa/libffa/w_mul.adb
+--- a/ffa/libffa/w_mul.adb b37749e920be9f2ca06679ba00c8d924c0e0d9f309921ddd36096a4770b6380ddd4deb9a56a84f535a8d02deb2e379c13c45b2ca40045e8bc4b230bd1c1f3ef5
++++ b/ffa/libffa/w_mul.adb f79f6f0c2069d6d35e407ca4bdab3f1b1f90cb9ca55664e64e73e7130d03ad3056c62e0deeac005dcb3728f3ff5ca1357ae608277f8b062bc610f7459b93e561
+@@ -134,4 +134,46 @@
+       
+    end Mul_Word;
+    
++   ---------------------------------------------------------------------------
++   -- LET A CURSE FALL FOREVER on the authors of GCC, and on the Ada committee,
++   -- neither of whom saw it fit to decree a primitive which returns both
++   -- upper and lower halves of an iron MUL instruction's result. Consequently,
++   -- portable Mul_Word demands ~four~ MULs (and several additions and shifts);
++   -- while portable Sqr_Word demands ~three~ MULs (and likewise adds/shifts.)
++   -- If it were not for their idiocy, BOTH routines would weigh 1 CPU instr.!
++   ---------------------------------------------------------------------------
++   
++   -- Carry out X*X squaring, return lower word XX_LW and upper word XX_HW.
++   procedure Sqr_Word(X       : in  Word;
++                      XX_LW   : out Word;
++                      XX_HW   : out Word) is
++      
++      -- Bottom half of multiplicand X
++      XL : constant HalfWord := BottomHW(X);
++      
++      -- Top half of multiplicand X
++      XH : constant HalfWord := TopHW(X);
++      
++      -- XL^2
++      LL : constant Word := Mul_HalfWord_Iron(XL, XL);
++      
++      -- XL * XH
++      LH : constant Word := Mul_HalfWord_Iron(XL, XH);
++      
++      -- XH^2
++      HH : constant Word := Mul_HalfWord_Iron(XH, XH);
++      
++      -- Carry
++      CL : constant Word := TopHW(TopHW(LL) + Shift_Left(BottomHW(LH), 1));
++      
++   begin
++      
++      -- Get the bottom half of the Product:
++      XX_LW := LL + Shift_Left(LH, HalfBitness + 1);
++      
++      -- Get the top half of the Product:
++      XX_HW := HH + Shift_Left(TopHW(LH), 1) + CL;
++      
++   end Sqr_Word;
++   
+ end W_Mul;
+diff -uNr a/ffa/libffa/w_mul.ads b/ffa/libffa/w_mul.ads
+--- a/ffa/libffa/w_mul.ads 0d60e63cf1527de3c76d96fe3f58151b0e02814eef0fba0d7f4ab5e28b938ffe0430d3b05b378695d942217110d323eb41934c818b187f5ee50d6c402ca35c57
++++ b/ffa/libffa/w_mul.ads cbc2184b13f61f3540baa6350673bc3735e29c3b9f4ea9b2ebcd7525d75a51cc9a11b84fdf5f92b61661daf3607643d6a935cb2113f8f5edd0ae46d37f41bb9f
+@@ -52,4 +52,10 @@
+                       XY_LW : out Word; XY_HW : out Word);
+    pragma Inline_Always(Mul_Word);
+    
++   -- Carry out X*X squaring, return lower word XX_LW and upper word XX_HW.
++   procedure Sqr_Word(X       : in  Word;
++                      XX_LW   : out Word;
++                      XX_HW   : out Word);
++   pragma Inline_Always(Sqr_Word);
++   
+ end W_Mul;
+diff -uNr a/ffa/libffa/words.ads b/ffa/libffa/words.ads
+--- a/ffa/libffa/words.ads c84e7e88846a8c51ccd53f1b704b66f7e23107fd56da9dbd5054a55dba963e730a9f5a8e62846d5a451b3bbae26b976746547df526689ab7548b261fe6b4fb2d
++++ b/ffa/libffa/words.ads 864714838c024ee2b0f4a2f8b3fcf5ccae3b055429b3e1763fdfb596b9115bf964c95214674e8eea859ada4caf41691362df3083cb4ef25dd218bc9237f28dfa
+@@ -49,4 +49,7 @@
+    -- When we must refer to individual bit positions of a machine word:
+    subtype WBit_Index is Natural range 0 .. Bitness - 1;
+    
++   -- For when a computed Word is mandatorily expected to equal zero:
++   subtype WZeroOrDie is Word range 0 .. 0;
++   
+ end Words;

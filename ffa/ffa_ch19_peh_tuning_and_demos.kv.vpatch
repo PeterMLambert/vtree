@@ -1,0 +1,1121 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 780d6308e25aca759fec5a60ae37944cdcc11249712125c0a6a579a7082370b0fb50c1cd0f6043edbcceca52c478f2f1c2faecd62ed3fb6c79e81206463b278a
++++ b/ffa/MANIFEST.TXT 9978e108265b404ac834322c0111a2cb518aef3cf514339b7f1e95bb7df97ff0b02183b15901dd1e5ec8b5bc7580026501755ebff476c5473e76de64f3fb9a1b
+@@ -17,3 +17,4 @@
+  560516 ffa_ch16_miller_rabin          "Miller-Rabin Method."
+  567223 ffa_ch17_peh                   "Introduction to Peh."
+  569234 ffa_ch18_subroutines           "Subroutines in Peh."
++ 578827 ffa_ch19_peh_tuning_and_demos  "Peh Tuning and Demo Tapes."
+diff -uNr a/ffa/demos/2048_rng_prime.peh b/ffa/demos/2048_rng_prime.peh
+--- a/ffa/demos/2048_rng_prime.peh false
++++ b/ffa/demos/2048_rng_prime.peh 40350a3c1ee93bcf02ae34e2d7aed472ba7b852bbbea3bd6da4dea6a304a665956b9a4839d6c2fd64e6d26b21e6c9c8937c65d17381715bb80184501849e177e
+@@ -0,0 +1,219 @@
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++(- Demo Tape for 'Peh'; produces a random probable-prime of the given form. -)
++(-                                                                          -)
++(- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      -)
++(- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     -)
++(-                                                                          -)
++(- You do not have, nor can you ever acquire the right to use, copy or      -)
++(- distribute this software ; Should you use this software for any purpose, -)
++(- or copy and distribute it to anyone or in any manner, you are breaking   -)
++(- the laws of whatever soi-disant jurisdiction, and you promise to         -)
++(- continue doing so for the indefinite future. In any case, please         -)
++(- always : read and understand any software ; verify any PGP signatures    -)
++(- that you use - for any purpose.                                          -)
++(-                                                                          -)
++(- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     -)
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++
++(----------------------------------------------------------------------------)
++
++( Largest Primorial which fits in a 2048-bit FZ : )
++
++@Primorial@ ( Regs : none )
++        .48CB4F7B0A023C393C0A4F253FFE4D1905DEFDF482D0C7754B59B612E3B741995
++         87DC933268A053E59F021733C80D558BF9CBBAD3A38E2FB5D4BA3157227E8ACA0
++         ACF379238AFA8DB31110AF0C566DC5DBC5C8E783E1566B3B44A4E35FFC2BFE481
++         C533A1609E99A1C9AF81C8F634F7400FBD1355D091FAB7B9AFF302AAC9D60C15C
++         29E3396A18523E177B1DA3898FF1F8BF74A2CC40032736A65B25B5908950863A8
++         019065A073EBF20164F14EA4338530C2818F208BAEEB2A810A9862A09B8ADE3BE
++         BDD7CF7DC88ECB1722F7ED2DAD24FE5C4851F7D6681CA2B97306BAC70E37D177C
++         139E2688AF33E5CCEF102A2AE35276983DDCABA3720E5C165EB88C0FE
++;
++
++(----------------------------------------------------------------------------)
++
++( Number of 'passing' M-R shots required before we will say that a candidate
++  integer is a 'probable prime': 32. Can change this if you dare. )
++
++@MR-Shots@ ( Regs : none )
++        .20
++;
++
++(----------------------------------------------------------------------------)
++
++( Bitmask imposed, via logical OR, on the randomly-generated candidates.
++  Consists of a 1 in the uppermost position for the current FZ width,
++  and a 1 in the lowermost position, to give ODD integers of desired width. )
++
++@Candidate-Bitmask@ ( Regs : none )
++        .1
++           .0 ~ W
++           .1 -
++        LS
++        .1
++        |
++;
++
++(----------------------------------------------------------------------------)
++
++( Take an integer N from stack.
++  N MUST BE > 1; assumed to be true, given that the Candidate Bitmask is > 1.
++  if N is Relatively Prime vs. Primorial:
++     Return 0;
++  else:
++     return 1. )
++
++@Primorial-Litmus@ ( Regs : none )
++
++        ( N is on the stack already. Now find GCD(N, Primorial) : )
++        @Primorial! G
++
++        ( Was the GCD equal to 1 ? )
++        .1 =
++
++        ( Invert the answer; i.e. a 'fail' will result in 1, a 'pass' -- 0 : )
++        .1 ^
++;
++
++(----------------------------------------------------------------------------)
++
++( Take a Bitmask specifying the bits that must be set to 1, from the stack.
++  Generate RANDOM integers, until obtains one that, when OR'd with Bitmask,
++  passes the Primorial Litmus. )
++
++@Make-Candidate@ ( Regs : u, m, z )
++
++        ( Get the Bitmask from the stack, and assign to m : )
++        $m
++
++        ( Begin a loop: )
++        :
++
++                ( u := u + 1 , i.e. increment the 'RNG shots' counter: )
++                u .1 + $u
++
++                ( Generate a random FZ of the current FZ width : )
++                ?
++                
++                ( Take the mandatory-ones Bitmask, and OR it into
++                  the random FZ from above, then store this to z: )
++                m | $z
++                
++                ( Run z through the Primorial Litmus: )
++                z @Primorial-Litmus!
++
++        ( If 1, i.e. Litmus failed, cycle the loop; otherwise we're done: )
++        ,
++
++        ( Return the z which passed the Primorial Litmus: )
++        z
++;
++
++(----------------------------------------------------------------------------)
++
++( Take integers N and I from stack (I is on the top of stack, followed by N) ;
++  Fire up to I shots of Miller-Rabin Test on N, each with a RANDOM witness;
++
++  If ALL I shots PASSED, i.e. M-R did NOT 'find composite' in any of them :
++     Return 0;
++  else (i.e. if any shot FAILED) :
++     Return 1 IMMEDIATELY. )
++
++@Iterated-MR-Test@ ( Regs : i, n, r )
++        ( i := Maximum number of Miller-Rabin shots that we will perform : )
++        $i
++        
++        ( n := N, i.e. store a copy of N: )
++        $n
++        
++        ( Begin a loop: )
++        :
++
++                ( Put n on the stack: )
++                n
++
++                ( Generate a random Witness for this shot: )
++                ?
++                ( Recall that it will always be brought into the valid range,
++                  automatically, in constant time. See also Ch. 16A. )
++
++                ( Run a M-R test; outputs 1 if FOUND composite, and 0 if NOT: )
++                P
++
++                ( r := result )
++                $r
++                
++                ( i := i - 1 , i.e. decrement the shots counter: )
++                i .1 - $i
++
++                ( If any shots still remain... )
++                i .0 >
++
++                ( Invert the M-R result: if 'NOT found composite', give a 1 : )
++                r .1 ^
++                
++                ( ...shots remain, AND current one did not 'find composite' : )
++                &
++
++        ( ... then have a 1, and we cycle the loop, for the next shot;
++          Otherwise, we're done: )
++        ,
++
++        ( At this point, N has failed a M-R shot, or passed all of the shots;
++          In either case, we return r,
++          which will be 0 IFF all shots passed, and otherwise 1 : )
++        r
++;
++
++(------------------------------ Main Program : ------------------------------)
++
++( Regs: u, t, k, x )
++
++( Initialize u, 'RNG' counter, i.e. how many random FZ were needed : )
++.0 $u
++
++( Initialize t, 'tries' counter, i.e. how many GCD-filtered candidates tried: )
++.0 $t
++
++( Initialize k to the Bitmask that is to be imposed on candidates : )
++@Candidate-Bitmask! $k
++
++( Begin the main loop: )
++:
++
++        ( t := t + 1 , i.e. increment the 'tries' counter: )
++        t .1 + $t
++
++        ( Get a candidate x, using Bitmask k, which passes Primorial Litmus: )
++        k @Make-Candidate! $x
++        
++        ( Perform MR-Shots of the Miller-Rabin Test: )
++        x @MR-Shots! @Iterated-MR-Test!
++        
++( If not yet found a candidate which passed both the initial Primorial Litmus
++  and then the full number of M-R shots, then cycle the loop : )
++,
++
++( At this point, we have found a 'probable prime' candidate, and will print: )
++
++( ... the Bitmask used  : )
++[Bitmask Imposed on Candidates  : ] k #
++
++( ... the number of 'passing' M-R shots required for termination : )
++[Number of Mandated M-R Shots   : ] @MR-Shots! #
++
++( ... the 'RNG shots' counter : )
++[Total Number of Random FZ Used : ] u #
++
++( ... the 'tries' counter, i.e. how many passed Primorial Litmus : )
++[GCD-Filtered Candidates Tested : ] t #
++
++( ... finally, the candidate which passed all of the requested tests : )
++[Probable Prime Integer         : ] x #
++
++( Now, terminate with a 'Yes' Verdict, as we have succeeded : )
++QY
++
++(--------------------------------~~The End~~---------------------------------)
+diff -uNr a/ffa/demos/ch19_flag.peh b/ffa/demos/ch19_flag.peh
+--- a/ffa/demos/ch19_flag.peh false
++++ b/ffa/demos/ch19_flag.peh a68c4967b3fe9280b96480e35ce23bb49aa47939490480731077764f943acca0a5dea56b2570a2d2e9d98d3404964ce639e85ad187e479eed1fb514a2b4ffc5a
+@@ -0,0 +1,146 @@
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++(- Demo Tape for 'Peh'; illustrates change in Flag semantics in Chapter 19. -)
++(-                                                                          -)
++(- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      -)
++(- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     -)
++(-                                                                          -)
++(- You do not have, nor can you ever acquire the right to use, copy or      -)
++(- distribute this software ; Should you use this software for any purpose, -)
++(- or copy and distribute it to anyone or in any manner, you are breaking   -)
++(- the laws of whatever soi-disant jurisdiction, and you promise to         -)
++(- continue doing so for the indefinite future. In any case, please         -)
++(- always : read and understand any software ; verify any PGP signatures    -)
++(- that you use - for any purpose.                                          -)
++(-                                                                          -)
++(- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     -)
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++
++(----------------------------------------------------------------------------)
++
++( Begin the Cutout: )
++LC
++
++(----------------------------------------------------------------------------)
++
++( This subroutine causes the Cutout-Active Overflow Flag to be Set : )
++
++@Set-OF-In-Cutout@ ( Regs : none )
++        .0 .1 - _
++;
++
++(----------------------------------------------------------------------------)
++
++( This subroutine causes the Cutout-Active Overflow Flag to be Cleared : )
++
++@Clear-OF-In-Cutout@ ( Regs : none )
++        ZF
++;
++
++(----------------------------------------------------------------------------)
++
++
++( This subroutine returns the Cutout-Active Overflow Flag : )
++
++@Get-OF-In-Cutout@ ( Regs : none )
++        O
++;
++
++(----------------------------------------------------------------------------)
++
++( Terminate the Cutout : )
++RC
++
++(----------------------------------------------------------------------------)
++
++( This subroutine causes the Ordinary Overflow Flag to be Set : )
++
++@Set-OF-Ordinary@ ( Regs : none )
++        .0 .1 - _
++;
++
++(----------------------------------------------------------------------------)
++
++( This subroutine causes the Ordinary Overflow Flag to be Cleared : )
++
++@Clear-OF-Ordinary@ ( Regs : none )
++        ZF
++;
++
++(----------------------------------------------------------------------------)
++
++( This subroutine returns the Ordinary Overflow Flag : )
++
++@Get-OF-Ordinary@ ( Regs : none )
++        O
++;
++
++(----------------------------------------------------------------------------)
++
++( Display both Overflow Flags : )
++@Show-Both-OF-Flags@ (Regs : none)
++
++                [Ordinary OF = ]
++                @Get-OF-Ordinary!
++                {[1]}{[0]}_
++
++                [ ]
++
++                @Get-OF-In-Cutout!
++                [Cutout's OF = ]
++                {[1]}{[0]}_
++                []
++;
++
++(----------------------------------------------------------------------------)
++
++(------------------------------ Main Program : ------------------------------)
++
++( Regs: none )
++
++
++[Setting Ordinary OF:
++]
++@Set-OF-Ordinary!
++
++@Show-Both-OF-Flags!
++[
++
++]
++
++[Setting Cutout's OF:
++]
++@Set-OF-In-Cutout!
++
++@Show-Both-OF-Flags!
++[
++
++]
++
++
++( Clear the Flags : )
++
++[Clearing Ordinary OF:
++]
++@Clear-OF-Ordinary!
++
++@Show-Both-OF-Flags!
++[
++
++]
++
++[Clearing Cutout's OF:
++]
++@Clear-OF-In-Cutout!
++
++@Show-Both-OF-Flags!
++[
++
++]
++
++
++( we're done:  )
++QY
++
++(--------------------------------~~The End~~---------------------------------)
+diff -uNr a/ffa/demos/primorial.peh b/ffa/demos/primorial.peh
+--- a/ffa/demos/primorial.peh false
++++ b/ffa/demos/primorial.peh 6bd00b7eb4a16f1b9ac47526c946bdc9b6e130a18477dc0618a2484ec20b371ec72541f4984c2d43f8758edc091c3ac083a85adb195b9e949dd5d159192cf3e9
+@@ -0,0 +1,98 @@
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++(- Demo Tape for 'Peh'; produces the largest primorial that fits in Width.  -)
++(-                                                                          -)
++(- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      -)
++(- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     -)
++(-                                                                          -)
++(- You do not have, nor can you ever acquire the right to use, copy or      -)
++(- distribute this software ; Should you use this software for any purpose, -)
++(- or copy and distribute it to anyone or in any manner, you are breaking   -)
++(- the laws of whatever soi-disant jurisdiction, and you promise to         -)
++(- continue doing so for the indefinite future. In any case, please         -)
++(- always : read and understand any software ; verify any PGP signatures    -)
++(- that you use - for any purpose.                                          -)
++(-                                                                          -)
++(- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     -)
++(----------------------------------------------------------------------------)
++(----------------------------------------------------------------------------)
++
++(------------------------------ Main Program : ------------------------------)
++
++( p is the 'primorial accumulator', and q is the current 'potential prime'. )
++
++( p is initialized to the product of the first two primes, 2 and 3 : )
++.6 $p
++
++( q is initialized to 5, i.e. the first prime that is not 2 or 3 :)
++.5 $q
++
++( Begin a loop: )
++:
++
++        ( Determine GCD(p, q) : )
++        p q G
++
++        ( If GCD(p, q) WAS equal to 1, we know that q is a new prime : )
++        .1 = 
++        {
++                ( Find the product pq.
++                  The UPPER FZ of this product will land on top of stack,
++                  and the LOWER FZ will lie immediately under it : )
++                p q *
++                
++                ( If the UPPER FZ of the product pq was NOT equal to 0...
++                  ... then we have overflowed our Width, and must stop: )
++                {
++                        ( Drop the LOWER FZ of the product pq, because
++                          we have overflowed Width and cannot use it : )
++                        _
++
++                        ( Leave a 0 on the stack, to trigger termination : )
++                        .0
++
++                        ( At this point, we have the largest primorial
++                          that can fit in our FZ Width, and we are done. )
++                }
++                
++                ( If the UPPER FZ of the product pq WAS equal to 0...
++                  ... then we have NOT overflowed our Width, and continue: )
++                {
++                        ( Store the LOWER FZ of the product pq to p :)
++                        $p
++
++                        ( Leave a 1 on the stack, to trigger continuation : )
++                        .1
++
++                        ( At this point, pq is the primorial up to and
++                          inclusive of q, and we keep going. )
++                }_
++        }
++
++        ( If GCD(p, q) WAS NOT equal to 1, we know that q is NOT a prime : )
++        {
++                ( Leave a 1 on the stack, to signal continuation : )
++                .1
++        }_
++
++        
++        ( After either of the above cases, we must:
++          q := q + 2,
++          given as any possible next prime after the current q must be odd : )
++        q .2 + $q
++
++( If we have a 1, cycle the loop; otherwise, we have the Primorial, in p,
++  and must output it and terminate the Tape : )
++,
++
++( Emit a Peh Tape which defines the constant 'Primorial' : )
++[@Primorial@ ( Regs : none )
++.]
++p#
++[;
++]
++
++( Now, terminate with a 'Yes' Verdict, as we have succeeded : )
++QY
++
++(--------------------------------~~The End~~---------------------------------)
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 5ba13c52f966e15d2daf2fdfe29f0515010b7e23bead59aad66b61828daf3724cb7d32d82aaa2edb9dfb65641becf7b2834900d916b12512dd02de62e54e2e3a
++++ b/ffa/ffacalc/ffa_calc.adb bce22003b01f819063b2830325bc6530636f003ba6e88a555e396d6f1e2656f1b05253dfed92043282f869bce10e42b4c519555344217d5afac2c4d2303cc24e
+@@ -136,6 +136,9 @@
+       -- Carry/Borrow Flag set by certain arithmetical Ops:
+       Flag          : WBool        := 0;
+       
++      -- 'Cutout'-segregated Carry/Borrow Flag:
++      CO_Flag       : WBool        := 0;
++      
+       -- Odometer:
+       Ticks         : Natural      := 0;
+       
+@@ -144,11 +147,11 @@
+       CommLevel     : Natural      := 0;
+       CondLevel     : Natural      := 0;
+       
+-      -- Whether we are currently inside a Proposed Subroutine Name:
+-      SubNameMode   : Boolean      := False;
++      -- The possible Modes of the reader:
++      type Modes is (Normal, SubName, SubBody, PrefixOp);
+       
+-      -- Whether we are currently inside a Proposed Subroutine Body:
+-      SubBodyMode   : Boolean      := False;
++      -- Currently-active reader Mode:
++      Mode          : Modes        := Normal;
+       
+       -- Current levels of nestable Blocks when reading a Subroutine Body:
+       SubQuoteLevel : Natural      := 0;
+@@ -164,9 +167,8 @@
+       Cutout_Armed  : Boolean      := False;
+       Cutout        : Cutouts;
+       
+-      -- Prefixed Operators
++      -- Prefix for Prefixed Operators
+       PrevC         : Character    := ' ';
+-      HavePrefix    : Boolean      := False;
+       
+       -- Current Verdict. We run while 'Mu', Tape remains, and Ticks under max.
+       Verdict       : Peh_Verdicts := Mu;
+@@ -245,10 +247,14 @@
+       end Zap_Registers;
+ 
+       
+-      -- Zero the Overflow Flag:
++      -- Zero the currently-active Overflow Flag:
+       procedure Zap_Flag is
+       begin
+-         Flag := 0;
++         if Use_CO_Registers then
++            CO_Flag := 0;
++         else
++            Flag    := 0;
++         end if;
+       end Zap_Flag;
+       
+       
+@@ -483,12 +489,18 @@
+          end if;
+          Write_Newline;
+          
+-         -- Print Overflow-Flag, Ticks and IP:
+-         Write_String("Flag  :" & WBool'Image(Flag));
++         -- Print active Overflow-Flag, then Ticks and IP:
++         
++         if Use_CO_Registers then
++            Write_String("Flag (CO) :" & WBool'Image(CO_Flag));
++         else
++            Write_String("Flag      :" & WBool'Image(Flag));
++         end if;
++         
+          Write_Newline;
+-         Write_String("Ticks :" & Natural'Image(Ticks));
++         Write_String("Ticks     :" & Natural'Image(Ticks));
+          Write_Newline;
+-         Write_String("IP    :" & Tape_Positions'Image(IP));
++         Write_String("IP        :" & Tape_Positions'Image(IP));
+          Write_Newline;
+       end Print_Trace;
+       
+@@ -843,7 +855,13 @@
+                                Y          => Stack(SP),
+                                Difference => Stack(SP - 1),
+                                Underflow  => F);
+-               Flag := FFA_Word_NZeroP(F);
++               
++               -- If we are in the Cutout, write the CO_Flag instead of Flag:
++               if Use_CO_Registers then
++                  CO_Flag := FFA_Word_NZeroP(F);
++               else
++                  Flag    := FFA_Word_NZeroP(F);
++               end if;
+                Drop;
+                
+                -- Add
+@@ -853,7 +871,13 @@
+                           Y        => Stack(SP),
+                           Sum      => Stack(SP - 1),
+                           Overflow => F);
+-               Flag := FFA_Word_NZeroP(F);
++               
++               -- If we are in the Cutout, write the CO_Flag instead of Flag:
++               if Use_CO_Registers then
++                  CO_Flag := FFA_Word_NZeroP(F);
++               else
++                  Flag    := FFA_Word_NZeroP(F);
++               end if;
+                Drop;
+                
+                -- Divide and give Quotient and Remainder
+@@ -980,7 +1004,12 @@
+                -- Put the Overflow flag on the stack
+             when 'O' =>
+                Push;
+-               FFA_WBool_To_FZ(Flag, Stack(SP));
++               -- If we are in the Cutout, read CO_Flag instead of Flag:
++               if Use_CO_Registers then
++                  FFA_WBool_To_FZ(CO_Flag, Stack(SP));
++               else
++                  FFA_WBool_To_FZ(Flag,    Stack(SP));
++               end if;
+                
+                -- Print the FZ on the top of the stack
+             when '#' =>
+@@ -1040,7 +1069,8 @@
+               |
+               '$' -- Pop top of Stack into the following Register...
+               =>
+-               HavePrefix := True;
++               -- Set the Prefixed Op Mode. Next Symbol is treated as prefixed:
++               Mode := PrefixOp;
+                
+                -----------
+                -- Loops --
+@@ -1083,7 +1113,7 @@
+                -- Save the NEXT IP as the first Symbol of the proposed Name:
+                Proposed_Sub.Name.L := Next_IP_On_Tape;
+                -- Enter the Name mode:
+-               SubNameMode         := True;
++               Mode                := SubName;
+                -- We will remain in Name mode until we see a @ or ! .
+                
+                -- '!' invokes a previously-defined Subroutine:
+@@ -1201,7 +1231,7 @@
+                   when 'D' =>
+                      Zap_Data_Stack;
+                      
+-                  -- ... Overflow Flag:
++                  -- ... Overflow Flag (if in Cutout, zaps CO_Flag) :
+                   when 'F' =>
+                      Zap_Flag;
+                      
+@@ -1401,7 +1431,138 @@
+       
+       ------------------------------------------------------------------------
+       
+-      -- Process a Symbol
++      -- Process a character in a proposed Subroutine Name:
++      procedure SubName_Symbol(C : in Character) is
++      begin
++         case C is
++            -- Attempt to INVOKE the named Subroutine:
++            when '!' =>
++               -- Detect attempt to invoke a Sub with no Name:
++               if IP = Proposed_Sub.Name.L then
++                  E("Attempted to invoke a nameless Subroutine!");
++               end if;
++               -- Exit the Sub Name mode and enter Normal mode:
++               Mode := Normal;
++               -- Attempt to invoke the subroutine:
++               Invoke_Named_Subroutine(Proposed_Sub.Name);
++               
++               -- Attempt to read a body for a Subroutine Definition:
++            when '@' =>
++               -- Detect attempt to define a Sub with no Name:
++               if IP = Proposed_Sub.Name.L then
++                  E("Attempted to define a nameless Subroutine!");
++               end if;
++               -- Save NEXT IP as the beginning of the proposed Body:
++               Proposed_Sub.Payload.L := Next_IP_On_Tape;
++               -- Exit the Name mode and enter Sub Body mode:
++               Mode                   := SubBody;
++               
++               -- Any permissible Symbol in a Subroutine Name:
++            when '0' .. '9' | 'A' .. 'Z' | 'a' .. 'z' | '-' | '_'  =>
++               -- Save IP as the potential end of the proposed Sub Name:
++               Proposed_Sub.Name.R    := IP;
++               
++            when others =>
++               E("Symbol '" & C & "' is prohibited in a Subroutine Name !");
++         end case;
++      end SubName_Symbol;
++      
++      ------------------------------------------------------------------------
++      
++      -- Process a character in a proposed Subroutine Body:
++      procedure SubBody_Symbol(C : in Character) is
++         
++         -- Name of Proposed Subroutine (for eggogs) :
++         Name : String
++           := String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R));
++         
++      begin
++         case C is
++            -- Subroutine Terminator:
++            when ';' =>
++               -- Only takes effect if NOT in a Comment or Quote Block:
++               if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                  if SubCondLevel /= 0 then
++                     E("Conditional Return in Subroutine: '"
++                         & Name & "' is Prohibited!" &
++                         " (Please check for unbalanced '{'.)'");
++                  end if;
++                  -- Now, Sub-Comm, Quote, and Cond levels are 0.
++                  -- The ';' becomes last Symbol of the new Sub's Body.
++                  -- Test for attempt to define a Sub with a null Body:
++                  if IP = Proposed_Sub.Payload.L then
++                     E("Null Body in Subroutine: '" & Name 
++                         & "' is prohibited!");
++                  end if;
++                  -- Intern this new Sub definition:
++                  Proposed_Sub.Payload.R := IP;
++                  -- Exit the Sub Body mode and enter Normal mode:
++                  Mode                   := Normal;
++                  -- Attempt to intern the Proposed Subroutine:
++                  Intern_Subroutine(Proposed_Sub);
++               end if;
++               
++               -- Begin-Comment inside a Subroutine Body:
++            when '(' =>
++               SubCommLevel := SubCommLevel + 1;
++               
++               -- End-Comment inside a Subroutine Body:
++            when ')' =>
++               -- If cannot drop Sub Comment level:
++               if SubCommLevel = 0 then
++                  E("Unbalanced ')' in Body of Subroutine: '"
++                      & Name & "' !");
++               end if;
++               SubCommLevel := SubCommLevel - 1;
++               
++               -- Begin-Quote inside a Subroutine Body:
++            when '[' =>
++               -- Ignore if Commented:
++               if SubCommLevel = 0 then
++                  SubQuoteLevel := SubQuoteLevel + 1;
++               end if;
++               
++               -- End-Quote inside a Subroutine Body:
++            when ']' =>
++               -- Ignore if Commented:
++               if SubCommLevel = 0 then
++                  -- If cannot drop Sub Quote level:
++                  if SubQuoteLevel = 0 then
++                     E("Unbalanced ']' in Body of Subroutine: '"
++                         & Name & "' !");
++                  end if;
++                  SubQuoteLevel := SubQuoteLevel - 1;
++               end if;
++               
++               -- Begin-Conditional inside a Subroutine Body:
++            when '{' =>
++               -- Ignore if Commented or Quoted:
++               if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                  SubCondLevel := SubCondLevel + 1;
++               end if;
++               
++               -- End-Conditional inside a Subroutine Body:
++            when '}' =>
++               -- Ignore if Commented or Quoted:
++               if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                  -- If cannot drop Sub Conditional level:
++                  if SubCondLevel = 0 then
++                     E("Unbalanced '}' in Body of Subroutine: '"
++                         & Name & "' !");
++                  end if;
++                  SubCondLevel := SubCondLevel - 1;
++               end if;
++               
++               -- All other Symbols have no special effect in Sub Body :
++            when others =>
++               null; -- Stay in Body mode until we see the ';'.
++         end case;
++      end SubBody_Symbol;
++      
++      
++      ------------------------------------------------------------------------
++      
++      -- All Peh Symbols begin their processing here :
+       procedure Op(C : in Character) is
+       begin
+          
+@@ -1454,151 +1615,42 @@
+                   null; -- Other symbols have no effect on the level
+             end case;
+             
+-            --- ... in a proposed Subroutine Name:
+-         elsif SubNameMode then
+-            case C is
++         else
++            --- ... we are not inside a 'Block' :
++            
++            case Mode is
+                
+-               -- Attempt to INVOKE the named Subroutine:
+-               when '!' =>
+-                  -- Detect attempt to invoke a Sub with no Name:
+-                  if IP = Proposed_Sub.Name.L then
+-                     E("Attempted to invoke a nameless Subroutine!");
+-                  end if;
+-                  -- Exit the Name mode:
+-                  SubNameMode := False;
+-                  -- Attempt to invoke the subroutine:
+-                  Invoke_Named_Subroutine(Proposed_Sub.Name);
++               --- ... a character in a proposed Subroutine Name:
++               when SubName =>
++                  SubName_Symbol(C);
+                   
+-               -- Attempt to read a body for a Subroutine Definition:
+-               when '@' =>
+-                  -- Detect attempt to define a Sub with no Name:
+-                  if IP = Proposed_Sub.Name.L then
+-                     E("Attempted to define a nameless Subroutine!");
+-                  end if;
+-                  -- Save the NEXT IP as the beginning of the proposed Body:
+-                  Proposed_Sub.Payload.L := Next_IP_On_Tape;
+-                  -- Exit the Name mode:
+-                  SubNameMode            := False;
+-                  -- Enter Sub Body mode:
+-                  SubBodyMode            := True;
++               --- ... a character in a proposed Subroutine Body:
++               when SubBody =>
++                  SubBody_Symbol(C);
+                   
+-               -- Any permissible Symbol in a Subroutine Name:
+-               when '0' .. '9' | 'A' .. 'Z' | 'a' .. 'z' | '-' | '_'  =>
+-                  -- Save IP as the potential end of the proposed Sub Name:
+-                  Proposed_Sub.Name.R := IP;
++               --- ... the second character of a Prefixed Op:
++               when PrefixOp =>
++                  -- Drop prefix-op hammer, until another prefix-op cocks it:
++                  Mode := Normal;
++            
++                  -- Dispatch this op, where prefix is the preceding character
++                  Op_Prefixed(Prefix => PrevC, O => C);
++                  
++               -- This is a Normal Op...
++               when Normal =>
++                  -- ... so proceed with the normal rules:
++                  Op_Normal(C);
++                  
++                  -- Save the current Symbol as a possible prefix:
++                  PrevC := C;
+                   
+-               when others =>
+-                  E("Symbol '" & C & "' is prohibited in a Subroutine Name !");
+             end case;
+             
+-            --- ... in a proposed Subroutine Body:
+-         elsif SubBodyMode then
+-            declare
+-               -- Name of Proposed Subroutine (for eggogs) :
+-               Name : String
+-                 := String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R));
+-            begin
+-               case C is
+-                  -- Subroutine Terminator:
+-                  when ';' =>
+-                     -- Only takes effect if NOT in a Comment or Quote Block:
+-                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
+-                        if SubCondLevel /= 0 then
+-                           E("Conditional Return in Subroutine: '"
+-                               & Name & "' is Prohibited!" &
+-                               " (Please check for unbalanced '{'.)'");
+-                        end if;
+-                        -- Now, Sub-Comm, Quote, and Cond levels are 0.
+-                        -- The ';' becomes last Symbol of the new Sub's Body.
+-                        -- Test for attempt to define a Sub with a null Body:
+-                        if IP = Proposed_Sub.Payload.L then
+-                           E("Null Body in Subroutine: '" & Name 
+-                               & "' is prohibited!");
+-                        end if;
+-                        -- Exit Body mode, and intern this new Sub definition:
+-                        Proposed_Sub.Payload.R := IP;
+-                        -- Exit the Sub Body mode:
+-                        SubBodyMode            := False;
+-                        -- Attempt to intern the Proposed Subroutine:
+-                        Intern_Subroutine(Proposed_Sub);
+-                     end if;
+-                     
+-                     -- Begin-Comment inside a Subroutine Body:
+-                  when '(' =>
+-                     SubCommLevel := SubCommLevel + 1;
+-                     
+-                     -- End-Comment inside a Subroutine Body:
+-                  when ')' =>
+-                     -- If cannot drop Sub Comment level:
+-                     if SubCommLevel = 0 then
+-                        E("Unbalanced ')' in Body of Subroutine: '"
+-                            & Name & "' !");
+-                     end if;
+-                     SubCommLevel := SubCommLevel - 1;
+-                     
+-                     -- Begin-Quote inside a Subroutine Body:
+-                  when '[' =>
+-                     -- Ignore if Commented:
+-                     if SubCommLevel = 0 then
+-                        SubQuoteLevel := SubQuoteLevel + 1;
+-                     end if;
+-                     
+-                     -- End-Quote inside a Subroutine Body:
+-                  when ']' =>
+-                     -- Ignore if Commented:
+-                     if SubCommLevel = 0 then
+-                        -- If cannot drop Sub Quote level:
+-                        if SubQuoteLevel = 0 then
+-                           E("Unbalanced ']' in Body of Subroutine: '"
+-                               & Name & "' !");
+-                        end if;
+-                        SubQuoteLevel := SubQuoteLevel - 1;
+-                     end if;
+-                     
+-                     -- Begin-Conditional inside a Subroutine Body:
+-                  when '{' =>
+-                     -- Ignore if Commented or Quoted:
+-                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
+-                        SubCondLevel := SubCondLevel + 1;
+-                     end if;
+-                     
+-                     -- End-Conditional inside a Subroutine Body:
+-                  when '}' =>
+-                     -- Ignore if Commented or Quoted:
+-                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
+-                        -- If cannot drop Sub Conditional level:
+-                        if SubCondLevel = 0 then
+-                           E("Unbalanced '}' in Body of Subroutine: '"
+-                               & Name & "' !");
+-                        end if;
+-                        SubCondLevel := SubCondLevel - 1;
+-                     end if;
+-                     
+-                     -- All other Symbols have no special effect in Sub Body :
+-                  when others =>
+-                     null; -- Stay in Body mode until we see the ';'.
+-               end case;
+-            end;
+-            --- ... if in a prefixed op:
+-         elsif HavePrefix then
+-            
+-            -- Drop the prefix-op hammer, until another prefix-op cocks it
+-            HavePrefix := False;
+-            
+-            -- Dispatch this op, where prefix is the preceding character
+-            Op_Prefixed(Prefix => PrevC, O => C);
+-            
+-         else
+-            -- This is a Normal Op, so proceed with the normal rules.
+-            Op_Normal(C);
+-            
+          end if;
+-         
+-         -- In all cases, save the current Symbol as possible prefix:
+-         PrevC := C;
+-         
+       end Op;
+       
++      ------------------------------------------------------------------------
++      
+       -----------------------------
+       -- Start of Tape Execution --
+       -----------------------------
+@@ -1652,23 +1704,33 @@
+       -- At this point, the Tape has halted.
+       
+       ------------------------------------------------------------------
+-      -- The following types of Unclosed Blocks trigger a Eggog Verdict:
++      -- Termination in a Mode other than 'Normal' triggers a Eggog Verdict:
+       
+-      -- Unclosed Subroutine Name at Tape's End:
+-      if SubNameMode then
+-         E("The Subroutine Name at IP:"
+-             & Tape_Positions'Image(Proposed_Sub.Name.L)
+-             & " is Unterminated!");
+-      end if;
+-      
+-      -- Unclosed Subroutine Body at Tape's End:
+-      if SubBodyMode then
+-         E("The Body of Subroutine: '" 
+-             & String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R)) 
+-             & "' is Unterminated!");
+-      end if;
++      case Mode is
++         
++         -- Unclosed Subroutine Name at Tape's End:
++         when SubName =>
++            E("The Subroutine Name at IP:"
++                & Tape_Positions'Image(Proposed_Sub.Name.L)
++                & " is Unterminated!");
++            
++         -- Unclosed Subroutine Body at Tape's End:
++         when SubBody =>
++            E("The Body of Subroutine: '" 
++                & String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R)) 
++                & "' is Unterminated!");
++            
++         -- Incomplete Prefix Op at Tape's End:
++         when PrefixOp =>
++            E("Prefix Op: '" & PrevC & "' is Unterminated at End of Tape!");
++            
++         -- This is the expected Mode at Tape's End:
++         when Normal =>
++            null;
++            
++      end case;
+       
+-      -- Unclosed Cutout:
++      -- Unclosed Cutout triggers a Eggog Verdict:
+       if Cutout_Begun and not Cutout_Armed then
+          E("The Cutout declaration 'LC' at IP:"
+              & Tape_Positions'Image(Cutout.L) & " is Unterminated!");
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads f11774699154a1bda84873ce0e8f11865ba42e40732e36cfbd819bde949d27e0dcb5d151aaaec1a6d34377bbad7829239d5cd8ff49c290a75cb95c5a3edd0169
++++ b/ffa/ffacalc/version.ads a08fb747f6da4334b765d3d4a97be8e602bb069fe6a1ae669649bb758fa723b216d0739bd7505b6968628b9d2f71eec706a39fd215c3793900f80a1f0e59fa80
+@@ -24,7 +24,7 @@
+    --------------------------------------------
+    -- Current 'deg. Kelvin' Version of Peh   --
+    --------------------------------------------
+-   Peh_K_Version : constant Natural := 251;
++   Peh_K_Version : constant Natural := 250;
+    --------------------------------------------
+    
+ end Version;
+diff -uNr a/ffa/ffademo/ACHTUNG.TXT b/ffa/ffademo/ACHTUNG.TXT
+--- a/ffa/ffademo/ACHTUNG.TXT false
++++ b/ffa/ffademo/ACHTUNG.TXT 1f133c05cde125ab7481fef8bbe4946c96215ad9abc3a3ce45aa9e6d22a6226d4d05f30e8e6e0696fd83aa7b4649959b058e7a9f663f397561af283584bbbbe8
+@@ -0,0 +1,4 @@
++The contents of this directory are OBSOLETE!
++
++However they are retained for reference, and for use by
++students of Chapters 1, 2, and 3.
+diff -uNr a/ffa/libffa/fz_divis.adb b/ffa/libffa/fz_divis.adb
+--- a/ffa/libffa/fz_divis.adb dbd50a883d03e0fa142cc64dfe52d846c5280f1a1a533a2de47d2448dfbc5713d52635e2dc59dd85ef7ddbb104dc051f88296e394b059cec88e4e99aa1c2ec9b
++++ b/ffa/libffa/fz_divis.adb 2eb5684e04ab18696a4a448543b48445bc8e89bdc116b4bb2a25e761ad0e697959ebd8b48dfb51465751aaeb1d5afd973d55dd55d7a075dbfcd0f56e540bff32
+@@ -69,6 +69,7 @@
+       
+    end FZ_IDiv;
+    
++   
+    -- Exactly same thing as IDiv, but keep only the Quotient
+    procedure FZ_Div(Dividend  : in  FZ;
+                     Divisor   : in  FZ;
+@@ -79,6 +80,7 @@
+       FZ_IDiv(Dividend, Divisor, Quotient, Remainder);
+    end FZ_Div;
+    
++   
+    -- Modulus. Permits the asymmetric Dividend and Divisor in FZ_Mod_Exp.
+    procedure FZ_Mod(Dividend  : in FZ;
+                     Divisor   : in FZ;
+@@ -99,48 +101,43 @@
+       -- Performs Restoring Division on a given segment of Dividend:Divisor
+       procedure Slice(Index : Dividend_Index;
+                       Cut   : Divisor_Cuts) is
++         
++         -- Borrow, from comparator
++         C   : WBool;
++         
++         -- Left-Shift Overflow
++         LsO : WBool;
++         
++         -- Current cut of Remainder register
++         Rs  : FZ renames R(1 .. Cut);
++         
++         -- Current cut of Divisor
++         Ds  : FZ renames Divisor(1 .. Cut);
++         
++         -- Current word of Dividend, starting from the highest
++         W   : Word  := Dividend(Dividend'Last + 1 - Index);
++         
+       begin
+          
+-         declare
+-            
+-            -- Borrow, from comparator
+-            C   : WBool;
+-            
+-            -- Left-Shift Overflow
+-            LsO : WBool;
+-            
+-            -- Current cut of Remainder register
+-            Rs  : FZ renames R(1 .. Cut);
++         -- For each bit in the current Dividend word:
++         for b in 1 .. Bitness loop
+             
+-            -- Current cut of Divisor
+-            Ds  : FZ renames Divisor(1 .. Cut);
++            -- Send top bit of current Dividend word to the bottom of W
++            W := Rotate_Left(W, 1);
+             
+-            -- Current word of Dividend, starting from the highest
+-            W   : Word  := Dividend(Dividend'Last + 1 - Index);
++            -- Advance Rs, shifting in the current Dividend bit
++            FZ_ShiftLeft_O_I(N => Rs, ShiftedN => Rs, Count => 1,
++                             OF_In => W and 1,
++                             Overflow => LsO);
+             
+-         begin
++            -- Subtract Divisor-Cut from R-Cut; Underflow goes into C
++            FZ_Sub(X => Rs, Y => Ds, Difference => Rs, Underflow => C);
+             
+-            -- For each bit in the current Dividend word:
+-            for b in 1 .. Bitness loop
+-               
+-               -- Send top bit of current Dividend word to the bottom of W
+-               W := Rotate_Left(W, 1);
+-               
+-               -- Advance Rs, shifting in the current Dividend bit
+-               FZ_ShiftLeft_O_I(N => Rs, ShiftedN => Rs, Count => 1,
+-                                OF_In => W and 1,
+-                                Overflow => LsO);
+-               
+-               -- Subtract Divisor-Cut from R-Cut; Underflow goes into C
+-               FZ_Sub(X => Rs, Y => Ds, Difference => Rs, Underflow => C);
+-               
+-               -- If C=1, subtraction underflowed, and we must undo it:
+-               FZ_Add_Gated(X => Rs, Y => Ds, Sum => Rs,
+-                            Gate => C and W_Not(LsO));
+-               
+-            end loop;
++            -- If C=1, subtraction underflowed, and we must undo it:
++            FZ_Add_Gated(X => Rs, Y => Ds, Sum => Rs,
++                         Gate => C and W_Not(LsO));
+             
+-         end;
++         end loop;
+          
+       end Slice;
+       

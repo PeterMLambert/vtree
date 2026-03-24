@@ -1,0 +1,266 @@
+diff -uNr a/ffa/ffacalc/cmdline.ads b/ffa/ffacalc/cmdline.ads
+--- a/ffa/ffacalc/cmdline.ads 80b0a736f6d5de9cb0c563a254465cc6ab2cd3a045bfbfecbb347069ce8a748aa9cd9c9268fe578ce10f29595a5a3efb4c67adc3f46ece432a2a8c7663bb2ca3
++++ b/ffa/ffacalc/cmdline.ads e0ad759605b591a052d598c055ecb9c0bc4856536cdedf2bd616d040e71a5a2b2c3b3d98781707199d1642538f1d76eb12b0e47aa159f449993116e00a95c52e
+@@ -34,12 +34,12 @@
+    procedure Get_Argument(Number : in  Natural;
+                           Result : out String);
+    
++   function Len_Arg (Arg_Num : Integer) return Integer;
++   pragma Import(C, Len_Arg, "__gnat_len_arg");
++   
+ private
+    
+    procedure Fill_Arg (A : System.Address; Arg_Num : Integer);
+    pragma Import(C, Fill_Arg, "__gnat_fill_arg");
+    
+-   function Len_Arg (Arg_Num : Integer) return Integer;
+-   pragma Import(C, Len_Arg, "__gnat_len_arg");
+-   
+ end CmdLine;
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 7176998bbc09e3c197329341463bf445ba9e05d1c2fa295a8aea710d7a4cfc60f4810134c74b92fcb71ddbae6d60ddb5a349ea9e4e3067ac7caf4ea7d43c7cf3
++++ b/ffa/ffacalc/ffa_calc.adb 232107688985724eb11a113032da3f2f4888fe06058ab0abfe8dc7c330f2d699122be8b0106de69a8b2728dfe4b28078153a4af77686834f71291ed7366e7f3d
+@@ -18,8 +18,8 @@
+ ------------------------------------------------------------------------------
+ 
+ -- Basics
+-with OS;          use OS;
+-with CmdLine;     use CmdLine;
++with OS;       use OS;
++with CmdLine;  use CmdLine;
+ 
+ -- FFA
+ with FZ_Lim;   use FZ_Lim;
+@@ -39,14 +39,19 @@
+ -- For Output
+ with FFA_IO;   use FFA_IO;
+ 
++-- For RNG:
++with FFA_RNG;  use FFA_RNG;
++
++
+ procedure FFA_Calc is
+    
+-   Width  : Positive; -- Desired FFA Width
+-   Height : Positive; -- Desired Height of Stack
++   Width  : Positive;   -- Desired FFA Width
++   Height : Positive;   -- Desired Height of Stack
++   RNG    : RNG_Device; -- The active RNG device.
+    
+ begin
+-   if Arg_Count /= 3 then
+-      Eggog("Usage: ./ffa_calc WIDTH HEIGHT");
++   if Arg_Count < 3 or Arg_Count > 4 then
++      Eggog("Usage: ./ffa_calc WIDTH HEIGHT [/dev/rng]");
+    end if;
+    
+    declare
+@@ -57,6 +62,24 @@
+       Get_Argument(1, Arg1); -- First arg
+       Get_Argument(2, Arg2); -- Second arg
+       
++      if Arg_Count = 4 then
++         -- RNG was specified:
++         declare
++            Arg3 : CmdLineArg;
++         begin
++            Get_Argument(3, Arg3); -- Third arg (optional)
++            
++            -- Ada.Sequential_IO chokes on paths with trailing whitespace!
++            -- So we have to give it a trimmed path. But we can't use
++            -- Ada.Strings.Fixed.Trim, because it suffers from
++            -- SecondaryStackism-syphilis. Instead we are stuck doing this:
++            Init_RNG(RNG, Arg3(Arg3'First .. Len_Arg(3)));
++         end;
++      else
++         -- RNG was NOT specified:
++         Init_RNG(RNG); -- Use the machine default then
++      end if;
++      
+       -- Parse into Positives:
+       Width  := Positive'Value(Arg1);
+       Height := Positive'Value(Arg2);
+@@ -422,6 +445,12 @@
+                -- Other --
+                -----------
+                
++               -- Push a FZ of RNGolade onto the stack
++            when '?' =>
++               Push;
++               FZ_Clear(Stack(SP));
++               FZ_Random(RNG, Stack(SP));
++               
+                -- mUx
+             when 'U' =>
+                Want(3);
+diff -uNr a/ffa/ffacalc/ffa_rng.adb b/ffa/ffacalc/ffa_rng.adb
+--- a/ffa/ffacalc/ffa_rng.adb false
++++ b/ffa/ffacalc/ffa_rng.adb 190c221cd6da728eec4414f6adb513310049db129f571c47368f67bd399eeeea5ed6e72df6dc4427d418c1b6c50715946a94bbd622736afda4dc4117ad916df3
+@@ -0,0 +1,58 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with OS;       use OS;
++
++with FZ_Type;  use FZ_Type;
++
++
++package body FFA_RNG is
++   
++   -- Prepare an RNG for use; at given path, or will use default
++   procedure Init_RNG(RNG           : out RNG_Device;
++                      RNG_Unix_Path : in  String := Default_RNG_Path) is
++   begin
++      begin
++         -- Open the RNG at the offered path:
++         Word_IO.Open(File => RNG.F,
++                      Mode => Word_IO.In_File,
++                      Name => RNG_Unix_Path);
++      exception
++         when others =>
++            Eggog("Could not open RNG at : " & RNG_Unix_Path & "!");
++      end;
++   end Init_RNG;
++   
++   
++   -- Fill a FZ from RNG
++   procedure FZ_Random(RNG : in RNG_Device;
++                       N   : out FZ) is
++   begin
++      begin
++         -- Fill the destination FZ from this RNG:
++         for i in N'Range loop
++            Word_IO.Read(RNG.F, N(i));
++         end loop;
++      exception
++         when others =>
++            Eggog("Could not read from RNG!");
++      end;
++   end FZ_Random;
++   
++end FFA_RNG;
+diff -uNr a/ffa/ffacalc/ffa_rng.ads b/ffa/ffacalc/ffa_rng.ads
+--- a/ffa/ffacalc/ffa_rng.ads false
++++ b/ffa/ffacalc/ffa_rng.ads 3cdea9e53bc0897151e3eb45166ac209388c4704d212dd40e2eafefe2850f56128559e9f5ba33d696f0cc45d41685428a6ff4265890c86d49266e5c90bd3fe8e
+@@ -0,0 +1,46 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Ada.Sequential_IO;
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FFA_RNG is
++   
++   Default_RNG_Path : constant String := "/dev/random";
++   
++   -- For reading from RNGs:
++   package Word_IO is new Ada.Sequential_IO(Element_Type => Word);
++   
++   -- Represents an RNG Device:
++   type RNG_Device is record
++      F : Word_IO.File_Type;
++   end record;
++   
++   -- Prepare an RNG for use; at given path, or will use default
++   procedure Init_RNG(RNG           : out RNG_Device;
++                      RNG_Unix_Path : in  String := Default_RNG_Path);
++   
++   -- Fill a FZ from RNG
++   procedure FZ_Random(RNG : in RNG_Device;
++                       N   : out FZ);
++   
++end FFA_RNG;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb b9880001cd7a0adc289e3f1ebc71b48eff6cb1079eeb5a21bf32a81ba4e0e0f3f9917fffdd02e0c1ac2f06553610fa0f396408680c411c8db3b6a80a8e1e978d
++++ b/ffa/libffa/fz_modex.adb 7dcf2ee0efc97ea57c360131f2ee836775fe2d57195d454c655e74cd030e72aa6d3109e2736a04aae0f305859de52e29edd38005b6249e0548950f1e91f36d4a
+@@ -60,41 +60,44 @@
+                         Modulus  : in  FZ;
+                         Result   : out FZ) is
+       
+-      -- Working register for the squaring
++      -- Working register for the squaring; initially is copy of Base
+       B : FZ(Base'Range)     := Base;
+       
+-      -- Register for cycling through the bits of E
++      -- Copy of Exponent, for cycling through its bits
+       E : FZ(Exponent'Range) := Exponent;
+       
+       -- Register for the Mux operation
+       T : FZ(Result'Range);
+       
++      -- Buffer register for the Result
++      R : FZ(Result'Range);
++      
+    begin
+       -- Result := 1
+-      WBool_To_FZ(1, Result);
++      WBool_To_FZ(1, R);
+       
+-      -- For each bit of Result width:
+-      for i in 1 .. FZ_Bitness(Result) loop
++      -- For each bit of R width:
++      for i in 1 .. FZ_Bitness(R) loop
+          
+          -- T := Result * B mod Modulus
+-         FZ_Mod_Mul(X => Result, Y => B, Modulus => Modulus,
+-                    Product => T);
++         FZ_Mod_Mul(X => R, Y => B, Modulus => Modulus, Product => T);
+          
+          -- Sel is the current low bit of E;
+          --    When Sel=0 -> Result := Result;
+          --    When Sel=1 -> Result := T
+-         FZ_Mux(X => Result, Y => T, Result => Result,
+-                Sel => FZ_OddP(E));
++         FZ_Mux(X => R, Y => T, Result => R, Sel => FZ_OddP(E));
+          
+          -- Advance to the next bit of E
+          FZ_ShiftRight(E, E, 1);
+          
+          -- B := B*B mod Modulus
+-         FZ_Mod_Mul(X => B, Y => B, Modulus => Modulus,
+-                    Product => B);
++         FZ_Mod_Mul(X => B, Y => B, Modulus => Modulus, Product => B);
+          
+       end loop;
+       
++      -- Output the Result:
++      Result := R;
++      
+    end FZ_Mod_Exp;
+    pragma Inline_Always(FZ_Mod_Exp);
+    

@@ -1,0 +1,1331 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT a1e4c898a5a315d2e55058f9de23a81c95d63a0671a52906975e47723413445b020f06c95e611af45b3b15f6c0ab3795e76d4d05bf7acdb85c3a05641bd4000b
++++ b/ffa/MANIFEST.TXT 780d6308e25aca759fec5a60ae37944cdcc11249712125c0a6a579a7082370b0fb50c1cd0f6043edbcceca52c478f2f1c2faecd62ed3fb6c79e81206463b278a
+@@ -6,7 +6,7 @@
+ xxxxxxx ffa_ch6_simplest_rsa           ""Geological" RSA."
+ xxxxxxx ffa_ch7_turbo_egyptians        ""Turbo Egyptians.""
+ xxxxxxx ffa_ch8_randomism              "Interlude: Randomism."
+-xxxxxxx ffa_ch9_exodus                 ""Exodus from Egypt" with Comba’s Algorithm."
++xxxxxxx ffa_ch9_exodus                 ""Exodus from Egypt" with Comba's Algorithm."
+ xxxxxxx ffa_ch10_karatsuba             "Introducing Karatsuba's Multiplication."
+ xxxxxxx ffa_ch11_tuning_and_api        "Tuning and Unified API."
+  551091 ffa_ch12_karatsuba_redux       "Karatsuba Redux."
+@@ -16,3 +16,4 @@
+  557938 ffa_ch15_gcd                   "Greatest Common Divisor."
+  560516 ffa_ch16_miller_rabin          "Miller-Rabin Method."
+  567223 ffa_ch17_peh                   "Introduction to Peh."
++ 569234 ffa_ch18_subroutines           "Subroutines in Peh."
+diff -uNr a/ffa/ffacalc/README b/ffa/ffacalc/README
+--- a/ffa/ffacalc/README a0fad6e06c4c14d704085539728fa1900087fcaf56da0ba882c2714325347fae4f83036c4d15eb8dc2734ea8214df779423200459ec0cad2b918c6ee71ea5ce0
++++ b/ffa/ffacalc/README a430d82f9802982ebf64484ca74db9a7d533e56e3c326f1cecb4dd1c5b412f93dbf003bd276657077c2bfd9d1e1b9caa2c2140676ef1da1fb98361ceb84de89c
+@@ -34,5 +34,5 @@
+ 
+ WIDTH  must be a... see libffa/fz_lim.ads.
+ HEIGHT must be equal to or great than 1.
+-TAPESPACE must be at or below the maximum set in limits.ads.
+-LIFE may be any bus-width integer (0 gives "immortal" run.)
++TAPESPACE must be at least 1, and at or below the maximum set in limits.ads.
++LIFE may be any bus-width integer equal to or above 0 (0 gives "immortal" run.)
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb c8dca28206fada4cca7369f0429dc4cbe3b5e75702c701f84256f2a6e04df33ef6557cd427bf2a486306675943215445982e21cea9caedbccde0049ac9c39be1
++++ b/ffa/ffacalc/ffa_calc.adb 5ba13c52f966e15d2daf2fdfe29f0515010b7e23bead59aad66b61828daf3724cb7d32d82aaa2edb9dfb65641becf7b2834900d916b12512dd02de62e54e2e3a
+@@ -1,4 +1,4 @@
+-------------------------------------------------------------------------------
++-----------------------------------------------------------------------------
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+@@ -79,123 +79,253 @@
+       -- After an Op, will contain position of NEXT op (if = to IP -> halt)
+       IP_Next       : Tape_Positions;
+       
++      -- Types of Entry for the Control Stack:
++      type Call_Types is (Invalid, Subroutines, Loops);
++      
++      -- Control Stack Entries:
++      type Call is
++         record
++            Why : Call_Types := Invalid; -- Which call type?
++            Ret : Tape_Positions;        -- The IP we must return to after it
++         end record;
++      
+       -- Control Stack; permits bidirectional motion across the Tape:
+-      Control_Stack : array(ControlStack_Range) of Tape_Positions
+-        := (others => Tape_Positions'First);
++      Control_Stack : array(ControlStack_Range) of Call;
+       
+       -- Current top of the Control Stack:
+       CSP           : ControlStack_Range := ControlStack_Range'First;
+       
++      -- A Segment represents a particular section of Tape, for certain uses.
++      type Segment is
++         record
++            -- The Tape Position of the FIRST Symbol on the Segment:
++            L : Tape_Positions := Tape'First; -- Default: start of the Tape.
++            
++            -- The Tape Position of the LAST Symbol on the Segment:
++            R : Tape_Positions := Tape'Last;  -- Default: end of the Tape.
++         end record;
++      
++      -- Subtypes of Segment:
++      subtype Sub_Names  is Segment; -- Subroutine Names
++      subtype Sub_Bodies is Segment; -- Subroutine Bodies
++      subtype Cutouts    is Segment; -- Cutout (see Ch.18 discussion)
++      
++      -- Represents a Subroutine defined on this Tape:
++      type Sub_Def is
++         record
++            Name    : Sub_Names;  -- Name of the Subroutine.
++            Payload : Sub_Bodies; -- Body of the Subroutine.
++         end record;
++      
++      -- Subroutine Table. Once defined, Subs may not be erased or altered.
++      Subs          : array(Subroutine_Table_Range) of Sub_Def;
++      
++      -- Position of the most recently-defined Subroutine in Subs :
++      STP           : Subroutine_Table_Range := Subs'First;
++      
+       -- Registers:
+       subtype RegNames is Character range 'g' .. 'z';
+       type RegTables is array(RegNames range <>) of FZ(1 .. Wordness);
++      
++      -- Ordinary Register Set (accessed if no Cutout, or when ABOVE it)
+       Registers     : RegTables(RegNames'Range);
+       
+-      -- Carry/Borrow Flag:
++      -- 'Cutout' Register Set (accessed only if IP is IN or BELOW the Cutout)
++      CO_Registers  : RegTables(RegNames'Range);
++      
++      -- Carry/Borrow Flag set by certain arithmetical Ops:
+       Flag          : WBool        := 0;
+       
+       -- Odometer:
+       Ticks         : Natural      := 0;
+       
+-      -- The current levels of the three types of nestedness:
++      -- The current levels of the three types of nestable Block:
+       QuoteLevel    : Natural      := 0;
+       CommLevel     : Natural      := 0;
+       CondLevel     : Natural      := 0;
+       
++      -- Whether we are currently inside a Proposed Subroutine Name:
++      SubNameMode   : Boolean      := False;
++      
++      -- Whether we are currently inside a Proposed Subroutine Body:
++      SubBodyMode   : Boolean      := False;
++      
++      -- Current levels of nestable Blocks when reading a Subroutine Body:
++      SubQuoteLevel : Natural      := 0;
++      SubCommLevel  : Natural      := 0;
++      SubCondLevel  : Natural      := 0;
++      
++      -- Scratch for a Subroutine being proposed for lookup or internment:
++      Proposed_Sub  : Sub_Def;
++      
++      -- 'Cutout' Tape Segment. (See Ch.18 discussion re: when and how to use.)
++      -- If the Cutout is armed, it stays armed until Peh halts.
++      Cutout_Begun  : Boolean      := False;
++      Cutout_Armed  : Boolean      := False;
++      Cutout        : Cutouts;
++      
+       -- Prefixed Operators
+       PrevC         : Character    := ' ';
+       HavePrefix    : Boolean      := False;
+       
+-      -- Current Verdict. We run while 'Mu', tape remains, and Ticks under max.
++      -- Current Verdict. We run while 'Mu', Tape remains, and Ticks under max.
+       Verdict       : Peh_Verdicts := Mu;
+       --------------------------------------------------------
+       
+       
+-      -- Determine whether we have reached the given limit of Life:
+-      function Exhausted_Life return Boolean is
+-         -- If Life = 0, we are in "immortal" mode. Otherwise mortal:
+-         MustDie : Boolean := 
+-           (Dimensions.Life /= 0) and (Ticks = Dimensions.Life);
++      ------------
++      -- Cutout --
++      ------------
++      
++      -- Find whether Cutout would prohibit move from current IP to the given :
++      function Cutout_Prohibits(Position : in Tape_Positions) return Boolean is
+       begin
+-         if MustDie then
+-            Achtung("WARNING: Exhausted Life ("
+-                      & Natural'Image(Ticks) & " ticks )");
+-         end if;
+-         return MustDie;
+-      end Exhausted_Life;
++         return Cutout_Armed and IP > Cutout.R and Position < Cutout.L;
++      end Cutout_Prohibits;
++      
++      
++      -- Find whether given a Tape Position lies inside an armed Cutout:
++      function In_Cutout(Position : in Tape_Positions) return Boolean is
++      begin
++         return Cutout_Armed and Position in Cutout.L .. Cutout.R;
++      end In_Cutout;
++      
++      
++      -- Determine whether to use the Cutout Registers at the current position:
++      function Use_CO_Registers return Boolean is
++      begin
++         -- If we are either BELOW or INSIDE armed Cutout : we use only the
++         -- CO_Registers alternative register file. Otherwise: use Registers.
++         return Cutout_Armed and IP <= Cutout.R;
++      end Use_CO_Registers;
++      
+       
++      ----------
++      -- Zaps --
++      ----------
+       
+-      -- Clear all state, other than blocks, Control Stack, Tape and Verdict:
+-      procedure Zap is
++      -- Zero the Data Stack and reset the SP:
++      procedure Zap_Data_Stack is
+       begin
+          -- Clear the Data Stack:
+          for i in Stack'Range loop
+             FFA_FZ_Clear(Stack(i));
+          end loop;
+          -- Set SP to bottom:
+-         SP            := Stack_Positions'First;
+-         -- Clear all Registers:
++         SP := Stack_Positions'First;
++      end Zap_Data_Stack;
++      
++      
++      -- Zero all Registers (Ordinary set) :
++      procedure Zap_Ordinary_Registers is
++      begin
+          for r in RegNames'Range loop
+             FFA_FZ_Clear(Registers(r));
+          end loop;
+-         -- Clear Overflow flag:
+-         Flag          := 0;
+-         -- Clear prefix:
+-         HavePrefix    := False;
+-         PrevC         := ' ';
+-      end Zap;
++      end Zap_Ordinary_Registers;
++      
++      
++      -- Zero all Registers (Cutout set) :
++      procedure Zap_Cutout_Registers is
++      begin
++         for r in RegNames'Range loop
++            FFA_FZ_Clear(CO_Registers(r));
++         end loop;
++      end Zap_Cutout_Registers;
++      
++      
++      -- Zero all Registers in the currently-active Register Set:
++      procedure Zap_Registers is
++      begin
++         if Use_CO_Registers then
++            Zap_Cutout_Registers;
++         else
++            Zap_Ordinary_Registers;
++         end if;
++      end Zap_Registers;
++
++      
++      -- Zero the Overflow Flag:
++      procedure Zap_Flag is
++      begin
++         Flag := 0;
++      end Zap_Flag;
++      
++      
++      -- NO effect on Blocks, Control Stack, Tape, Verdict, Cutout, Subroutines
++      procedure Zap_Master is
++      begin
++         Zap_Data_Stack;
++         Zap_Registers;
++         Zap_Flag;
++      end Zap_Master;
+       
+       
+-      -- Report a fatal error condition at the current symbol.
++      -----------
++      -- Eggog --
++      -----------
++      
++      -- Report a fatal error condition at the current Symbol.
+       -- On Unixlikes, this will also end the process and return control to OS.
+       procedure E(S : in String) is
+       begin
+-         Zap; -- Jettison all resettable state!
++         Zap_Master; -- Jettison all resettable state!
+          Eggog("FATAL: Tick:" & Natural'Image(Ticks) &
+-                 " IP:" & Tape_Positions'Image(IP) & " : " & S);
++                 ", IP:" & Tape_Positions'Image(IP) & 
++                 ", Symbol: '" & Tape(IP) & "'" & " : " & S);
+       end E;
+       
+       
+-      -------------------
+-      -- Control Stack --
+-      -------------------
++      -----------
++      -- Walls --
++      -----------
+       
+-      -- Push a given Tape Position to the Control Stack:
+-      procedure Control_Push(Position : in Tape_Positions) is
++      -- Determine whether we are currently at the last Symbol on the Tape:
++      function Last_Tape_Symbol return Boolean is
+       begin
+-         -- First, test for Overflow of Control Stack:
+-         if CSP = Control_Stack'Last then
+-            E("Control Stack Overflow!");
++         return IP = Tape_Positions'Last;
++      end Last_Tape_Symbol;
++      
++      
++      -- Certain Ops are NOT permitted to occur as the final Op on a Tape:
++      function Next_IP_On_Tape return Tape_Positions is
++      begin
++         -- Check if we are in fact on the last Symbol of the Tape:
++         if Last_Tape_Symbol then
++            E("This Op requires a succeeding Tape Position, "
++             & "but it is at the end of the Tape!");
+          end if;
+-         
+-         -- Push given Tape Position to Control Stack:
+-         CSP                := CSP + 1;
+-         Control_Stack(CSP) := Position;
+-      end Control_Push;
++         -- ... Otherwise, return the immediate successor Tape Position:
++         return IP + 1;
++      end Next_IP_On_Tape;
+       
+       
+-      -- Pop a Tape Position from the Control Stack:
+-      function Control_Pop return Tape_Positions is
+-         Position : Tape_Positions;
++      -- Determine whether we have reached the given limit of Life:
++      function Exhausted_Life return Boolean is
++         -- If Life = 0, we are in "immortal" mode. Otherwise mortal:
++         MustDie : Boolean := 
++           (Dimensions.Life /= 0) and (Ticks = Dimensions.Life);
+       begin
+-         -- First, test for Underflow of Control Stack:
+-         if CSP = Control_Stack'First then
+-            E("Control Stack Underflow!");
++         if MustDie then
++            Achtung("WARNING: Exhausted Life ("
++                      & Natural'Image(Ticks) & " ticks )");
+          end if;
+-         
+-         -- Pop a Tape Position from Control Stack:
+-         Position           := Control_Stack(CSP);
+-         Control_Stack(CSP) := Tape_Positions'First;
+-         CSP                := CSP - 1;
+-         return Position;
+-      end Control_Pop;
++         return MustDie;
++      end Exhausted_Life;
+       
+       
+       ----------------
+       -- Data Stack --
+       ----------------
+       
+-      -- Move SP up
++      -- Determine whether the Data Stack is Not Empty:
++      function Data_Stack_Not_Empty return Boolean is
++      begin
++         return SP /= Stack'First;
++      end Data_Stack_Not_Empty;
++      
++      
++      -- Raise the SP up by one:
+       procedure Push is
+       begin
+          if SP = Stack_Positions'Last then
+@@ -206,7 +336,7 @@
+       end Push;
+       
+       
+-      -- Discard the top of the stack
++      -- Discard the Top of the Data Stack:
+       procedure Drop is
+       begin
+          FFA_FZ_Clear(Stack(SP));
+@@ -214,7 +344,7 @@
+       end Drop;
+       
+       
+-      -- Check if stack has the necessary N items
++      -- Check whether the Data Stack has the necessary N items:
+       procedure Want(N : in Positive) is
+       begin
+          if SP < N then
+@@ -223,16 +353,11 @@
+       end Want;
+       
+       
+-      -- Ensure that a divisor is not zero
+-      procedure MustNotZero(D : in FZ) is
+-      begin
+-         if FFA_FZ_ZeroP(D) = 1 then
+-            E("Division by Zero!");
+-         end if;
+-      end MustNotZero;
+-      
++      ---------
++      -- I/O --
++      ---------
+       
+-      -- Slide a new hex digit into the FZ on top of stack
++      -- Slide a new hex digit into the FZ on top of the Data Stack
+       procedure Ins_Hex_Digit(Digit : in Nibble) is
+          Overflow : WBool := 0;
+       begin
+@@ -260,9 +385,24 @@
+       end Print_FZ;
+       
+       
+-      -- Print a Debug Trace (used in 'QD')
++      ------------------
++      -- Debug Traces --
++      ------------------
++      
++      -- Print the bounds of a Tape Segment for Debug:
++      procedure Print_Segment(S : in Segment) is
++      begin
++         Write_String("(" & Tape_Positions'Image(S.L) &
++                        "," & Tape_Positions'Image(S.R) & " )");
++      end Print_Segment;
++      
++      
++      -- Print a Debug Trace (used in 'QD') :
+       procedure Print_Trace is
+       begin
++         -- For clarity in cases where the Tape has already produced output:
++         Write_Newline;
++         
+          -- Print Data Stack Trace:
+          Write_String("Data Stack:");
+          Write_Newline;
+@@ -275,20 +415,77 @@
+          Write_String("Control Stack:");
+          Write_Newline;
+          for i in reverse Control_Stack'First + 1 .. CSP loop
+-            Write_String("   " & ControlStack_Range'Image(i) & " :"
+-                           & Tape_Positions'Image(Control_Stack(i)));
++            Write_String("   " & ControlStack_Range'Image(i) & " :");
++            Write_String(" Return IP:"
++                           & Stack_Positions'Image(Control_Stack(i).Ret));
++            Write_String(" Call Type: ");
++            case Control_Stack(i).Why is
++               when Subroutines =>
++                  Write_String("Subroutine");
++               when Loops =>
++                  Write_String("Loop");
++               when others =>
++                  Write_String("INVALID");
++            end case;
+             Write_Newline;
+          end loop;
+          
+          -- Print All Registers:
+          Write_String("Registers:");
+          Write_Newline;
++         -- We will not print the Cutout Register Set unless it is active:
+          for r in RegNames'Range loop
+-            Write_String("    " & r & " : ");
+-            Print_FZ(Registers(r));
++            if Use_CO_Registers then
++               -- If the Cutout Register Set is currently active:
++               Write_String(" (C)" & r & " : ");
++               Print_FZ(CO_Registers(r));
++            else
++               -- If the Ordinary Register Set is currently active:
++               Write_String("    " & r & " : ");
++               Print_FZ(Registers(r));
++            end if;
+          end loop;
+          
+-         -- Print Ticks and IP:
++         -- Print Subroutine Table:
++         Write_String("Subroutines:");
++         Write_Newline;
++         -- Walk the Subroutine Table from first to last valid entry:
++         for i in Subs'First + 1 .. STP loop
++            declare
++               -- The current Sub in the Subroutine Table being examined:
++               S      : Sub_Def := Subs(i);
++               -- The Name of the current Sub:
++               S_Name : String  := String(Tape(S.Name.L .. S.Name.R));
++            begin
++               Write_String("   " & Subroutine_Table_Range'Image(i)
++                              & " : '" & S_Name & "' ");
++               Print_Segment(S.Payload);
++               if Cutout_Armed then
++                  -- Indicate whether Sub is uncallable here because of Cutout:
++                  if Cutout_Prohibits(S.Payload.L) then
++                     Write_String(" (Guarded)");
++                  -- Indicate whether Sub lies INSIDE the Cutout:
++                  elsif In_Cutout(S.Payload.R) then
++                     Write_String(" (Cutout)");
++                  end if;
++               end if;
++               Write_Newline;
++            end;
++         end loop;
++         
++         Write_String("Cutout: ");
++         -- Print Cutout bounds, if Cutout is armed:
++         if Cutout_Armed then
++            Write_String("Armed: ");
++            Print_Segment(Cutout);
++         else
++            Write_String("NONE");
++         end if;
++         Write_Newline;
++         
++         -- Print Overflow-Flag, Ticks and IP:
++         Write_String("Flag  :" & WBool'Image(Flag));
++         Write_Newline;
+          Write_String("Ticks :" & Natural'Image(Ticks));
+          Write_Newline;
+          Write_String("IP    :" & Tape_Positions'Image(IP));
+@@ -296,45 +493,251 @@
+       end Print_Trace;
+       
+       
++      -------------------
++      -- Control Stack --
++      -------------------
++      
++      -- Determine whether the Control Stack is Not Empty:
++      function Control_Stack_Not_Empty return Boolean is
++      begin
++         return CSP /= Control_Stack'First;
++      end Control_Stack_Not_Empty;
++      
++      
++      -- Construct a Call and push it to the Control Stack:
++      procedure Control_Push(Call_Type : in Call_Types;
++                             Return_IP : in Tape_Positions) is
++      begin
++         -- First, test for Overflow of Control Stack:
++         if CSP = Control_Stack'Last then
++            E("Control Stack Overflow!");
++         end if;
++         -- Push a Call with given parameters to the Control Stack:
++         CSP                := CSP + 1;
++         Control_Stack(CSP) := (Why => Call_Type, Ret => Return_IP);
++      end Control_Push;
++      
++      
++      -- Pop an IP from the Control Stack, and verify expected Call Type:
++      function Control_Pop(Expected_Type : in Call_Types)
++                          return Tape_Positions is
++         C : Call;
++      begin
++         -- First, test for Underflow of Control Stack:
++         if CSP = Control_Stack'First then
++            E("Control Stack Underflow!");
++         end if;
++         -- Pop from Control Stack:
++         C                      := Control_Stack(CSP);
++         Control_Stack(CSP).Why := Invalid;
++         CSP                    := CSP - 1;
++         -- Now, see whether it was NOT the expected type. If so, eggog:
++         if C.Why /= Expected_Type then
++            declare
++               CT : constant array(Call_Types) of String(1 .. 10)
++                 := (" INVALID  ", "Subroutine", "Loop state");
++            begin
++               E("Currently in a " & CT(C.Why) & "; but this Op exits a "
++                   & CT(Expected_Type) & " !");
++            end;
++         end if;
++         -- ... The Call was of the expected type, so return it:
++         return C.Ret;
++      end Control_Pop;
++      
++      
++      -----------------
++      -- Subroutines --
++      -----------------
++      
++      -- Find Subroutine with supplied Name in Subroutine Table, if it exists:
++      function Lookup_Subroutine(Name : in Sub_Names)
++                                return Subroutine_Table_Range is
++         -- Number of Symbols in the Name of the current Proposed Subroutine:
++         Sub_Name_Length : Positive := 1 + Name.R - Name.L;
++      begin
++         -- Enforce minimum Subroutine Name length:
++         if Sub_Name_Length < Subr_Min_Name_Length then
++            E("Proposed Name is" & Positive'Image(Sub_Name_Length) &
++                " Symbols long, but the shortest permitted Name length is" &
++                Positive'Image(Subr_Min_Name_Length) & " !");
++         end if;
++         -- Walk the Subroutine Table from first to last valid entry:
++         for i in Subs'First + 1 .. STP loop
++            declare
++               -- The current Sub in the Subroutine Table being examined:
++               S             : Sub_Def := Subs(i);
++               -- Number of Symbols in the Name of S:
++               S_Name_Length : Positive := 1 + S.Name.R - S.Name.L;
++            begin
++               -- If the lengths of the Names match:
++               if Sub_Name_Length = S_Name_Length then
++                  -- If the two Names are actually equal:
++                  if Tape(Name.L .. Name.R) = Tape(S.Name.L .. S.Name.R) then
++                     return i; -- Return the table index of the located Sub
++                  end if;
++               end if;
++            end;
++         end loop;
++         -- Name was not found in Subroutine Table; return the zero position:
++         return Subs'First;
++      end Lookup_Subroutine;
++      
++      
++      -- Attempt to intern the given Subroutine into the Subroutines Table:
++      procedure Intern_Subroutine(Sub : in Sub_Def) is
++         -- Position of the current Proposed Sub in Sub Table:
++         Index  : Subroutine_Table_Range := Lookup_Subroutine(Sub.Name);
++         -- To DEFINE a Sub, it must NOT have existed in Sub Table.
++         
++         -- Name of the Proposed Sub (for eggogs) :
++         S_Name : String := String(Tape(Sub.Name.L .. Sub.Name.R));
++      begin
++         -- If a Sub with this Name already exists, eggog:
++         if Index /= Subs'First then
++            E("Attempted to redefine Subroutine '" & S_Name & "' !");
++         end if;
++         -- Definitions are prohibited inside Loops or Sub calls:
++         if Control_Stack_Not_Empty then
++            E("Attempted to define Subroutine '" 
++                & S_Name & "' while inside a Loop or Subroutine!");
++         end if;
++         -- If the Subroutine Table is full, eggog:
++         if STP = Subs'Last then
++            E("Cannot define the Subroutine '" & S_Name
++                & ": the Subroutine Table is Full!");
++         end if;
++         -- Finally, intern the Proposed Subroutine into the Sub Table:
++         STP       := STP + 1;
++         Subs(STP) := Sub;
++      end Intern_Subroutine;
++      
++      
++      -- Invoke a given Subroutine:
++      procedure Invoke_Subroutine(Sub : in Sub_Def) is
++      begin
++         -- Push the Call to Control Stack:
++         Control_Push(Call_Type => Subroutines, Return_IP => Next_IP_On_Tape);
++         -- Next instruction will be the first Symbol of the Sub's Body:
++         IP_Next := Sub.Payload.L;
++      end Invoke_Subroutine;
++      
++      
++      -- Attempt to invoke a Subroutine with the supplied name:
++      procedure Invoke_Named_Subroutine(Name : in Sub_Names) is
++         -- Position of the current Proposed Sub in Sub Table:
++         Index  : Subroutine_Table_Range := Lookup_Subroutine(Name);
++         -- To invoke a Sub, it MUST exist in the Sub Table.
++         
++         -- Name of the Proposed Sub (for eggogs) :
++         S_Name : String := String(Tape(Name.L .. Name.R));
++      begin
++         -- If no defined Subroutine has this Name, eggog:
++         if Index = Subs'First then
++            E("Invoked Undefined Subroutine '" & S_Name & "' !");
++         end if;
++         -- Otherwise, proceed to the invocation:
++         declare
++            -- The Sub Table Entry we successfully looked up:
++            Sub : Sub_Def := Subs(Index);
++         begin
++            -- Recursion is prohibited in Peh Tapes. Detect it:
++            if IP in Sub.Payload.L .. Sub.Payload.R then
++               E("Recursive invocation in Subroutine '" 
++                   & S_Name & "' is prohibited!");
++            end if;
++            -- Prohibit Subroutines whose definitions end AFTER the current IP:
++            if IP < Sub.Payload.R then
++               E("Cannot invoke Subroutine '" & S_Name &
++                   "' before the position where it is defined!");
++            end if;
++            -- Proceed to invoke the Subroutine:
++            Invoke_Subroutine(Sub);
++         end;
++      end Invoke_Named_Subroutine;
++      
++      
++      -- Invoke the nearest Subroutine defined to the LEFT of the current IP:
++      procedure Invoke_Left_Subroutine is
++         -- Position of the Subroutine to be invoked (Subs'First if none)
++         Index : Subroutine_Table_Range := Subs'First;
++      begin
++         -- Find the nearest invocable Sub (i.e. to the LEFT of current IP) :
++         -- Walk starting from the LAST Sub in Subs, down to the FIRST:
++         for i in reverse Subs'First + 1 .. STP loop
++            -- If a Sub's definition ended PRIOR TO the current IP:
++            if Subs(i).Payload.R < IP then
++               -- Save that Sub's table index:
++               Index := i;
++               -- If we found a Sub that met the condition, stop walking:
++               exit when Index /= Subs'First;
++            end if;
++         end loop;
++         -- If no Subs have been defined prior to current IP, then eggog:
++         if Index = Subs'First then
++            E("No Subroutines were defined prior to this position!");
++         end if;
++         -- Proceed to invoke the selected Sub:
++         Invoke_Subroutine(Subs(Index));
++      end Invoke_Left_Subroutine;
++      
++      
++      ---------
++      -- Peh --
++      ---------
++      
++      -- For all Ops which entail Division: ensure that a Divisor is not zero:
++      procedure MustNotZero(D : in FZ) is
++      begin
++         if FFA_FZ_ZeroP(D) = 1 then
++            E("Division by Zero!");
++         end if;
++      end MustNotZero;
++      
++      ------------------------------------------------------------------------
++      
+       -- Execute a Normal Op
+       procedure Op_Normal(C : in Character) is
+          
+          -- Over/underflow output from certain ops
+          F : Word;
+-         
++
+       begin
+          
+          case C is
+             
+-            --------------
+-            -- Stickies --
+-            --------------
+-            -- Enter Commented
++            ------------
++            -- Blocks --
++            ------------
++            
++            -- Enter Comment Block: Symbols will be ignored until matching ')'
+             when '(' =>
+                CommLevel := 1;
+                
+-               -- Exit Commented (but we aren't in it!)
++               -- Exit a Comment Block (but if we're here, we aren't in one!)
+             when ')' =>
+                E("Mismatched close-comment parenthesis !");
+                
+-               -- Enter Quoted
++               -- Enter a Quote Block: Symbols will print until matching ']'
+             when '[' =>
+                QuoteLevel := 1;
+                
+-               -- Exit Quoted (but we aren't in it!)
++               -- Exit a Quote Block (but if we're here, we aren't in one!)
+             when ']' =>
+                E("Mismatched close-quote bracket !");
+                
+-               -- Enter a ~taken~ Conditional branch:
++               -- Enter a Conditional branch:
+             when '{' =>
+                Want(1);
+                if FFA_FZ_ZeroP(Stack(SP)) = 1 then
++                  -- Enter a 'taken' branch.
++                  -- All subsequent Symbols will be ignored until matching '}'.
+                   CondLevel := 1;
+                end if;
+                Drop;
+                
+                -- Exit from a ~non-taken~ Conditional branch:
+-               -- ... we push a 0, to suppress the 'else' clause
++               -- ... we push a 0, to suppress the 'else' clause:
+             when '}' =>
+                Push;
+                FFA_WBool_To_FZ(0, Stack(SP));
+@@ -362,8 +765,13 @@
+                -- Fetch from Register --
+                -------------------------
+             when 'g' .. 'z' =>
++               -- Put value of Register on stack
+                Push;
+-               Stack(SP) := Registers(C); -- Put value of Register on stack
++               if Use_CO_Registers then
++                  Stack(SP) := CO_Registers(C); -- use Cutout Register set
++               else
++                  Stack(SP) := Registers(C);    -- use ordinary set
++               end if;
+                
+                ------------------
+                -- Stack Motion --
+@@ -580,10 +988,6 @@
+                Print_FZ(Stack(SP));
+                Drop;
+                
+-               -- Zap (reset all resettables)
+-            when 'Z' =>
+-               Zap;
+-               
+                -- Put the Peh Program Version on the stack,
+                -- followed by FFA Program Version.
+             when 'V' =>
+@@ -626,6 +1030,8 @@
+             when
+               'Q' -- 'Quit...'
+               |
++              'Z' -- 'Zap...'
++              |
+               'L' -- 'Left...'
+               |
+               'R' -- 'Right...'
+@@ -636,37 +1042,62 @@
+               =>
+                HavePrefix := True;
+                
+-               -------------------
+-               -- Control Stack --
+-               -------------------
++               -----------
++               -- Loops --
++               -----------
+                
+-               -- Push current IP (i.e. of THIS Op) to Control Stack.
++               -- Begin Loop: Push IP (i.e. of THIS Op) to Control Stack.
+             when ':' =>
+-               Control_Push(IP);
++               Control_Push(Call_Type => Loops, Return_IP => IP);
+                
+-               -- Conditional Return: Pop top of Stack, and...
++               -- Conditional End Loop: Pop top of Stack, and...
+                -- ... if ZERO:    simply discard the top of the Control Stack.
+                -- ... if NONZERO: pop top of Control Stack and make it next IP.
+             when ',' =>
+                Want(1);
+                declare
+-                  Position : Tape_Positions := Control_Pop;
++                  Loop_Position : Tape_Positions := Control_Pop(Loops);
++                  Trigger       : WBool          := FFA_FZ_NZeroP(Stack(SP));
+                begin
+-                  if FFA_FZ_NZeroP(Stack(SP)) = 1 then
+-                     IP_Next := Position;
++                  -- If Trigger is active, re-enter the Loop:
++                  if Trigger = 1 then
++                     IP_Next := Loop_Position;
+                   end if;
+                end;
++               -- ... otherwise, continue normally.
+                Drop;
+                
+-               -- UNconditional Return: Control Stack top popped into IP_Next.
++               -----------------
++               -- Subroutines --
++               -----------------
++               
++               -- Return from a Subroutine:
+             when ';' =>
+-               IP_Next := Control_Pop;
++               -- Next instruction will be at the saved Return Position:
++               IP_Next := Control_Pop(Subroutines);
++               
++               -- Indicate the start of a Subroutine Name, e.g. @SubName
++               -- ... if DEFINING  a NEW   Subroutine: is followed by @body;
++               -- ... if INVOKING EXISTING Subroutine: is followed by !
++            when '@' =>
++               -- Save the NEXT IP as the first Symbol of the proposed Name:
++               Proposed_Sub.Name.L := Next_IP_On_Tape;
++               -- Enter the Name mode:
++               SubNameMode         := True;
++               -- We will remain in Name mode until we see a @ or ! .
++               
++               -- '!' invokes a previously-defined Subroutine:
++               -- ... If found after @Name was given, the syntax is: @SubName!
++               -- ... If found in THIS context, with no @Name , then invokes
++               --     the nearest Subroutine defined to the LEFT of this IP.
++               -- NO Sub defined to the RIGHT of the current IP may be invoked.
++            when '!' =>
++               Invoke_Left_Subroutine;
+                
+                ---------------------------------------------------------
+                -- Reserved Ops, i.e. ones we have not defined yet:    --
+                ---------------------------------------------------------
+-            when '!' | '@' |
+-                 'H' | 'I' | 'J' | 'K' | 'N' | 'T' | 'X' | 'Y' =>
++            when 'H' | 'I' | 'J' | 'K' | 'N' | 'T' | 'X' | 'Y' =>
+                
+                E("This Operator is not defined yet: " & C);
+                ---------------------------------------------------------
+@@ -675,7 +1106,8 @@
+                -- NOPs --
+                ----------
+                
+-               -- Unprintables and spaces DO NOTHING:
++               -- Unprintables and spaces DO NOTHING.
++               -- (However: they occupy space, consume Life, clear Prefix.)
+             when others =>
+                null;
+                
+@@ -683,6 +1115,7 @@
+          
+       end Op_Normal;
+       
++      ------------------------------------------------------------------------
+       
+       -- Execute a Prefixed Op
+       procedure Op_Prefixed(Prefix : in Character;
+@@ -691,7 +1124,7 @@
+          -- Report an attempt to execute an undefined Prefix Op:
+          procedure Undefined_Prefix_Op is
+          begin
+-            E("Undefined Prefix Op: " & Prefix & O);
++            E("Undefined Prefix Op: '" & Prefix & O & "'");
+          end Undefined_Prefix_Op;
+          
+       begin
+@@ -700,7 +1133,7 @@
+          case Prefix is
+             
+             ---------------------------------------------------------
+-            -- Quit...
++            -- Quit... (See Ch. 17 discussion)
+             when 'Q' =>
+                
+                -- .. Quit how?
+@@ -708,6 +1141,11 @@
+                   
+                   -- ... with a 'Yes' Verdict:
+                   when 'Y' =>
++                     -- Prohibited from within a loop or Subroutine:
++                     if Control_Stack_Not_Empty then
++                        E("Attempted to proclaim a 'Yes' Verdict" &
++                            " inside a Loop or Subroutine!");
++                     end if;
+                      Verdict := Yes;
+                      
+                   -- ... with a 'No' Verdict:
+@@ -748,6 +1186,35 @@
+                end case;
+                
+             ---------------------------------------------------------
++            -- Zap...
++            when 'Z' =>
++               
++               -- .. Zap what?
++               case O is
++                  
++                  -- ... Registers:
++                  when 'R' =>
++                     -- If in Cutout, will zap only Cutout set of regs
++                     Zap_Registers;
++                     
++                  -- ... Data Stack:
++                  when 'D' =>
++                     Zap_Data_Stack;
++                     
++                  -- ... Overflow Flag:
++                  when 'F' =>
++                     Zap_Flag;
++                     
++                  -- ... All Zappable State:
++                  when 'A' =>
++                     Zap_Master;
++                     
++                  when others =>
++                     Undefined_Prefix_Op;
++                     
++               end case;
++               
++            ---------------------------------------------------------
+             -- Write into Register...
+             when '$' =>
+                
+@@ -758,7 +1225,11 @@
+                
+                -- Selected Register exists; move top FZ on stack into it:
+                Want(1);
+-               Registers(O) := Stack(SP);
++               if Use_CO_Registers then
++                  CO_Registers(O) := Stack(SP); -- use Cutout Register set
++               else
++                  Registers(O)    := Stack(SP); -- use ordinary set
++               end if;
+                Drop;
+             
+             ---------------------------------------------------------
+@@ -786,6 +1257,29 @@
+                   when 'R' =>
+                      E("Left-Rotate not yet defined!");
+                      
++                  -- ... 'Cutout' :
++                  -- Mark the LEFT SIDE of the 'Cutout' Tape segment;
++                  -- The Tape IN OR PRIOR to it will retain the ability to
++                  -- move directly into points PRIOR to THIS position
++                  -- on the Tape (i.e. where THIS Op had executed).
++                  -- Ops on Tape AFTER 'RC' mark can move INTO Cutout,
++                  -- but NOT directly into any position PRIOR to it.
++                  -- If 'LC' is executed, a 'RC' MUST occur before Tape end.
++                  -- FATAL if a 'LC' or 'RC' Op had previously executed.
++                  when 'C' =>
++                     -- Eggog if we have ALREADY begun the Cutout somewhere:
++                     if Cutout_Begun then
++                        E("'LC' Op may only execute ONCE on a Tape!");
++                     end if;
++                     -- Cutout defs are prohibited inside loops or Sub calls:
++                     if Control_Stack_Not_Empty then
++                        E("Attempted to execute 'LC' (Left-Cutout)" &
++                            " inside a Loop or Subroutine!");
++                     end if;
++                     -- Set the START of the Cutout, and mark it 'begun':
++                     Cutout_Begun := True;
++                     Cutout.L     := IP;
++                     
+                   -- ... Unknown (Eggog):
+                   when others =>
+                      Undefined_Prefix_Op;
+@@ -824,6 +1318,30 @@
+                                          XY => Stack(SP - 1));
+                      Drop;
+                      
++                  -- ... 'Cutout' :
++                  -- Mark the RIGHT SIDE of the 'Cutout' Tape segment that
++                  -- began with 'LC', and permanently arms the Cutout.
++                  -- After THIS position, no IP_Next may be set which
++                  -- directly transfers control to a point PRIOR to 'LC'.
++                  -- FATAL if no 'LC' had executed to mark the LEFT SIDE.
++                  when 'C' =>
++                     -- Eggog if we never marked the beginning with 'LC':
++                     if not Cutout_Begun then
++                        E("'RC' Op found, but no there was no prior 'LC' !");
++                     end if;
++                     -- Eggog if we have already armed the Cutout:
++                     if Cutout_Armed then
++                        E("'RC' Op found, but the Cutout is already armed!");
++                     end if;
++                     -- Cutout defs are prohibited inside loops or Sub calls:
++                     if Control_Stack_Not_Empty then
++                        E("Attempted to execute 'RC' (Right-Cutout)" &
++                            " inside a Loop or Subroutine!");
++                     end if;
++                     -- Otherwise proceed to complete and arm the Cutout:
++                     Cutout.R     := IP;
++                     Cutout_Armed := True;
++                     
+                   -- ... Unknown (Eggog):
+                   when others =>
+                      Undefined_Prefix_Op;
+@@ -881,11 +1399,13 @@
+          
+       end Op_Prefixed;
+       
++      ------------------------------------------------------------------------
+       
+       -- Process a Symbol
+       procedure Op(C : in Character) is
+       begin
+-         -- First, see whether we are in a state of nestedness:
++         
++         -- See whether we are inside a 'Block' :
+          
+          -- ... in a Comment block:
+          if CommLevel > 0 then
+@@ -929,10 +1449,136 @@
+                   
+                when '{' =>   -- Add a nesting level:
+                   CondLevel := CondLevel + 1;
++                  
+                when others =>
+                   null; -- Other symbols have no effect on the level
+             end case;
+             
++            --- ... in a proposed Subroutine Name:
++         elsif SubNameMode then
++            case C is
++               
++               -- Attempt to INVOKE the named Subroutine:
++               when '!' =>
++                  -- Detect attempt to invoke a Sub with no Name:
++                  if IP = Proposed_Sub.Name.L then
++                     E("Attempted to invoke a nameless Subroutine!");
++                  end if;
++                  -- Exit the Name mode:
++                  SubNameMode := False;
++                  -- Attempt to invoke the subroutine:
++                  Invoke_Named_Subroutine(Proposed_Sub.Name);
++                  
++               -- Attempt to read a body for a Subroutine Definition:
++               when '@' =>
++                  -- Detect attempt to define a Sub with no Name:
++                  if IP = Proposed_Sub.Name.L then
++                     E("Attempted to define a nameless Subroutine!");
++                  end if;
++                  -- Save the NEXT IP as the beginning of the proposed Body:
++                  Proposed_Sub.Payload.L := Next_IP_On_Tape;
++                  -- Exit the Name mode:
++                  SubNameMode            := False;
++                  -- Enter Sub Body mode:
++                  SubBodyMode            := True;
++                  
++               -- Any permissible Symbol in a Subroutine Name:
++               when '0' .. '9' | 'A' .. 'Z' | 'a' .. 'z' | '-' | '_'  =>
++                  -- Save IP as the potential end of the proposed Sub Name:
++                  Proposed_Sub.Name.R := IP;
++                  
++               when others =>
++                  E("Symbol '" & C & "' is prohibited in a Subroutine Name !");
++            end case;
++            
++            --- ... in a proposed Subroutine Body:
++         elsif SubBodyMode then
++            declare
++               -- Name of Proposed Subroutine (for eggogs) :
++               Name : String
++                 := String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R));
++            begin
++               case C is
++                  -- Subroutine Terminator:
++                  when ';' =>
++                     -- Only takes effect if NOT in a Comment or Quote Block:
++                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                        if SubCondLevel /= 0 then
++                           E("Conditional Return in Subroutine: '"
++                               & Name & "' is Prohibited!" &
++                               " (Please check for unbalanced '{'.)'");
++                        end if;
++                        -- Now, Sub-Comm, Quote, and Cond levels are 0.
++                        -- The ';' becomes last Symbol of the new Sub's Body.
++                        -- Test for attempt to define a Sub with a null Body:
++                        if IP = Proposed_Sub.Payload.L then
++                           E("Null Body in Subroutine: '" & Name 
++                               & "' is prohibited!");
++                        end if;
++                        -- Exit Body mode, and intern this new Sub definition:
++                        Proposed_Sub.Payload.R := IP;
++                        -- Exit the Sub Body mode:
++                        SubBodyMode            := False;
++                        -- Attempt to intern the Proposed Subroutine:
++                        Intern_Subroutine(Proposed_Sub);
++                     end if;
++                     
++                     -- Begin-Comment inside a Subroutine Body:
++                  when '(' =>
++                     SubCommLevel := SubCommLevel + 1;
++                     
++                     -- End-Comment inside a Subroutine Body:
++                  when ')' =>
++                     -- If cannot drop Sub Comment level:
++                     if SubCommLevel = 0 then
++                        E("Unbalanced ')' in Body of Subroutine: '"
++                            & Name & "' !");
++                     end if;
++                     SubCommLevel := SubCommLevel - 1;
++                     
++                     -- Begin-Quote inside a Subroutine Body:
++                  when '[' =>
++                     -- Ignore if Commented:
++                     if SubCommLevel = 0 then
++                        SubQuoteLevel := SubQuoteLevel + 1;
++                     end if;
++                     
++                     -- End-Quote inside a Subroutine Body:
++                  when ']' =>
++                     -- Ignore if Commented:
++                     if SubCommLevel = 0 then
++                        -- If cannot drop Sub Quote level:
++                        if SubQuoteLevel = 0 then
++                           E("Unbalanced ']' in Body of Subroutine: '"
++                               & Name & "' !");
++                        end if;
++                        SubQuoteLevel := SubQuoteLevel - 1;
++                     end if;
++                     
++                     -- Begin-Conditional inside a Subroutine Body:
++                  when '{' =>
++                     -- Ignore if Commented or Quoted:
++                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                        SubCondLevel := SubCondLevel + 1;
++                     end if;
++                     
++                     -- End-Conditional inside a Subroutine Body:
++                  when '}' =>
++                     -- Ignore if Commented or Quoted:
++                     if SubCommLevel = 0 and SubQuoteLevel = 0 then
++                        -- If cannot drop Sub Conditional level:
++                        if SubCondLevel = 0 then
++                           E("Unbalanced '}' in Body of Subroutine: '"
++                               & Name & "' !");
++                        end if;
++                        SubCondLevel := SubCondLevel - 1;
++                     end if;
++                     
++                     -- All other Symbols have no special effect in Sub Body :
++                  when others =>
++                     null; -- Stay in Body mode until we see the ';'.
++               end case;
++            end;
+             --- ... if in a prefixed op:
+          elsif HavePrefix then
+             
+@@ -945,16 +1591,22 @@
+          else
+             -- This is a Normal Op, so proceed with the normal rules.
+             Op_Normal(C);
++            
+          end if;
+          
+-         -- In all cases, save the current symbol as possible prefix:
++         -- In all cases, save the current Symbol as possible prefix:
+          PrevC := C;
+          
+       end Op;
+       
++      -----------------------------
++      -- Start of Tape Execution --
++      -----------------------------
++      
+    begin
+       -- Reset all resettable state:
+-      Zap;
++      Zap_Master;
++      Zap_Cutout_Registers;
+       
+       -- Execution begins with the first Op on the Tape:
+       IP := Tape_Positions'First;
+@@ -962,7 +1614,7 @@
+       loop
+          
+          -- If current Op is NOT the last Op on the Tape:
+-         if IP /= Tape_Positions'Last then
++         if not Last_Tape_Symbol then
+             
+             -- ... then default successor of the current Op is the next one:
+             IP_Next := IP + 1;
+@@ -986,12 +1638,45 @@
+            IP_Next  = IP or -- Reached the end of the Tape, or...
+            Exhausted_Life;  -- Exhausted Life.
+          
++         -- If the Cutout has been armed on this Tape, then enforce it:
++         if Cutout_Prohibits(IP_Next) then
++            E("Attempted movement to IP:" & Tape_Positions'Image(IP_Next) &
++                " violates the Cutout!");
++         end if;
++         
+          -- We did not halt yet, so select the IP of the next Op to fetch:
+          IP := IP_Next;
+          
+       end loop;
+       
+-      -- Warn operator about any unclosed blocks:
++      -- At this point, the Tape has halted.
++      
++      ------------------------------------------------------------------
++      -- The following types of Unclosed Blocks trigger a Eggog Verdict:
++      
++      -- Unclosed Subroutine Name at Tape's End:
++      if SubNameMode then
++         E("The Subroutine Name at IP:"
++             & Tape_Positions'Image(Proposed_Sub.Name.L)
++             & " is Unterminated!");
++      end if;
++      
++      -- Unclosed Subroutine Body at Tape's End:
++      if SubBodyMode then
++         E("The Body of Subroutine: '" 
++             & String(Tape(Proposed_Sub.Name.L .. Proposed_Sub.Name.R)) 
++             & "' is Unterminated!");
++      end if;
++      
++      -- Unclosed Cutout:
++      if Cutout_Begun and not Cutout_Armed then
++         E("The Cutout declaration 'LC' at IP:"
++             & Tape_Positions'Image(Cutout.L) & " is Unterminated!");
++      end if;
++      
++      ------------------------------------------------------------------
++      -- The following types of Unclosed Blocks trigger a Warning:
++      
+       if CommLevel > 0 then
+          Achtung("WARNING: Tape terminated with an unclosed Comment!");
+       end if;
+@@ -1004,16 +1689,27 @@
+          Achtung("WARNING: Tape terminated with an unclosed Conditional!");
+       end if;
+       
++      ------------------------------------------------------------------
++      -- Non-empty stacks, after Tape has halted, also trigger a Warning:
++      
+       -- Warn operator if we terminated with a non-empty Control Stack.
+       -- This situation ought to be considered poor style in a Peh Tape;
+       -- for clarity, Verdicts should be returned from a place near
+       -- the visually-apparent end of a Tape. However, this is not mandatory.
+-      if CSP /= Control_Stack'First then
+-         Achtung("WARNING: Tape terminated with a non-empty Control Stack!");
++      if Control_Stack_Not_Empty then
++         Achtung("WARNING: Tape terminated inside a Loop or Subroutine!");
+       end if;
+       
+-      -- We're done with the Tape, so clear the state:
+-      Zap;
++      -- Warn operator if we terminated with a non-empty Data Stack:
++      if Data_Stack_Not_Empty then
++         Achtung("WARNING: Tape terminated with a non-empty Data Stack!");
++      end if;
++      
++      ------------------------------------------------------------------
++      
++      -- We're done with the Tape and any Warnings, so clear the state:
++      Zap_Master;
++      Zap_Cutout_Registers;
+       
+       -- Return the Verdict:
+       return Verdict;
+diff -uNr a/ffa/ffacalc/ffa_calc.ads b/ffa/ffacalc/ffa_calc.ads
+--- a/ffa/ffacalc/ffa_calc.ads d190ce3aeb4c78d22671e7d960508560e04fa0aae61b1e84b9486b32183dbee0c829ae81af30c277f5ec395ec268386640f0486c6113bca9b96f72be3d0341c9
++++ b/ffa/ffacalc/ffa_calc.ads 90a94967440d1ae75c85de8970952891fe5fdacb9fc3f23b4f19440338df4034a98eaf40952bd7f630975fd19edb039235070a9a401274a08b01f2a9cb89b001
+@@ -44,6 +44,10 @@
+    -- The 'zero' position, as with the Data Stack, indicates 'emptiness'
+    -- when pointed to by CSP ( see ffa_calc.adb ) and is never accessed.
+    
++   -- Valid indices into the Subroutine Table:
++   subtype Subroutine_Table_Range is Natural range 0 .. Subroutine_Table_Size;
++   -- The 'zero' position indicates 'emptiness', as in the above.
++   
+    -- Ensure that requested Peh Dimensions are permissible. Terminate if not.
+    procedure Validate_Peh_Dimensions(Dimensions : in Peh_Dimensions);
+    
+diff -uNr a/ffa/ffacalc/limits.ads b/ffa/ffacalc/limits.ads
+--- a/ffa/ffacalc/limits.ads c1545ba38d991624749345a5ae24336fca2d3ca04e06f3e4f9b77aeea15a717a1eb4f1b5b6e2d7f14229335706fdf94770e2f5cbe13471d6e93750a8dc3c5a2f
++++ b/ffa/ffacalc/limits.ads 18ad9896df7d86ec9357635446177dc9ec5f7d87f819ab92134edc51e749b006e8a8d86135dcb69c6297a417e6964ca145cd53f26d178e033733a52ad5536d2d
+@@ -29,4 +29,10 @@
+    -- The exact height of the Peh Control Stack. This is an invariant.
+    Peh_Control_Stack_Size : constant Positive := 256;
+    
++   -- The exact size of the Peh Subroutine Table. This is an invariant.
++   Subroutine_Table_Size  : constant Positive := 256;
++   
++   -- The minimum number of Symbols in a Subroutine Name. This is an invariant.
++   Subr_Min_Name_Length   : constant Positive := 2;
++   
+ end Limits;
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads 80480cca4fdf0cc6f56afc761a32b2257259eefa83755773d16058f4c13ad58293740a4f0a1dfe863860a7ad51c5a10fc9b8b1faf859c79108455a85fe7b32b1
++++ b/ffa/ffacalc/version.ads f11774699154a1bda84873ce0e8f11865ba42e40732e36cfbd819bde949d27e0dcb5d151aaaec1a6d34377bbad7829239d5cd8ff49c290a75cb95c5a3edd0169
+@@ -24,7 +24,7 @@
+    --------------------------------------------
+    -- Current 'deg. Kelvin' Version of Peh   --
+    --------------------------------------------
+-   Peh_K_Version : constant Natural := 252;
++   Peh_K_Version : constant Natural := 251;
+    --------------------------------------------
+    
+ end Version;

@@ -1,0 +1,1178 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT a38b616095bbf9035689c8bf9be759a0e958d99249ddbc68a675eef479e211d7916a93ac702ecb3c5627cd5f0940a0e43d870ac488d063b1b1b7654bb3e4e243
++++ b/ffa/MANIFEST.TXT 9b65bb45012cdbe66d613823f63e75e1a8a63ab64b11b2235549fe62bda45d09ade27aeafc8df47c32d905d4400a82f80aee488a6ae7d7795cb91e6408057eab
+@@ -13,3 +13,4 @@
+  551348 ffa_w_borrow_expr diana_coman Replaces expression for calculating borrow bit with more readable version that is also symmetrical to that for carry bit.
+  551516 ffa_ch13_measure_and_qshifts   "Measure and Quiet Shifts."
+  555788 ffa_ch14_barrett               "Barrett's Modular Reduction."
++ 557938 ffa_ch15_gcd                   "Greatest Common Divisor."
+diff -uNr a/ffa/README b/ffa/README
+--- a/ffa/README e6ef90e8e81e2504052a9c3b4ebcf1f7f7aba62e8b2330e96eaf48978e1749a0d655261b8ac31028af0abbd1f50ab9fd7492dd2a80852b8e8e6958a55e00ecb9
++++ b/ffa/README a685ae297e995254762e5d2ae4a7fb4180391e26803c6de1761f0cf6023062befa31a00892a12e035be0526a8536b91ad29f03bd451711665b968cf4084db6f0
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/README b/ffa/ffacalc/README
+--- a/ffa/ffacalc/README e61da32cd223c6eb8b83c5161d88dbfad3779a744baccbedd1af357e941d0e17b324e3ff1177c72300d76a8c71486a15a473ff635005238b296bd939a85e0eda
++++ b/ffa/ffacalc/README 04c162662701740cecad1575c604eeccc461336e6e75dde17595fdd266194fe3b408593e2f44b1c2f9af7b2495153fac3c7cda0fdac7786afaef34c121499ff6
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/cmdline.adb b/ffa/ffacalc/cmdline.adb
+--- a/ffa/ffacalc/cmdline.adb 888b4f60e7068f0069d7293242209ac500a7ba7f5b6f01f8eef23da1d52b26eaf47bc80465c9fbd5278aa677afb27cb955427ed0d7e9a8409ef50eb763bb09f8
++++ b/ffa/ffacalc/cmdline.adb 6f32ba846b2ddc89efecb4647890d79dc4cdf333185aa1821a8631583657aacde6d8528b95a7e2d98f71b9b0a174a8df0475f5f5f9f6b759a0baf1f3e256f86f
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/cmdline.ads b/ffa/ffacalc/cmdline.ads
+--- a/ffa/ffacalc/cmdline.ads 064971bb7e0a8a48fa00b523083a4332b9a4589bf83bb03ca236ef15bc977ba40f7375b00a06deaac84081fff7615b0bc4463eeeded57976b1b084fb37657f46
++++ b/ffa/ffacalc/cmdline.ads 38c999f7611a8733b8b8298ffd4f06c0f829dace631235465eced1e5973f945ee0e421bb0ffab7dc7cf2b6bdc7c3940dd1fc55ecf4bed6b7f202df68b9f23846
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb c6ce2b2efec9bf6172130008c0ea7703d08d07862296a2ca5b1d790352697c3e05d2d233bfcf3f533164e45027a9bfa2815445fdb1e75807f5092335f99b03a4
++++ b/ffa/ffacalc/ffa_calc.adb 0dc7983700b4d2eec0cd0fe41d7be166568caf3bee53d635cab6685a0fbfc4057ab6b5836a3cd74ac152973a4a6cbbcfe4c8a514942e03f3591dcd811c8d1aa2
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -393,6 +393,27 @@
+                                XY_Lo => Stack(SP - 1),
+                                XY_Hi => Stack(SP));
+                
++               -- Square, give bottom and top halves
++            when 'S' =>
++               Want(1);
++               Push;
++               FFA_FZ_Square(X     => Stack(SP - 1),
++                             XX_Lo => Stack(SP - 1),
++                             XX_Hi => Stack(SP));
++               
++               -- Greatest Common Divisor (GCD)
++            when 'G' =>
++               Want(2);
++               
++               -- Note that GCD(0,0) is not factually zero, or unique.
++               -- But it is permissible to define it as zero.
++               -- (See Ch. 15 discussion.)
++               
++               FFA_FZ_Greatest_Common_Divisor(X      => Stack(SP - 1),
++                                              Y      => Stack(SP),
++                                              Result => Stack(SP - 1));
++               Drop;
++               
+                -----------------
+                -- Bitwise Ops --
+                -----------------
+@@ -492,14 +513,6 @@
+                FFA_FZ_Clear(Stack(SP));
+                FFA_FZ_Set_Head(Stack(SP), Word(FFA_K_Version));
+                
+-               -- Square, give bottom and top halves
+-            when 'S' =>
+-               Want(1);
+-               Push;
+-               FFA_FZ_Square(X     => Stack(SP - 1),
+-                             XX_Lo => Stack(SP - 1),
+-                             XX_Hi => Stack(SP));
+-               
+                --------------
+                -- Prefixes --
+                --------------
+@@ -520,7 +533,7 @@
+                -- Reserved Ops, i.e. ones we have not defined yet:   --
+                ---------------------------------------------------------
+             when '!' | '@' | '$' | ':' | ';' | ',' |
+-                 'G' | 'H' | 'I' | 'J' | 'K' | 'N' |
++                 'H' | 'I' | 'J' | 'K' | 'N' |
+                  'P' | 'T' | 'X' | 'Y' =>
+                
+                E("This Operator is not defined yet: " & C);
+@@ -602,19 +615,27 @@
+                   when 'R' =>
+                      E("Right-Rotate not yet defined!");
+                      
++                  -- 'Right-Multiply', give only lower half of the product XY
++                  when '*' =>
++                     Want(2);
++                     FFA_FZ_Low_Multiply(X  => Stack(SP - 1),
++                                         Y  => Stack(SP),
++                                         XY => Stack(SP - 1));
++                     Drop;
++                     
+                   -- ... Unknown:
+                   when others =>
+                      E("Undefined Op: R" & O);
+                      
+                end case;
+             ---------------------------------------------------------
+-            -- Modular...   
++            -- Modular...
+             when 'M' =>
+                
+                -- Which M-op?
+                case O is
+                   
+-                  -- ... Multiplication :
++                  -- ... Multiplication (Conventional) :
+                   when '*' =>
+                      Want(3);
+                      MustNotZero(Stack(SP));
+@@ -625,7 +646,16 @@
+                      Drop;
+                      Drop;
+                      
+-                  -- ... Exponentiation :
++                  -- ... Squaring (Conventional) :
++                  when 'S' =>
++                     Want(2);
++                     MustNotZero(Stack(SP));
++                     FFA_FZ_Modular_Square(X       => Stack(SP - 1),
++                                           Modulus => Stack(SP),
++                                           Product => Stack(SP - 1));
++                     Drop;
++                     
++                  -- ... Exponentiation (Barrettronic) :
+                   when 'X' =>
+                      Want(3);
+                      MustNotZero(Stack(SP));
+diff -uNr a/ffa/ffacalc/ffa_calc.gpr b/ffa/ffacalc/ffa_calc.gpr
+--- a/ffa/ffacalc/ffa_calc.gpr 52b7bb186f030b62b54d315384dd843497b43154aeb4046684c7fa58c616cce3e0694d23537489f70a83b7cb54eb23d39100066a2656045f98a9b63e471f2f8f
++++ b/ffa/ffacalc/ffa_calc.gpr a09ec660d5c3f45b6277db4ca2b27f92b5b83c40a25dd030ba87c1966db92ad0bb0d8fb06489807c47c755b5768be490cde04d841ffac4c97d817d8c47607d02
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/ffa_rng.adb b/ffa/ffacalc/ffa_rng.adb
+--- a/ffa/ffacalc/ffa_rng.adb 5314c163058bb201207a4ce29d8b6617c15f7b63490c445a371b3bab4323842a948532ac92cc67c7b3e8546eb92421e75516220a27052e43bb96490d3fb1f243
++++ b/ffa/ffacalc/ffa_rng.adb 2f7f257e0ae6f10a8b865c9bc6fc904ee0a2ee24ebaf3a68f49959d9cccdba4c6f7b612c5e189ad7bc6d9b560b799c611d28c20755f68cf9592f2f5b2bf81fe1
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/ffa_rng.ads b/ffa/ffacalc/ffa_rng.ads
+--- a/ffa/ffacalc/ffa_rng.ads 18ceffd6e2783f1b16c6d6bbf07d5acdf6e5f83b1181162d2dd39f449a505ccf2db4b1c8f74ce334b53cc8c1a17ecf052a4c1dbf8c025082d2e2014a1ba12674
++++ b/ffa/ffacalc/ffa_rng.ads 26fdb67915e7b62c803d76892f63ec6df69c656d209ce5d1359ea310b67d019451e3caae52dba2c7afca472ba83880720776e9f3e589f1c905f5e5c68fa33960
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/os.adb b/ffa/ffacalc/os.adb
+--- a/ffa/ffacalc/os.adb 336baf1718ecf7aada909e7a7ba8062c6107d53f397969ef3740c26a31142551ef450dee4cbddcd55f0673e250ce7c47520672dc8ff0eb962f4c126793e2ebaa
++++ b/ffa/ffacalc/os.adb cb36806df5808e2f409446f3ffc170c3c50285dc5b7864504a5617a617215a18cc372f74ca28f583e44a43102c61b640b55b0c6f2ae40074f6716ffac94fe6a0
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/os.ads b/ffa/ffacalc/os.ads
+--- a/ffa/ffacalc/os.ads a6ea0fe40c8f1ffca030c48dc252ba3d31d3765f57375efa7f26cdd39ed56ad24527832d0fe071b8e98f4bc9793a292d167739ec0448839e75723684630d1368
++++ b/ffa/ffacalc/os.ads 023e91ef60d6d2fd98f527db1cf90fd181473dd5b621e40ba9ce550e7923537dedac9b2f29271de4be0035eb34cc67424285e5e8bffc2e2f322f01cf208d2ecb
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads 24fbdeb64a2e0f728092b5e6be2f55d40276cbe30e500a92554b3e702ff9f128d5860664ad4bbb1e4d3ddfb4b0189e043fba946acec305c24a2f216e757b8d86
++++ b/ffa/ffacalc/version.ads de74b71ad764a1253ca500c7ef1e4f285356b2a9f4ccd056f05deb9fb99f7477488c6c03fe1caee82d8ff153461ee81c9e046d74dc880281c43c5ac565706a07
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -24,7 +24,7 @@
+    ----------------------------------------------
+    -- Current 'deg. Kelvin' Version of FFACalc --
+    ----------------------------------------------
+-   FFACalc_K_Version : constant Natural := 255;
++   FFACalc_K_Version : constant Natural := 254;
+    ----------------------------------------------
+    
+ end Version;
+diff -uNr a/ffa/ffademo/README b/ffa/ffademo/README
+--- a/ffa/ffademo/README ad4bcd1c0f26fdae13316825f8ad112744491727d35d0645bba892dde1dca9cc13feb756ea2bf673245daa6e027386e896e5d2975f3a53949eb210571997e9d2
++++ b/ffa/ffademo/README 211d65559129ee9d5f1be41e914ac95c3d4114a77b1074b63f084c5c1fd54f77f0481500ceaa21f49474636a7ffffab55d50700eb77089fbf0835962de7f335a
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch1.adb b/ffa/ffademo/demo_ch1.adb
+--- a/ffa/ffademo/demo_ch1.adb 20e5fd1db56fbedccad21587fe6d6ad44c6d7208cd5632a12e364b81217acf68b1b92bc1d82e29e5c16e6caebb5b8dce8c275a2e21691f5b355314b0aac2be7d
++++ b/ffa/ffademo/demo_ch1.adb 8d3c05ea7e46e43e30f40b8757a83b18069cf62f419a04da591699e3cc55ab9ad8a73188f7c89ec7d9796ed4e1c4c87e0caf1b371f75d6a2da9eabe09f46a201
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch1.ads b/ffa/ffademo/demo_ch1.ads
+--- a/ffa/ffademo/demo_ch1.ads 1959cda0f5a15b35a1e5b050978162e9522f3885881f98eaff4bbda4b314e49a6cecd3e938f4c894e1e18c64cce7e704c63bc867ff8d5e0ac37161365b6b4b31
++++ b/ffa/ffademo/demo_ch1.ads da01e12abee204118ec4e1507c21f4a1a9f00a66330ab95ad8bb88dc672bc0df454f18448384309d853433137015e8239cfee2ce8bd723b9f1e832fdba6ba97a
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch2.adb b/ffa/ffademo/demo_ch2.adb
+--- a/ffa/ffademo/demo_ch2.adb ff319d21d5a1b36292f185556512b4ef986ccf657610377da93d3efaeba340c67abd8aea86423176090f7dbb9a33203740d27b87b229a70ab30e3ace6633cb0e
++++ b/ffa/ffademo/demo_ch2.adb 0139b4a14c4a4dc7bbccb7c63b93221ab8cad22fa86a051b83d59389cbdd4b209494a1899c61c68b084bfaefa56aa7b9f69238b7eff9adbe930065d04a69588e
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch2.ads b/ffa/ffademo/demo_ch2.ads
+--- a/ffa/ffademo/demo_ch2.ads d0ec9ed3535a120a612d261b779ec88a02ea7be5a683399e8c49e2d1e8833897dd8b84f1e517dc570de17e4ca6752b5654e5ade3d3974d94842bcebf57ab65be
++++ b/ffa/ffademo/demo_ch2.ads fa7d3281d43c3c2a7cb10505f7fdb088d59764083527eddb50b680ea5e71045cf55d04dfe19c6166a2ed7070a7600ce66d2f7af63b0b5c17b0359d403a61c3bb
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch3.adb b/ffa/ffademo/demo_ch3.adb
+--- a/ffa/ffademo/demo_ch3.adb d2aec7db4cef68a2ca7ddf2aae62e393f228c429d60dd1ac7cbf0c7e5519b30ca053cc9c78a78438ff1108541c9f47240da5500345c97854efaa853a4a930c9d
++++ b/ffa/ffademo/demo_ch3.adb 5a771e24b4d412cf6e173ddfb2d2c551a6769b8bdce9bea3786e439211d31659f0226534ab1ccdcb8f1c207baea61d2ebd8159f16c161a23bccbb6ad8be87cde
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/demo_ch3.ads b/ffa/ffademo/demo_ch3.ads
+--- a/ffa/ffademo/demo_ch3.ads 49e370ed04a5198711e8bae455b680ec0b5e88aa2eac1a2d6839f368792a21efe06ec7f204b66a6956aaf1512f704928a35a4b6906eef8355325944ed09eddf9
++++ b/ffa/ffademo/demo_ch3.ads ac054511755085f296d7e05fb3f2aedec947d0de8afb438e910564a013662e13fb6cf3f6c3e292a8999b79b699494721fb7cd6ccd9178b986839933cf7d103e1
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/ffa_demo.adb b/ffa/ffademo/ffa_demo.adb
+--- a/ffa/ffademo/ffa_demo.adb d02319fe61524ad04e579446f26df1bcf6b822050b357dcf7bf150ca553f25ebf9603c246a84b902d0e3165a71a29b519a2e9d10a0f5d150eb2db24b44a36355
++++ b/ffa/ffademo/ffa_demo.adb 9787ba550bea5f850dbfb195b49b237cd97e3f46f626ac58a562f1afef1a641ae8003aa772b4e0007ea420a3bc5cbef411d886d4a236d4a0899455217babffd9
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/ffa_demo.gpr b/ffa/ffademo/ffa_demo.gpr
+--- a/ffa/ffademo/ffa_demo.gpr d6e5faee35c92b829d83f16c74ec7bcbfe66214aeb7a4ad914c5acb84b561dcf0d311d7fbddc4a9edf4d5feba462b5bfb709aa42adb9b75b40c515275b1454bd
++++ b/ffa/ffademo/ffa_demo.gpr 62e9828196da93186a14754d10681e38468543080647d6a1fd005f0388a9ff0f9c3b8651d380af730f343ecbf2eaa4d4dce88e4314fc745e4fa0e160a0dd0c6f
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/ffa_io.adb b/ffa/ffademo/ffa_io.adb
+--- a/ffa/ffademo/ffa_io.adb 408328bdcb8543bff0e7adfd454105c5b1876c7ee71ef41337622bd95d269188f6643fd8bf9ea6076692aefc59e63a9a02b986b7c4c697b76a3ea0b69a4ffb87
++++ b/ffa/ffademo/ffa_io.adb 71914c1a511309dbe2e0fc544c47f8c9928f2ce6dfef9ca1d6704b547f4d3d67c2df448de77b5a3c1d16ad167b7312f244d47c6c76d5a1e16e0ba21df5c02fa4
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/ffademo/ffa_io.ads b/ffa/ffademo/ffa_io.ads
+--- a/ffa/ffademo/ffa_io.ads de4ff4dfc81df4a4febc2b5a1c359df912969821fb3790d51d78eed6352fa52d03eb70a9226ef896cee16dcfc40ab2facb9fd49d54110fb86f3febd8caf29e64
++++ b/ffa/ffademo/ffa_io.ads 5ce266ed8b00691bada93e6f6785a67198b90a428cf069d456c034aba341a283d67b2e22c0a715405688cab6f489b7a29bb283f07797244b681884b019686134
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/README b/ffa/libffa/README
+--- a/ffa/libffa/README b8dbe89a3d907943ed0a96ef2eb23550a00fe344c5396becc747ba8d64e1ba2d45baf32e4dca24630d4a2b75297fd1b79402592c07dd2949666f4a72c14406c9
++++ b/ffa/libffa/README e3e58e34c4af6db89fb13b252f3df092c25a0bf8ff1b66ac01f8ad84881deba500d4a97f8fd9d5bbcf422d78ed7ba0646e1b6d6f03f3985cb9b4054762439add
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/ffa.adb b/ffa/libffa/ffa.adb
+--- a/ffa/libffa/ffa.adb 720237083e8d484b06d432529e8547d78adb2eb1f72cf0934f7596ce8ca7aec883c43f0951e133294b5139d4386e749c0939efe3715ec46bc2515e3b23493a7b
++++ b/ffa/libffa/ffa.adb 4701313606dccbc988dc36888db1a2530f9f109eaef92073f95dc5d327c301f660f46047e4c1deaf18897834bd2b6c5c693557e5d5bd5fb4c21e91c5b344759e
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -21,6 +21,7 @@
+ with FZ_Shift;
+ with FZ_Mul;
+ with FZ_Sqr;
++with FZ_GCD;
+ 
+ 
+ -- Wrapper bodies for routines that we inline, but must enforce preconditions
+@@ -117,4 +118,16 @@
+       FZ_Sqr.FZ_Square_Buffered(X => X, XX_Lo => XX_Lo, XX_Hi => XX_Hi);
+    end FFA_FZ_Square;
+    
++   ----------------------------------------------------------------------------
++   --- Other Operations on FZ
++   ----------------------------------------------------------------------------
++   
++   -- Find Greatest Common Divisor (GCD) of X and Y.
++   procedure FFA_FZ_Greatest_Common_Divisor(X      : in  FZ;
++                                            Y      : in  FZ;
++                                            Result : out FZ) is
++   begin
++      FZ_GCD.FZ_Greatest_Common_Divisor(X => X, Y => Y, Result => Result);
++   end FFA_FZ_Greatest_Common_Divisor;
++   
+ end FFA;
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads 364f816604e2ee0fc4a07429824e32292032806456afc794d306ee7f9a41180d9a517fb2563311f1f526f9b6512597e974321dca2ac61251d36da4033f18578d
++++ b/ffa/libffa/ffa.ads ba6b8ed841ff5c8cbadd59934821b311f6f74200c23bcbda0b3a430c43a151b8242296d255c97c44788c6a5c97afbe7dac8339fd369aaff3b509a70e9ba620f8
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -32,6 +32,7 @@
+ with FZ_ModEx;
+ with FZ_Measr;
+ with FZ_QShft;
++with FZ_LoMul;
+ 
+ 
+ -- FFA Exports
+@@ -43,7 +44,7 @@
+    --- Current 'deg. Kelvin' Version of FFA
+    ----------------------------------------------------------------------------
+    
+-   FFA_K_Version : constant Natural := 255;
++   FFA_K_Version : constant Natural := 254;
+    
+    ----------------------------------------------------------------------------
+    --- Fundamental Types and Sizes
+@@ -273,6 +274,12 @@
+      XX_Hi'Length = X'Length and
+      X'Length mod 2 = 0;
+    
++   -- Low-Only Multiplier. Preserves the inputs.
++   procedure FFA_FZ_Low_Multiply(X     : in  FZ;
++                                 Y     : in  FZ;
++                                 XY    : out FZ)
++     renames FZ_LoMul.FZ_Low_Multiply_Buffered;
++   
+    ----------------------------------------------------------------------------
+    --- Modular Operations on FZ
+    ----------------------------------------------------------------------------
+@@ -284,6 +291,12 @@
+                                      Product  : out FZ)
+      renames FZ_ModEx.FZ_Mod_Mul;
+    
++   -- Modular Squaring: Product := X*X mod Modulus
++   procedure FFA_FZ_Modular_Square(X        : in  FZ;
++                                   Modulus  : in  FZ;
++                                   Product  : out FZ)
++     renames FZ_ModEx.FZ_Mod_Sqr;
++   
+    -- Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FFA_FZ_Modular_Exponentiate(Base     : in  FZ;
+                                          Exponent : in  FZ;
+@@ -311,4 +324,10 @@
+                                     Count    : in     FZBit_Index)
+      renames FZ_QShft.FZ_Quiet_ShiftLeft;
+    
++   -- Find Greatest Common Divisor (GCD) of X and Y.
++   procedure FFA_FZ_Greatest_Common_Divisor(X      : in  FZ;
++                                            Y      : in  FZ;
++                                            Result : out FZ)
++     with Pre => X'Length = Y'Length and X'Length = Result'Length;
++   
+ end FFA;
+diff -uNr a/ffa/libffa/ffa.gpr b/ffa/libffa/ffa.gpr
+--- a/ffa/libffa/ffa.gpr 95f8719172dc8f10159e2f6993eb5810d2a3d8db993e3902dbde3c32692a283a32a214e2780b37b3fdee3995fea2054c6df1998cb260755e614842c8f755b8b5
++++ b/ffa/libffa/ffa.gpr 21fd2701a60f083712880e75c2d1b0f24d71c958e14f24a1666b039ea0ff2efba3eed79a9f8a608a2161edddb37b648b4871e0a40ab6d70b44ffb53fd8fe47b4
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_arith.adb b/ffa/libffa/fz_arith.adb
+--- a/ffa/libffa/fz_arith.adb 118a03b1beab9bfc7c517c193f333b5f9a1169cd7b3364ca7b10b7050f8aa8f85e4323b925f6534041f0f02de5242a72cc3a9829bf9e5cf25a075aa162cb1244
++++ b/ffa/libffa/fz_arith.adb a6774ea126b6431e912686b5269349926976a8685a61817e99fe468b61056842a0881b0569d5ec0de27b904b456bd13350fc4f939286a5633c08a7888dd23c4b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_arith.ads b/ffa/libffa/fz_arith.ads
+--- a/ffa/libffa/fz_arith.ads 1be9e99c85140fdbcaa506ea97de7b3e469ed5f0d30a252cca92dc74c0f8d77ddea63f7552907cd0705879984cb74259a228982504c441286c56bbf1d18a14be
++++ b/ffa/libffa/fz_arith.ads 5ad89e1c806e453f5f1a37c024f28b0a37d535395c301de29ac3488a29f4670bf7517fe870eea5b17033ec718b35a02a21cb6127b3a26b95d1f3631b83495f63
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_barr.adb b/ffa/libffa/fz_barr.adb
+--- a/ffa/libffa/fz_barr.adb 8c306bd23d12315a8d62f760968b2cf32bda6f49279b3f995df7a100587c7b273e79c327c295521e42beda4d1e0a9f0e7f4c5293d57e92843b82c69a353f4687
++++ b/ffa/libffa/fz_barr.adb 83d6eb138af7dbbe49a29fbd4af186ea79f8d4441fd84814316e84c20de20614f7b9d69b3bd8e160ba37fc6c30b83aec2ccc26600e289d87225c677686c6072b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -255,10 +255,10 @@
+       -- Result is initially zero (and will stay zero if Modulus = 1)
+       FZ_Clear(XReduced);
+       
+-      -- (1) Ns := X >> Jm
++      -- (1) Xs := X >> Jm
+       FZ_Quiet_ShiftRight(N => X, ShiftedN => Xs, Count => Bar.J);
+       
+-      -- (2) Z  := X * Bm
++      -- (2) Z  := Xs * Bm
+       FZ_Multiply_Unbuffered(X => Bar.B, Y => Xs, XY => Z);
+       
+       -- (3) Zs := Z >> 2Wm - Jm (already thrown lower Wm, so only Wm - Jm now)
+diff -uNr a/ffa/libffa/fz_barr.ads b/ffa/libffa/fz_barr.ads
+--- a/ffa/libffa/fz_barr.ads a61e949eb6a9d5ea3a15661a3e85f563512425bb3b9b88e611d7d4d1b185998b8da2f51c730ef2453a71174ecb0b787fede98f5c98acdd8434ef6af1c03853e3
++++ b/ffa/libffa/fz_barr.ads f606be0f2b8ac2fcf5276248075df267e6ad9f0f2f0ba68b80ea6810314971dceacb6342dd4a70037cdcaecdde3ae0d20fd66795cc7e3f732fe3b775278bd740
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_basic.adb b/ffa/libffa/fz_basic.adb
+--- a/ffa/libffa/fz_basic.adb 542081523450c3ff80ce87cd60ab4323268859807b8ded868beb3e73c90689ab37502405284374f8c7165408615d117443a28ccfc627b1a475cd1408a9ffaa7c
++++ b/ffa/libffa/fz_basic.adb acd77b6792fab4e26434d5296ef0974b4b9b4819460e7dc1bbd52aa7bf5af05115ae058e0a4c02ffba2d62963e0bdd7ac1f7969aaea76cdd9e2f4b0f52e9c7dc
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_basic.ads b/ffa/libffa/fz_basic.ads
+--- a/ffa/libffa/fz_basic.ads bc0a92eb0e81a645f6f7753cd559ef65c2cea1714b618d02e44844a3bad48dc3402ec0646b72c087f84c289e6ca04211d856374eb18265ed9a00e73684d85905
++++ b/ffa/libffa/fz_basic.ads 936c164263272cacbdb6ccfdfc258554a2c16bd07fdc82659019eda2fcbeb4e240e1d5ae2dcffaf46b5485d707cd935c26328f5e52ed60b47e48780751b30155
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_bitop.adb b/ffa/libffa/fz_bitop.adb
+--- a/ffa/libffa/fz_bitop.adb bb3866767e020335338d99d1a1cb8e9bd058a0a3408ef6da9ae8d7e96dbdd3e3745c9982cdce6a0762279636cff08da820aaa4db77ab54a3f95fd470acb64e3e
++++ b/ffa/libffa/fz_bitop.adb c5aaa06e45fb1f6906814b1d1ee2efa1e9e25898764e1263ef01faa7acabb44129dcec7b03f2d9235ff5b06c552dec7276ed3b42a4cd23562714b17600c14f35
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_bitop.ads b/ffa/libffa/fz_bitop.ads
+--- a/ffa/libffa/fz_bitop.ads 9a8eb210f888927c59827161713d88477bba533b910993aec0995e62b3ba8b088ea8d12522f0a395328bb9de4184f4d4015a16367d2dc0bc86d084fb1b598c8e
++++ b/ffa/libffa/fz_bitop.ads bd78ed6a5bee27604cabad69066e382189311b7a6dd1c302f2a8f13263cfef2169d07912469c9fb4b63dc3d0ba57df72504b98dd4c1a99f2a8ffddeda7e5a34f
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_cmp.adb b/ffa/libffa/fz_cmp.adb
+--- a/ffa/libffa/fz_cmp.adb bfc359eb3785dc78189df80b099bf5dd65931766553ae519cbdd7a8320d260c16ee6b272e2c7fd2631147e0ae2519ca57d896c2c58aeb7252eab7dc5c9563598
++++ b/ffa/libffa/fz_cmp.adb 45e9005159d1d31db9308676b44c7e70ccc98f1e2c01039510e17f332e24cae7c0b95854e043ffb4b245340b2277b8a99ffe92bd7ca1cddbad38bd1b7ee0a7aa
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_cmp.ads b/ffa/libffa/fz_cmp.ads
+--- a/ffa/libffa/fz_cmp.ads 9c5aef1c8b1c06e03d55dfeeb6bcfa00bfadb33ef95541d8a1b480c71662726fd7d8ea064ff2f1bc2bbe18982faa3eb1db7fae0a1c9f8fe4abf8c21d3843710e
++++ b/ffa/libffa/fz_cmp.ads 81851eedeadde7d3e5cddb55027c3d65224c3600ee45fc378ac509d8578b458f823f93227bd7010000c890ba9574d57d3bc3fff86a795d5a45e614cae0b0aa2b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_divis.adb b/ffa/libffa/fz_divis.adb
+--- a/ffa/libffa/fz_divis.adb d2c527100e5d010d29a4515dd377d15a36b11a7aa24d526b92aad0e37a3adfe97093fab5df133a650575ddccfdc15dba79059de6882c48174e067e546e9f234f
++++ b/ffa/libffa/fz_divis.adb dbd50a883d03e0fa142cc64dfe52d846c5280f1a1a533a2de47d2448dfbc5713d52635e2dc59dd85ef7ddbb104dc051f88296e394b059cec88e4e99aa1c2ec9b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_divis.ads b/ffa/libffa/fz_divis.ads
+--- a/ffa/libffa/fz_divis.ads 5fb712e8ce80e8b445db02442ba50601b9e1fdb5a2f35e97c958145c253730b080f6750fba80878366a1505a881d5fb69af509d4d738fbb95db16ca66ca9dd29
++++ b/ffa/libffa/fz_divis.ads 8a1d586856523db8900710b71c0927c7cd0248188bb8868f106ae2361c02f7b4de8cfb4bc2c55e05fe0de5ea75e61f015093311af09bc62fa64a98ff85b083cc
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_gcd.adb b/ffa/libffa/fz_gcd.adb
+--- a/ffa/libffa/fz_gcd.adb false
++++ b/ffa/libffa/fz_gcd.adb 46157dcf363b52695f6ec10671307155e62702a1ea79861a067f56716b03acb8573988bed3e2350401ad8222f7351f96d22383f2b7b5fc8ebc1d9901e24b6f63
+@@ -0,0 +1,89 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++
++with Words;    use Words;
++with FZ_Basic; use FZ_Basic;
++with FZ_Shift; use FZ_Shift;
++with FZ_QShft; use FZ_QShft;
++with FZ_Arith; use FZ_Arith;
++with FZ_Pred;  use FZ_Pred;
++
++
++package body FZ_GCD is
++   
++   -- Find Greatest Common Divisor (GCD) of X and Y.
++   -- Note that by convention, GCD(0, 0) = 0.
++   procedure FZ_Greatest_Common_Divisor(X      : in  FZ;
++                                        Y      : in  FZ;
++                                        Result : out FZ) is
++      
++      -- Widths of X, Y, and Result are equal
++      subtype Width is Word_Index range X'Range;
++      
++      -- Working buffers for GCD computation, initially equal to the inputs
++      A      : FZ(Width) := X; -- GCD will appear in A in the end
++      B      : FZ(Width) := Y;
++      
++      -- Evenness (negation of lowest bit) of A and B respectively
++      Ae, Be : WBool;
++      
++      -- Common power-of-2 factor
++      Twos   : Word := 0;
++      
++      -- |A - B|
++      D      : FZ(Width);
++      
++      -- This flag is set iff A < B
++      A_lt_B : WBool;
++      
++   begin
++      
++      -- For convergence, requires number of shots equal to 2 * FZ_Bitness:
++      for i in 1 .. 2 * FZ_Bitness(X) loop
++         
++         -- If A is even, A := A >> 1; otherwise A := A
++         Ae := 1 - FZ_OddP(A);
++         FZ_ShiftRight(A, A, WBit_Index(Ae));
++         
++         -- If B is even, B := B >> 1; otherwise B := B
++         Be := 1 - FZ_OddP(B);
++         FZ_ShiftRight(B, B, WBit_Index(Be));
++         
++         -- If both A and B were even, increment the common power-of-two
++         Twos := Twos + (Ae and Be);
++         
++         -- D := |A - B|
++         FZ_Sub_Abs(X => A, Y => B, Difference => D, Underflow => A_lt_B);
++         
++         -- B' := min(A, B)
++         FZ_Mux(X => B, Y => A, Result => B, Sel => A_lt_B);
++         
++         -- A' := |A - B|
++         A := D;
++         
++      end loop;
++      
++      -- Reintroduce the common power-of-2 factor stored in 'Twos'
++      FZ_Quiet_ShiftLeft(N => A, ShiftedN => A, Count => Indices(Twos));
++      
++      -- Output final result
++      Result := A;
++      
++   end FZ_Greatest_Common_Divisor;
++   
++end FZ_GCD;
+diff -uNr a/ffa/libffa/fz_gcd.ads b/ffa/libffa/fz_gcd.ads
+--- a/ffa/libffa/fz_gcd.ads false
++++ b/ffa/libffa/fz_gcd.ads f9daab09eba1b9a1c45df770508f27f4e20b87e0a7bfff19b85bb3ce82a7b73929d04a7d7e9c97e35ad8012cba61ed1247a93067f3d90a96ba2c727e78a36e76
+@@ -0,0 +1,33 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++package FZ_GCD is
++   
++   pragma Pure;
++   
++   -- Find Greatest Common Divisor (GCD) of X and Y.
++   procedure FZ_Greatest_Common_Divisor(X      : in  FZ;
++                                        Y      : in  FZ;
++                                        Result : out FZ);
++   pragma Inline_Always(FZ_Greatest_Common_Divisor);
++   
++end FZ_GCD;
+diff -uNr a/ffa/libffa/fz_io.adb b/ffa/libffa/fz_io.adb
+--- a/ffa/libffa/fz_io.adb ca78f137eb08edeb38be7844d4a077a051ff6a63e8b4f294e42979c125fb3c7220edf2dc184f788ee2872edba17d3c54dcc26e3f37545c6708aa1409e2f04b8c
++++ b/ffa/libffa/fz_io.adb a7cb16583341a2123773c5b3d85e08256a9adbaffd6ab50b11d18a80519b55054f704f8271c011f2cd2550fa77f80c3e03df2e07c1caa4c445dd3b474b574b8e
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_io.ads b/ffa/libffa/fz_io.ads
+--- a/ffa/libffa/fz_io.ads 63affc9e3d7bdcc86575f87185769d7c60cc6d46b0b78be4b05489e90096c6e2d276c1e142932f9976babf13a2ca7ec79509d7231596dcb507f01ed36019fbec
++++ b/ffa/libffa/fz_io.ads ad669a40dfb16255689d2090e9cb42d933749f009f0094e84ce35e9b0ac5d50926fd04748f0de83fdfc045a53d4db6cae278923071b3a97de75b08010090ca75
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_lim.adb b/ffa/libffa/fz_lim.adb
+--- a/ffa/libffa/fz_lim.adb 2cc9761900e19afbc04b07151108755d4ae49643a1d94db021d400de09b21b689fed635b5865ed0e0571bddd8d3bc90d5447eaeb40a39171ddeaaebb42bce929
++++ b/ffa/libffa/fz_lim.adb bf5f54c13ada8b6784551f80af48a3f155c3f03bfd471d58096b2251f648df015156e56cfb04aeec05bddc0921a7fc6c1a306f7867c758fb32d6ba0df9e3ee32
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_lim.ads b/ffa/libffa/fz_lim.ads
+--- a/ffa/libffa/fz_lim.ads ac9f7762bfa90673bb7331b065910a3b2b2f62ab77420981713a4f89ff2e1a6b73d313c4e694a1d68ba8b45258eccc8b2655c34ae252c78c710bd97f5d5ea007
++++ b/ffa/libffa/fz_lim.ads 6c2a389e1bc141f56410999301917d62ba56361ec8ebe0acc1df46a385ccaf38506cbc59ce6718b9170a1c2379476b73f4b9854f358ffe5b5a08db0ae6bae9fd
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_lomul.adb b/ffa/libffa/fz_lomul.adb
+--- a/ffa/libffa/fz_lomul.adb b4df4be19361f59ae40b0e80f90e1317fd28f95f32c7f6ce98c3d028679e5f6f2b90c2749e03ce029bf924bcfafb953226ee8173d48490e86e600e7989aa6344
++++ b/ffa/libffa/fz_lomul.adb 870e79e88ee3af8c782780cbf568ac9e5861a31d6fb5a3b06ddb45ad1cdcfa34574e28a39016d011cede0a2c032f433db520b845fa39d19eb396833ddd327bfe
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -176,4 +176,21 @@
+       
+    end FZ_Low_Multiply_Unbuffered;
+    
++   
++   -- Low-Only Multiplier. Preserves the inputs.
++   procedure FZ_Low_Multiply_Buffered(X     : in  FZ;
++                                      Y     : in  FZ;
++                                      XY    : out FZ) is
++      
++      -- Product buffer.
++      P : FZ(1 .. X'Length);
++      
++   begin
++      
++      FZ_Low_Multiply_Unbuffered(X, Y, P);
++      
++      XY := P;
++      
++   end FZ_Low_Multiply_Buffered;
++   
+ end FZ_LoMul;
+diff -uNr a/ffa/libffa/fz_lomul.ads b/ffa/libffa/fz_lomul.ads
+--- a/ffa/libffa/fz_lomul.ads a773d77d13dc90e23e4bdb7612c9330d5789078ff5f6e0947e90ee4060d4e254ad93758e6d3f487c3c6932fcf9e6fa2a0b479264d4cde7b160ff4c53dd70e720
++++ b/ffa/libffa/fz_lomul.ads 1e900f933a2b617ad8eeb2eb4099aabe1c6a8a56cbdc4c72b286fa04aaf0d7df3e6875f44c71c58f60956c7a94eed08cd8bb8a60a17a074d292475a2d3485e7e
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -51,4 +51,12 @@
+      X'Length mod 2 = 0;
+    -- CAUTION: Inlining prohibited for Low_Mul !
+    
++   -- Low-Only Multiplier. Preserves the inputs.
++   procedure FZ_Low_Multiply_Buffered(X     : in  FZ;
++                                      Y     : in  FZ;
++                                      XY    : out FZ)
++     with Pre => X'Length = Y'Length and
++     XY'Length = X'Length and
++     X'Length mod 2 = 0;
++   
+ end FZ_LoMul;
+diff -uNr a/ffa/libffa/fz_measr.adb b/ffa/libffa/fz_measr.adb
+--- a/ffa/libffa/fz_measr.adb 3e868323d9fb836971dbb971a2996ff7868407df3b7cca05e2ae02c24a919b8d0c6277f93b1a9073d612c0092d0e1280afafbf3996f452c053b4c1433f529c54
++++ b/ffa/libffa/fz_measr.adb d914d49ce512cfd4ff09c60d082f6824aac238ba6b363721cd2f64373b43d2b12d93c4b4ca69ebace3e9074aaef77ef8f09e0436880ada096d9013c61122bd4e
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_measr.ads b/ffa/libffa/fz_measr.ads
+--- a/ffa/libffa/fz_measr.ads f4b728be332da4162214657e54df4a241b02dfe4781ac47e34df24138661c9c0e0d7835e3cf34377a3e152051a17a6c7adf0d24c793a80f93f47c117f471b3b1
++++ b/ffa/libffa/fz_measr.ads f09b64d1bb3cc96c58e51f3f7d646719a1996b1ff133f9d84ed9096544ea6b6e4b1608337f5de2d184eaffb58a88c7def153fe52aa76cb8c00083dc0323ecf4d
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb 321cc7f54066ca6f0c7be85a195a028919076a6775510f99b5c9802f093cb08042770e08e8579376a7558ceb4ba1a0f0f43d437847fd2a89ca30ec8bc48c6177
++++ b/ffa/libffa/fz_modex.adb d1f331872729de629191f57371544da4ac672dce61b7cd9829912eaa07dad4628a297afd91ab2a923b39bf640ab3787f4ba6662119b2a4fd9c7c79b82b11e097
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_modex.ads b/ffa/libffa/fz_modex.ads
+--- a/ffa/libffa/fz_modex.ads 7d2ee2b7147b289a76b8731543adf6cc049b35350c031d1d11bbe0b1d475a879b483368b95c535af0d10061626060f2ca1438f0aa15f198da74b0b1f449183b2
++++ b/ffa/libffa/fz_modex.ads 674b3c93ea1db47aa9944896ef8a3d4b47b10176d2e76be0f76de8ab5058b84eaf59cd34e16594f914414cf407ee4d656dddde996a7e078dfa1e4c354a9cbb30
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb 92bd5f707cebadbabc29f5f02a452f8d223b640ad39bf3b08cea613caa9ca92a7ae91096812ffc09e895c97bcc5aba5054e89c30a6d550926d9cc4814b3180a7
++++ b/ffa/libffa/fz_mul.adb 2f61ccdfc1fa425f8587c607fa826546ddeb9c19a8b71b27e201834a6abfa0b8ea8d4165462e71fc74b2600854ed43324a054abf67df5fdcb90eacd713645e02
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_mul.ads b/ffa/libffa/fz_mul.ads
+--- a/ffa/libffa/fz_mul.ads e85e9fc6e391e1332ec7aa9bbf4331bba8e462d5c1996b497696c12bb26097f1a3e4f97a342c868c30534ff648d12c2989875adde9233507a656c2b28742418f
++++ b/ffa/libffa/fz_mul.ads 3c5d5273ab2eef6466bd84dde5d07580d94f37265f94dfa2d838299f713c029111daef9fcabe90da83a9b2aec5ada218000fbf9f14e918c16b455221e57e845b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_pred.adb b/ffa/libffa/fz_pred.adb
+--- a/ffa/libffa/fz_pred.adb 3e8866783222849eb1341717ae473b1c1b3065bb71b119f804cd105dba897a89a51d2190dfdc2cdf6534a2c4100d254efada11fefe5a0f411b0654a2106e9512
++++ b/ffa/libffa/fz_pred.adb dce7717443c377e450e327ca0f5681883aea87c0ea32c3434a079d0175ea9530355d7e031dc5fcd29df3cb22f1e8da2ec1d57d2cb42e09180abaa1e0d21b84c0
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_pred.ads b/ffa/libffa/fz_pred.ads
+--- a/ffa/libffa/fz_pred.ads 11ec92d638c2c6296bb9566cf34a5d7aea57e045acb2c30580b0dbf02b5c00d4090050b496d281b9d94b986ee34487c35bff86a10b7c24aadbc0ead8643c4518
++++ b/ffa/libffa/fz_pred.ads 299605f7227834b125629ade2fff78cb7c8c3c4137f393a79b8c089432da4a74f14fd0bdb97809fe972b6605bacd5d8d40d519708a8926b19b668a637a4021c0
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_qshft.ads b/ffa/libffa/fz_qshft.ads
+--- a/ffa/libffa/fz_qshft.ads 095afd026948c5a102c32a9b442d3d4a1f721a59396b90b40479eadd243c6c66e362698749a500de2784445860cb7b6b1b38fa5c1d07f4c86d742e40c7fac36d
++++ b/ffa/libffa/fz_qshft.ads 442ed4c8d389a75fae3020d641d2f67733a2f763a303e6e74ca10bc44b666032055b0a3d990334ea65b668904be3caf8cdf17fbc85b59147d24da3092645735c
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_shift.adb b/ffa/libffa/fz_shift.adb
+--- a/ffa/libffa/fz_shift.adb 631501f444d2718e57c7433d448ed6f4612d3d8e5be36b78e651bc8f54c032bd0361cc42899b69bcdefc8b8c50f97ba64814840dcf2ebf058b40bd660872a680
++++ b/ffa/libffa/fz_shift.adb 6aa493c872ee364a4d6b5c94dcc0b17f9f89b65b473497421f9f093581818f5a45c4045d3d43a57bd09d5e1c4f06603ed8bc4605094dbfba80b0b53e807708f7
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_shift.ads b/ffa/libffa/fz_shift.ads
+--- a/ffa/libffa/fz_shift.ads 4ee469c436ed539003d13f9247cef562fa9ab00133a68e91c2550fd734ff4916153ec6fc3c4a4dde4afb25b0da9e95ea6dd91dad4ca16c984deda6bba3bc5906
++++ b/ffa/libffa/fz_shift.ads dc892e85d8210a013b6656dccb2acf7eeeadff311b6b24c284d6df9dfd4ee6c2ac5a44234c3ef22649a232305f11e768713fc243edfd919034e73465448526ad
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_sqr.adb b/ffa/libffa/fz_sqr.adb
+--- a/ffa/libffa/fz_sqr.adb 8f0062ed157d9eb9910c160640f3f6da391d6724a0023da3b21b6bb00f5391e53a35569073ea698d82a259a26f910de0803fb8eabac6b2694f3d43ac709ae76e
++++ b/ffa/libffa/fz_sqr.adb 290234c0f3cd55e7775cf910f7e4a10d40eb83b06a88c8d31237063d8a145185ee00613408f3fb0a69fe36833eabb4410c972d76a59b925a0f671b28fae31d64
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_sqr.ads b/ffa/libffa/fz_sqr.ads
+--- a/ffa/libffa/fz_sqr.ads eb5cbe08505a865fdbec2d54434b3c1a2460d1bbf78b0cc90499b198b57be364844baa8a8921056a13b6f0ebc35c281e5021d7d60d931ff42f9bbca8ef253575
++++ b/ffa/libffa/fz_sqr.ads 623437f526af813a67934ad1775dcf808bea6d81ddd86871c1508e822b107d4a033db361b10bae54126b2de095432ba4cecd733a4833d00e19a551a8051a8ee2
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/fz_type.ads b/ffa/libffa/fz_type.ads
+--- a/ffa/libffa/fz_type.ads d2817dfd3e193ec26a5466791e7a55e7b781272faa088ec051d96f622dcfffd369ae0f2f7717c8f803a3b4ad0a278b27ee79841751b5c4f9a16a0dec5fb7a907
++++ b/ffa/libffa/fz_type.ads aa9e099d3eaad9e0214c8f35522f916ce86d472aff6ee372a35160aaf3771539d232b8ad93ce69db47b58cbe840f7ec9ea9af162d06fcf0ff71668d648d5e0e6
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/restrict.adc b/ffa/libffa/restrict.adc
+--- a/ffa/libffa/restrict.adc 8040f67337558ba8ebde821ca4edd6264a8164aa9d0cf5a44f5f270c43fcac6d0033421b94d3bd5379b75b85a06300a271237d391ada11b9360865ac22bc5c5b
++++ b/ffa/libffa/restrict.adc 9e6fc99f6ea080396c3c1a6358b7dde04b241f3ffeac951bb389efecadccc3b5578b500bcb1bb9a8ccccb8026af38f7fa2e9d2a07ddbd054961b3f452cdc4ae2
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/w_mul.adb b/ffa/libffa/w_mul.adb
+--- a/ffa/libffa/w_mul.adb f79f6f0c2069d6d35e407ca4bdab3f1b1f90cb9ca55664e64e73e7130d03ad3056c62e0deeac005dcb3728f3ff5ca1357ae608277f8b062bc610f7459b93e561
++++ b/ffa/libffa/w_mul.adb a5c49c4973c7d140328847b18e8b03377fd21a2dde6ea870f38b3eba9517939309cbacdf6cea3dbb6d88e03d963022cfb1a776aac15bfea6c2333df6ea07001d
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/w_mul.ads b/ffa/libffa/w_mul.ads
+--- a/ffa/libffa/w_mul.ads cbc2184b13f61f3540baa6350673bc3735e29c3b9f4ea9b2ebcd7525d75a51cc9a11b84fdf5f92b61661daf3607643d6a935cb2113f8f5edd0ae46d37f41bb9f
++++ b/ffa/libffa/w_mul.ads d4f70ca1801350af790c22469a84d8eadeba8e5dc89143e610bc5f0aeebc37a42f980cc58d74d28e1a9f127be18f565978233f7ee1e92d5d57dfffca9114c8c1
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/w_pred.adb b/ffa/libffa/w_pred.adb
+--- a/ffa/libffa/w_pred.adb 40ac064f3b287c8759527756d668349e2599f495ff6e99d5db70bdfd5edb46752e282631416ef35954a3a224a868485904ac172aa0959b6d28c40904b92b289e
++++ b/ffa/libffa/w_pred.adb 7ec39ee4a3ad6422dc9a47cb6c2b2f54c617f935817f8abb8ed43608921a6a401673bcb2444a1aaffe937792073f9b339edaba117f709d280ffc98fda9d70d6f
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/w_pred.ads b/ffa/libffa/w_pred.ads
+--- a/ffa/libffa/w_pred.ads 942986a3e94a3b1622d397a4e4d6ff574ec85b635fc0a5248d43b6150e457cb1d5845667b1075b4d2bfc0cef9d19997354921a453d3748d97b93d6c079f8c01c
++++ b/ffa/libffa/w_pred.ads 030953eda47712590600cf57f24df3b0a828ef877446545f47b35b151b82fa94cd1f20d5e0eb96afc8f971182112ca955407f54dafb5c6b4a66b8fc1fe0a1023
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/w_shifts.ads b/ffa/libffa/w_shifts.ads
+--- a/ffa/libffa/w_shifts.ads 0053916c4c078241c2644c24a963cedbb3a4a5eeb7f3060893fd6e1519cb3afe8467f23c3b7be9892d243502d827c0c5ca7d438c629cff580b2399b86966445d
++++ b/ffa/libffa/w_shifts.ads 68c4e4434d26be44b8c593d47fe11d8ca6961c7162e6dec641e63481140f7d613b2ba76d5029f5d6c9dd3d2bd5621994cfa96998dc8c8682f7bbe3408fd0ce4b
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/word_ops.adb b/ffa/libffa/word_ops.adb
+--- a/ffa/libffa/word_ops.adb bcb4cc4d9466ec43f01b7b9a2f8e473b013843b6bc0dab034782054ef73b4d961345692a645ecf9aca3451b567f54b5d2b822687bb6f74f031fceca8b41325cd
++++ b/ffa/libffa/word_ops.adb fbdac179b9427e31bfbacb20a217d6121c97698580d4999a6485feb0e4c65da6430afd3043afb0263c1ca018caf11eb3718b5691003bdc7c469177c1641d5f07
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/word_ops.ads b/ffa/libffa/word_ops.ads
+--- a/ffa/libffa/word_ops.ads 32be1a6d9f30d7e653bcf263bc1a38bd6d90ae642158660a8dcdaefdb885dc8d5467925a3949671e627a0c88b734f83a96f6b05762aa232144a2d79c5ef69661
++++ b/ffa/libffa/word_ops.ads 03498cba677e363814d66a88bb1c3a6de9c2a6a4d3866f734e9af888e3c7fc746ede9102c5c6b5138196e973603275d5dbdefa7b2b90fa15a8fcec81b569894c
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+diff -uNr a/ffa/libffa/words.ads b/ffa/libffa/words.ads
+--- a/ffa/libffa/words.ads 864714838c024ee2b0f4a2f8b3fcf5ccae3b055429b3e1763fdfb596b9115bf964c95214674e8eea859ada4caf41691362df3083cb4ef25dd218bc9237f28dfa
++++ b/ffa/libffa/words.ads 7f030d8e3992fa477f47dc05dfd883999cb02a45447c0054307d8d4bb55e9d79642762e9576dde5989a96dab90048e14980a60e50e0efcd652781488e71f6e42
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --

@@ -1,0 +1,114 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT d4399061359144b2040dbb4cb55e906423fb89666279365c37897a6ea67323c03187ea14cf2fd60635eadf30ef454b122727aad4c2ee3cd1593fba90134fcef3
++++ b/ffa/MANIFEST.TXT fc1bdea6ee6bf8bb8c53a2012690cf585f482216a44fc7e0aaad542064a9f1b0c9f6f060cb539dda8b54759544a7f12aa87ac46121628a02eb3a43711741cb17
+@@ -23,3 +23,4 @@
+  612395 ffa_ch20c_litmus_clearsigned   "Support for 'clearsigned' GPG texts in Litmus."
+  612828 ffa_ch20d_litmus_nested_fix    "Fix for bug where nested 'clearsigned' sigs were rejected."
+  629424 ffa_ch21a_bis_fix_ch15_gcd     "Fix for lethal flaw in Ch.15's Greatest Common Divisor."
++ 659788 ffa_ch21a_ter_ch14_ch20_errata "Fix for false alarm in Ch.14; Removal of two mutually-canceling bugs in Litmus."
+diff -uNr a/ffa/contrib/litmus/litmus.sh b/ffa/contrib/litmus/litmus.sh
+--- a/ffa/contrib/litmus/litmus.sh a6f142145b954fc7938df34435542376d3d7d2609aec6b7367ad49414e3730960ec4e213b6aa0ede2c8a4714f44224970738c8da938b6c1ae426188491f22c06
++++ b/ffa/contrib/litmus/litmus.sh f0d41124d72a3b364f70ea8dd1f9a434230f9ba965c89c3c48dd78071d7ac59c68ba407ef4818f326339bce5a3261c5ba10b8de8612e7c0778513b928e681988
+@@ -42,6 +42,13 @@
+ # All Other Cases:
+ RET_EGGOG=-1
+ 
++# Verify that all of the necessary external programs in fact exist:
++for i in $EXTERNALS
++do
++    command -v $i >/dev/null && continue || \
++        { echo "$i is required but was not found! Please install it." >&2 ; \
++        exit $RET_EGGOG; }
++done
+ 
+ # Terminations:
+ 
+@@ -216,14 +223,6 @@
+     exit $RET_EGGOG
+ fi
+ 
+-# Verify that all of the necessary external programs in fact exist:
+-for i in $EXTERNALS
+-do
+-    command -v $i >/dev/null && continue || \
+-        { echo "$i is required but was not found! Please install it." >&2 ; \
+-        exit $RET_EGGOG; }
+-done
+-
+ # 'ASCII-Armoured' PGP signatures have mandatory start and end markers:
+ START_MARKER="^\-\-\-\-\-BEGIN PGP SIGNATURE\-\-\-\-\-"
+ END_MARKER="^\-\-\-\-\-END PGP SIGNATURE\-\-\-\-\-"
+@@ -458,6 +457,7 @@
+ # Calculate length (bytes) of the ASN turd for the digest used in the sig:
+ ASN_LEN=$((${#ASN} / 2))
+ 
++# Read the hashed and unhashed sections :
+ 
+ # Hashed Section Length
+ get_sig_bytes 2
+@@ -471,7 +471,7 @@
+ sig_hashed=$r
+ 
+ # Unhashed Section Length
+-get_sig_bytes 1
++get_sig_bytes 2
+ hex_to_int
+ sig_unhashed_len=$r
+ 
+@@ -491,16 +491,7 @@
+ # Convert to upper case
+ hash=$(echo $hash | tr 'a-z' 'A-Z')
+ 
+-# Parse the RSA Signature portion of the Sig file:
+-
+-# RSA Packet Length (how many bytes to read)
+-get_sig_bytes 1
+-hex_to_int
+-rsa_packet_len=$r
+-
+-# The RSA Packet itself
+-get_sig_bytes $rsa_packet_len
+-rsa_packet=$r
++# Read and validate digest prefix :
+ 
+ # Digest Prefix (2 bytes)
+ get_sig_bytes 2
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads 13553a8eafbc60a349fb364bc26db59b7c4e3a998da325bd725d960a2f1e6f16c96be9eb6c373b5307545b042aa7b37bb0e995c7008516fe7c4016ade21ac524
++++ b/ffa/libffa/ffa.ads f9f61342605d6250a2c2a2b1f6b4329b029d152ca25ce89cffddd62fa181b15f69045445fe3f8c199d232eb6712583bc991589ebaadd5621878feff6cfb227c7
+@@ -45,7 +45,7 @@
+    --- Current 'deg. Kelvin' Version of FFA
+    ----------------------------------------------------------------------------
+    
+-   FFA_K_Version : constant Natural := 200;
++   FFA_K_Version : constant Natural := 199;
+    
+    ----------------------------------------------------------------------------
+    --- Fundamental Types and Sizes
+diff -uNr a/ffa/libffa/fz_barr.adb b/ffa/libffa/fz_barr.adb
+--- a/ffa/libffa/fz_barr.adb baefddb79033f5d5657ec6c1685bbd6ec468f41535215b0d88cacc9089bbbd0ce073352c8ebc287c81ead2be8a33972a0ce6bb4f3dfc19b0cd8a048121173ace
++++ b/ffa/libffa/fz_barr.adb e814458f807c46977a169a9f23e6baa2577e33afa4a367fe4d56c9096203c807904c2616cf15b7e791fbc049f7f6195c6f282c2536d56c66ac2088d2de5de1bf
+@@ -247,9 +247,13 @@
+       -- Borrow from the gated subtractions
+       C       : WBool;
+       
+-      -- Barring cosmic ray, no underflow can take place in (4) and (5)
++      -- Barring cosmic ray, no underflow can take place in (4)
+       NoCarry : WZeroOrDie := 0;
+       
++      -- Borrow from Subtraction in (5) is meaningless, and is discarded
++      IgnoreC : WBool;
++      pragma Unreferenced(IgnoreC);
++      
+    begin
+       
+       -- Result is initially zero (and will stay zero if Modulus = 1)
+@@ -277,7 +281,7 @@
+       
+       -- (5) R  := X - Q (we only need Rl-sized segments of X and Q here)
+       FZ_Sub(X => X(1 .. Rl), Y => Q(1 .. Rl),
+-             Difference => R, Underflow => NoCarry);
++             Difference => R, Underflow => IgnoreC); -- Borrow is discarded
+       
+       -- (6) S1 := R - M, C1 := Borrow (1st gated subtraction of Modulus)
+       FZ_Sub(X => R, Y => Bar.ZXM, Difference => S, Underflow => C);

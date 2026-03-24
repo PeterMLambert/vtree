@@ -1,0 +1,833 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 67556c1f32511391b7b63ea9ab889ddedb2150791430ba9aab55471631ff071a768fb351566acd363c6f446a090839b83a4d1632a99022ce53e7bf27ec9a0f53
++++ b/ffa/MANIFEST.TXT 6b79786e1249c1470ad1233f54de117bab8b9cc5a68224f31d21b07772d42f255a909d8fa17c5ee240481b8c48fbcd942fd3a82c3ba0cc2b2bdb8b07f3c12225
+@@ -11,3 +11,4 @@
+ xxxxxxx ffa_ch11_tuning_and_api        "Tuning and Unified API."
+  551091 ffa_ch12_karatsuba_redux       "Karatsuba Redux."
+  551348 ffa_w_borrow_expr diana_coman Replaces expression for calculating borrow bit with more readable version that is also symmetrical to that for carry bit.
++ 551516 ffa_ch13_measure_and_qshifts   "Measure and Quiet Shifts."
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 4a851245719704af35888e2d1bc00b4cec16e66093e7d79408e98e8a2eaba0e0f5a7ed1eee26d0f75fa651dbe4bddd48c31722a2b9b98464362b681f5d7b4c8a
++++ b/ffa/ffacalc/ffa_calc.adb fa29011671fb6e7c802d18c92d4b94c2d32bb54145a929ece7780830ace49582a6ea090ad4678b55a403fa5ebec34aa091c8672ce1d060e18ed6c87d554e87e9
+@@ -108,6 +108,11 @@
+       QuoteLevel : Natural := 0;
+       CommLevel  : Natural := 0;
+       CondLevel  : Natural := 0;
++      
++      -- Prefixed Operators
++      PrevC      : Character := ' ';
++      HavePrefix : Boolean   := False;
++      
+       --------------------------------------------------------
+       
+       
+@@ -122,6 +127,9 @@
+          SP   := Stack_Positions'First;
+          -- Clear Overflow flag
+          Flag := 0;
++         -- Clear prefix
++         HavePrefix := False;
++         PrevC      := ' ';
+       end Zap;
+       
+       
+@@ -197,6 +205,13 @@
+       end Print_FZ;
+       
+       
++      -- Denote that the given op is a prefix
++      procedure IsPrefix is
++      begin
++         HavePrefix := True;
++      end IsPrefix;
++      
++      
+       -- Execute a Normal Op
+       procedure Op_Normal(C : in Character) is
+          
+@@ -377,28 +392,6 @@
+                                XY_Lo => Stack(SP - 1),
+                                XY_Hi => Stack(SP));
+                
+-               -- Modular Multiplication
+-            when 'M' =>
+-               Want(3);
+-               MustNotZero(Stack(SP));
+-               FFA_FZ_Modular_Multiply(X       => Stack(SP - 2),
+-                                       Y       => Stack(SP - 1),
+-                                       Modulus => Stack(SP),
+-                                       Product => Stack(SP - 2));
+-               Drop;
+-               Drop;
+-               
+-               -- Modular Exponentiation
+-            when 'X' =>
+-               Want(3);
+-               MustNotZero(Stack(SP));
+-               FFA_FZ_Modular_Exponentiate(Base     => Stack(SP - 2),
+-                                           Exponent => Stack(SP - 1),
+-                                           Modulus  => Stack(SP),
+-                                           Result   => Stack(SP - 2));
+-               Drop;
+-               Drop;
+-               
+                -----------------
+                -- Bitwise Ops --
+                -----------------
+@@ -452,6 +445,19 @@
+                Drop;
+                Drop;
+                
++               -- Find the position of eldest nonzero bit, if any exist
++            when 'W' =>
++               Want(1);
++               declare
++                  Measure : Word;
++               begin
++                  -- Find the measure ( 0 if no 1s, or 1 .. FZBitness )
++                  Measure := FFA_FZ_Measure(Stack(SP));
++                  -- Put on top of stack
++                  FFA_FZ_Clear(Stack(SP));
++                  FFA_FZ_Set_Head(Stack(SP), Measure);
++               end;
++               
+                -- Put the Overflow flag on the stack
+             when 'O' =>
+                Push;
+@@ -474,8 +480,6 @@
+                end loop;
+                Quit(0);
+                
+-               ---------------------------------------------------------
+-               -- Ch. 12B:
+                -- Square, give bottom and top halves
+             when 'S' =>
+                Want(1);
+@@ -483,13 +487,38 @@
+                FFA_FZ_Square(X     => Stack(SP - 1),
+                              XX_Lo => Stack(SP - 1),
+                              XX_Hi => Stack(SP));
++               
++               --------------
++               -- Prefixes --
++               --------------
++               
++               -- 'Left...'    :
++            when 'L' =>
++               IsPrefix;
++               
++               -- 'Right...'   :
++            when 'R' =>
++               IsPrefix;
++               
++               -- 'Modular...' :
++            when 'M' =>
++               IsPrefix;
++               
++               ---------------------------------------------------------
++               -- Reserved Ops, i.e. ones we have not defined yet:   --
++               ---------------------------------------------------------
++            when '!' | '@' | '$' | ':' | ';' | ',' |
++                 'G' | 'H' | 'I' | 'J' | 'K' | 'N' |
++                 'P' | 'T' | 'V' | 'X' | 'Y' =>
++               
++               E("This Operator is not defined yet: " & C);
+                ---------------------------------------------------------
+                
+                ----------
+                -- NOPs --
+                ----------
+                
+-               -- Ops we have not yet spoken of -- do nothing
++               -- Unprintables and spaces DO NOTHING:
+             when others =>
+                null;
+                
+@@ -498,6 +527,118 @@
+       end Op_Normal;
+       
+       
++      -- Execute a Prefixed Op
++      procedure Op_Prefixed(Prefix : in Character;
++                            O      : in Character) is
++      begin
++         
++         -- The Prefixed Op:
++         case Prefix is
++            
++            ---------------------------------------------------------
++            -- Left...
++            when 'L' =>
++               
++               -- Which L-op?
++               case O is
++                  
++                  -- ... Shift  :
++                  when 'S' =>
++                     Want(2);
++                     declare
++                        -- Number of bit positions to shift by:
++                        ShiftCount : FZBit_Index
++                          := FZBit_Index(FFA_FZ_Get_Head(Stack(SP)));
++                     begin
++                        FFA_FZ_Quiet_ShiftLeft(N        => Stack(SP - 1),
++                                               ShiftedN => Stack(SP - 1),
++                                               Count    => ShiftCount);
++                     end;
++                     Drop;
++                     
++                  -- ... Rotate :
++                  when 'R' =>
++                     E("Left-Rotate not yet defined!");
++                     
++                  -- ... Unknown:
++                  when others =>
++                     E("Undefined Op: L" & O);
++                     
++               end case;
++            ---------------------------------------------------------
++            -- Right...
++            when 'R' =>
++               
++               -- Which R-op?
++               case O is
++                  
++                  -- ... Shift:
++                  when 'S' =>
++                     Want(2);
++                     declare
++                        -- Number of bit positions to shift by:
++                        ShiftCount : FZBit_Index
++                          := FZBit_Index(FFA_FZ_Get_Head(Stack(SP)));
++                     begin
++                        FFA_FZ_Quiet_ShiftRight(N        => Stack(SP - 1),
++                                                ShiftedN => Stack(SP - 1),
++                                                Count    => ShiftCount);
++                     end;
++                     Drop;
++                     
++                  -- ... Rotate:
++                  when 'R' =>
++                     E("Right-Rotate not yet defined!");
++                     
++                  -- ... Unknown:
++                  when others =>
++                     E("Undefined Op: R" & O);
++                     
++               end case;
++            ---------------------------------------------------------
++            -- Modular...   
++            when 'M' =>
++               
++               -- Which M-op?
++               case O is
++                  
++                  -- ... Multiplication :
++                  when '*' =>
++                     Want(3);
++                     MustNotZero(Stack(SP));
++                     FFA_FZ_Modular_Multiply(X       => Stack(SP - 2),
++                                             Y       => Stack(SP - 1),
++                                             Modulus => Stack(SP),
++                                             Product => Stack(SP - 2));
++                     Drop;
++                     Drop;
++                     
++                  -- ... Exponentiation :
++                  when 'X' =>
++                     Want(3);
++                     MustNotZero(Stack(SP));
++                     FFA_FZ_Modular_Exponentiate(Base     => Stack(SP - 2),
++                                                 Exponent => Stack(SP - 1),
++                                                 Modulus  => Stack(SP),
++                                                 Result   => Stack(SP - 2));
++                     Drop;
++                     Drop;
++                     
++                  -- ... Unknown:
++                  when others =>
++                     E("Undefined Op: M" & O);
++                     
++               end case;
++            ---------------------------------------------------------
++            -- ... Unknown: (impossible per mechanics, but must handle case)
++            when others =>
++               E("Undefined Prefix: " & Prefix);
++               
++         end case;
++         
++      end Op_Prefixed;
++      
++      
+       -- Process a Symbol
+       procedure Op(C : in Character) is
+       begin
+@@ -548,6 +689,16 @@
+                when others =>
+                   null; -- Other symbols have no effect on the level
+             end case;
++            
++            --- ... if in a prefixed op:
++         elsif HavePrefix then
++            
++            -- Drop the prefix-op hammer, until another prefix-op cocks it
++            HavePrefix := False;
++            
++            -- Dispatch this op, where prefix is the preceding character
++            Op_Prefixed(Prefix => PrevC, O => C);
++            
+          else
+             -- This is a Normal Op, so proceed with the normal rules.
+             Op_Normal(C);
+@@ -569,6 +720,8 @@
+             Op(C);
+             -- Advance Odometer
+             Pos := Pos + 1;
++            -- Save the op for use in prefixed ops
++            PrevC := C;
+          else
+             Zap;
+             Quit(0); -- if EOF, we're done
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads aa1b855dffa6fb750cf1778f0dfb532328fc555dfa0c1fab99b3d9dd85b6c5bc16508a1422273f9706acc917e1b873a38ae9b358fb9a070f25f5403195cac01c
++++ b/ffa/libffa/ffa.ads 325d1b598f4588db145a10e3c6344707c6d5bf12fe83acce5210e420034bbc6cfaddc3b23152f515710f467a2d4baa08408dc8bbf5b258cd34d29e289c38998a
+@@ -30,6 +30,8 @@
+ with FZ_BitOp;
+ with FZ_Divis;
+ with FZ_ModEx;
++with FZ_Measr;
++with FZ_QShft;
+ 
+ 
+ -- FFA Exports
+@@ -41,15 +43,16 @@
+    --- Fundamental Types and Sizes
+    ----------------------------------------------------------------------------
+    
+-   subtype Word       is Words.Word;
+-   subtype WBool      is Words.WBool;
++   subtype Word        is Words.Word;
++   subtype WBool       is Words.WBool;
+    
+-   subtype Nibble     is Words.Nibble;
++   subtype Nibble      is Words.Nibble;
+    
+-   subtype FZ         is FZ_Type.FZ;
+-   subtype Indices    is FZ_Type.Indices;
++   subtype FZ          is FZ_Type.FZ;
++   subtype Indices     is FZ_Type.Indices;
++   subtype FZBit_Index is FZ_Type.FZBit_Index;
+    
+-   subtype Char_Count is FZ_IO.Char_Count;
++   subtype Char_Count  is FZ_IO.Char_Count;
+    
+    Bitness  : Positive renames Words.Bitness;
+    
+@@ -282,4 +285,24 @@
+                                          Result   : out FZ)
+      renames FZ_ModEx.FZ_Mod_Exp;
+    
++   ----------------------------------------------------------------------------
++   --- Other Operations on FZ
++   ----------------------------------------------------------------------------
++   
++   -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
++   function FFA_FZ_Measure(N : in FZ) return Word
++     renames FZ_Measr.FZ_Measure;
++   
++   -- Constant-time arbitrary right-shift.
++   procedure FFA_FZ_Quiet_ShiftRight(N        : in     FZ;
++                                     ShiftedN : in out FZ;
++                                     Count    : in     FZBit_Index)
++     renames FZ_QShft.FZ_Quiet_ShiftRight;
++   
++   -- Constant-time arbitrary left-shift.
++   procedure FFA_FZ_Quiet_ShiftLeft(N        : in     FZ;
++                                    ShiftedN : in out FZ;
++                                    Count    : in     FZBit_Index)
++     renames FZ_QShft.FZ_Quiet_ShiftLeft;
++   
+ end FFA;
+diff -uNr a/ffa/libffa/fz_basic.adb b/ffa/libffa/fz_basic.adb
+--- a/ffa/libffa/fz_basic.adb 4e704add5330464a8df437a836b5232f754d31e1c27141a79c7add51edca2a2bf4f3c63f098110be6a751d29db1fe99776a961cd089b920651d3a4324a43e33f
++++ b/ffa/libffa/fz_basic.adb 542081523450c3ff80ce87cd60ab4323268859807b8ded868beb3e73c90689ab37502405284374f8c7165408615d117443a28ccfc627b1a475cd1408a9ffaa7c
+@@ -33,6 +33,19 @@
+    end FZ_Bitness;
+    
+    
++   -- Determine the Bitness of the given FZ's Length
++   function FZ_Bitness_Log2(N : in FZ) return Positive is
++      W : Bit_Count := N'Length;
++      R : Positive  := 1;
++   begin
++      while W > 1 loop
++         W := W / 2;
++         R := R + 1;
++      end loop;
++      return R - 1;
++   end FZ_Bitness_Log2;
++   
++   
+    -- N := 0
+    procedure FZ_Clear(N : out FZ) is
+    begin
+diff -uNr a/ffa/libffa/fz_basic.ads b/ffa/libffa/fz_basic.ads
+--- a/ffa/libffa/fz_basic.ads 780724c25222c12597a25e39885e33d30ae89bdad814c271cfb5e353a3b1d48760342186f7a0aa44c47d3433fe02891935e27cd2b1d8ab94c3aa61c128df3c33
++++ b/ffa/libffa/fz_basic.ads bc0a92eb0e81a645f6f7753cd559ef65c2cea1714b618d02e44844a3bad48dc3402ec0646b72c087f84c289e6ca04211d856374eb18265ed9a00e73684d85905
+@@ -29,6 +29,10 @@
+    function FZ_Bitness(N : in FZ) return Bit_Count;
+    pragma Inline_Always(FZ_Bitness);
+    
++   -- Determine the Bitness of the given FZ's Length
++   function FZ_Bitness_Log2(N : in FZ) return Positive;
++   pragma Inline_Always(FZ_Bitness_Log2);
++   
+    -- N := 0
+    procedure FZ_Clear(N : out FZ);
+    pragma Inline_Always(FZ_Clear);
+diff -uNr a/ffa/libffa/fz_measr.adb b/ffa/libffa/fz_measr.adb
+--- a/ffa/libffa/fz_measr.adb false
++++ b/ffa/libffa/fz_measr.adb 5235054f1a2ffc6f2560122d8623a3acdd486b15f85a930cb6099622008571ec59b56a423af2d061fc39931bf624b231425212d28bbd06e9faea148ebe3a5148
+@@ -0,0 +1,68 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Word_Ops; use Word_Ops;
++with W_Pred;   use W_Pred;
++with W_Shifts; use W_Shifts;
++
++
++package body FZ_Measr is
++   
++   -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
++   function FZ_Measure(N : in FZ) return Word is
++      
++      -- The result (default : 0, will remain 0 if N is in fact zero)
++      Index     : Word := 0;
++      
++      -- The currently-examined Word, starting from the junior-most
++      Ni        : Word;
++      
++      -- The most recently-seen nonzero Word, if indeed any exist
++      W         : Word := 0;
++      
++      -- 1 if currently-examined Word is zero, otherwise 0
++      NiZ       : WBool;
++      
++   begin
++      
++      -- Find, in constant time, eldest non-zero Word:
++      for i in 0 .. Indices(N'Length - 1) loop
++         Ni    := N(N'First + i);              -- Ni := current Word;
++         NiZ   := W_ZeroP(Ni);                 -- ... is this Word = 0?
++         Index := W_Mux(Word(i), Index, NiZ);  -- If NO, save the Index,
++         W     := W_Mux(Ni,      W,     NiZ);  -- ... and save that Word.
++      end loop;
++      
++      -- Set Index to be the bit-position of the eldest non-zero Word:
++      Index := Shift_Left(Index, BitnessLog2); -- Index := Index * Bitness
++      
++      -- Find, in constant time, eldest non-zero bit in that Word:
++      for b in 1 .. Bitness loop
++         -- If W is non-zero, advance the Index...
++         Index := W_Mux(Index + 1, Index, W_ZeroP(W));
++         -- ... in either case, advance W:
++         W     := Shift_Right(W, 1);
++      end loop;
++      
++      -- If N = 0, result will be 0; otherwise: index of the eldest 1 bit.
++      return Index;
++      
++   end FZ_Measure;
++   
++end FZ_Measr;
+diff -uNr a/ffa/libffa/fz_measr.ads b/ffa/libffa/fz_measr.ads
+--- a/ffa/libffa/fz_measr.ads false
++++ b/ffa/libffa/fz_measr.ads 287e4cf7a7675b8c9038d229570590b7c013e183c65bd149e08acec898e6829c627e3f7401637407940d31be9102fc0ba2020d22885e9ae022d6ada1d231efcd
+@@ -0,0 +1,32 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Measr is
++   
++   pragma Pure;
++   
++   -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
++   function FZ_Measure(N : in FZ) return Word;
++   pragma Inline_Always(FZ_Measure);
++   
++end FZ_Measr;
+diff -uNr a/ffa/libffa/fz_qshft.adb b/ffa/libffa/fz_qshft.adb
+--- a/ffa/libffa/fz_qshft.adb false
++++ b/ffa/libffa/fz_qshft.adb 4998cc0716b4cbd3d0e8eab6b254de811c9d25601e4ae86c17215e5d66096e9d5768c2cfa2312a1ae9fc460a943a9536f88ed72adc69b46bd9fcbd15f3d6e0fb
+@@ -0,0 +1,233 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Iron;     use Iron;
++with Word_Ops; use Word_Ops;
++with W_Pred;   use W_Pred;
++with W_Shifts; use W_Shifts;
++with FZ_Basic; use FZ_Basic;
++with FZ_Shift; use FZ_Shift;
++
++
++package body FZ_QShft is
++   
++   -- Constant-time subword shift, for where there is no barrel shifter
++   procedure FZ_Quiet_ShiftRight_SubW_Soft(N        : in FZ;
++                                           ShiftedN : in out FZ;
++                                           Count    : in WBit_Index) is
++      Nw  : constant Word  := Word(Count);
++      nC  : constant WBool := W_ZeroP(Nw); -- 'no carry' for Count == 0 case
++      Ni  : Word := 0; -- Current word
++      C   : Word := 0; -- Current carry
++      S   : Positive;  -- Current shiftness level
++      B   : Word;      -- Quantity of shift (bitwalked over)
++      CB  : Word;      -- Quantity of carry counter-shift (bitwalked over)
++      St  : Word;      -- Temporary word shift candidate
++      Ct  : Word;      -- Temporary carry counter-shift candidate
++   begin
++      for i in reverse N'Range loop
++         Ni          := N(i);
++         ShiftedN(i) := C;
++         C           := W_Mux(Ni, 0, nC);
++         S           := 1;
++         B           := Nw;
++         CB          := Word(Bitness) - B;
++         -- For each shift level (of the subword shiftvalue width) :
++         for j in 1 .. BitnessLog2 loop
++            -- Shift and mux the current word
++            St := Shift_Right(Ni, S);
++            Ni := W_Mux(Ni, St, B and 1);
++            -- Shift and mux the current carry
++            Ct := Shift_Left(C, S);
++            C  := W_Mux(C,  Ct, CB and 1);
++            -- Go to the next shiftness level
++            S  := S * 2;
++            B  := Shift_Right(B,  1);
++            CB := Shift_Right(CB, 1);
++         end loop;
++         -- Slide in the carry from the previous shift
++         ShiftedN(i) := ShiftedN(i) or Ni;
++      end loop;
++   end FZ_Quiet_ShiftRight_SubW_Soft;
++   
++   
++   -- Constant-time subword shift, for where there is no barrel shifter
++   procedure FZ_Quiet_ShiftLeft_SubW_Soft(N        : in FZ;
++                                          ShiftedN : in out FZ;
++                                          Count    : in WBit_Index) is
++      Nw  : constant Word  := Word(Count);
++      nC  : constant WBool := W_ZeroP(Nw); -- 'no carry' for Count == 0 case
++      Ni  : Word := 0; -- Current word
++      C   : Word := 0; -- Current carry
++      S   : Positive;  -- Current shiftness level
++      B   : Word;      -- Quantity of shift (bitwalked over)
++      CB  : Word;      -- Quantity of carry counter-shift (bitwalked over)
++      St  : Word;      -- Temporary word shift candidate
++      Ct  : Word;      -- Temporary carry counter-shift candidate
++   begin
++      for i in N'Range loop
++         Ni          := N(i);
++         ShiftedN(i) := C;
++         C           := W_Mux(Ni, 0, nC);
++         S           := 1;
++         B           := Nw;
++         CB          := Word(Bitness) - B;
++         -- For each shift level (of the subword shiftvalue width) :
++         for j in 1 .. BitnessLog2 loop
++            -- Shift and mux the current word
++            St := Shift_Left(Ni, S);
++            Ni := W_Mux(Ni, St, B and 1);
++            -- Shift and mux the current carry
++            Ct := Shift_Right(C, S);
++            C  := W_Mux(C,  Ct, CB and 1);
++            -- Go to the next shiftness level
++            S  := S * 2;
++            B  := Shift_Right(B,  1);
++            CB := Shift_Right(CB, 1);
++         end loop;
++         -- Slide in the carry from the previous shift
++         ShiftedN(i) := ShiftedN(i) or Ni;
++      end loop;
++   end FZ_Quiet_ShiftLeft_SubW_Soft;
++   
++   
++   -- Constant-time arbitrary Right-Shift.
++   procedure FZ_Quiet_ShiftRight(N        : in     FZ;
++                                 ShiftedN : in out FZ;
++                                 Count    : in     FZBit_Index) is
++      
++      -- Total number of bit positions to shift by
++      C     : constant Word     := Word(Count);
++      
++      -- Number of sub-Word bit positions to shift by
++      Bits  : constant Natural  := Natural(C and (2**BitnessLog2 - 1));
++      
++      -- The Bitness of N's Length
++      Wb    : constant Positive := FZ_Bitness_Log2(N);
++      
++      -- Number of whole-Word bitnesses to shift by
++      Words : Word              := Shift_Right(C, BitnessLog2);
++      
++      -- Current 'shiftness level'
++      S     : Indices           := 1;
++      
++   begin
++      
++      -- Subword shift first:
++      if HaveBarrelShifter then
++         -- If permitted, use iron shifter:
++         FZ_ShiftRight(N, ShiftedN, Bits);
++      else
++         -- Otherwise, use the soft subword shifter:
++         FZ_Quiet_ShiftRight_SubW_Soft(N, ShiftedN, Bits);
++      end if;
++      
++      -- Then whole-Word shift:
++      for i in 1 .. Wb loop
++         
++         declare
++            
++            -- Current bit of Words
++            WordsBit : constant WBool := Words and 1;
++            
++         begin
++            
++            -- Shift at the current shiftness
++            for i in ShiftedN'First        .. ShiftedN'Last - S loop
++               ShiftedN(i) := W_Mux(ShiftedN(i), ShiftedN(i + S), WordsBit);
++            end loop;
++            
++            -- Fill the emptiness
++            for i in ShiftedN'Last - S + 1 .. ShiftedN'Last loop
++               ShiftedN(i) := W_Mux(ShiftedN(i), 0,               WordsBit);
++            end loop;
++            
++            -- Go to the next shiftness level
++            S     := S * 2;
++            Words := Shift_Right(Words, 1);
++            
++         end;
++         
++      end loop;
++      
++   end FZ_Quiet_ShiftRight;
++   
++   
++   -- Constant-time arbitrary Left-Shift.
++   procedure FZ_Quiet_ShiftLeft(N        : in     FZ;
++                                ShiftedN : in out FZ;
++                                Count    : in     FZBit_Index) is
++      
++      -- Total number of bit positions to shift by
++      C     : constant Word     := Word(Count);
++      
++      -- Number of sub-Word bit positions to shift by
++      Bits  : constant Natural  := Natural(C and (2**BitnessLog2 - 1));
++      
++      -- The Bitness of N's Length
++      Wb    : constant Positive := FZ_Bitness_Log2(N);
++      
++      -- Number of whole-Word bitnesses to shift by
++      Words : Word              := Shift_Right(C, BitnessLog2);
++      
++      -- Current 'shiftness level'
++      S     : Indices           := 1;
++      
++   begin
++      
++      -- Subword shift first:
++      if HaveBarrelShifter then
++         -- If permitted, use iron shifter:
++         FZ_ShiftLeft(N, ShiftedN, Bits);
++      else
++         -- Otherwise, use the soft subword shifter:
++         FZ_Quiet_ShiftLeft_SubW_Soft(N, ShiftedN, Bits);
++      end if;
++      
++      -- Then whole-Word shift:
++      for i in 1 .. Wb loop
++         
++         declare
++            
++            -- Current bit of Words
++            WordsBit : constant WBool := Words and 1;
++            
++         begin
++            
++            -- Shift at the current shiftness
++            for i in reverse ShiftedN'First + S .. ShiftedN'Last loop
++               ShiftedN(i) := W_Mux(ShiftedN(i), ShiftedN(i - S), WordsBit);
++            end loop;
++            
++            -- Fill the emptiness
++            for i in ShiftedN'First             .. ShiftedN'First + S - 1 loop
++               ShiftedN(i) := W_Mux(ShiftedN(i), 0,               WordsBit);
++            end loop;
++            
++            -- Go to the next shiftness level
++            S     := S * 2;
++            Words := Shift_Right(Words, 1);
++            
++         end;
++         
++      end loop;
++      
++   end FZ_Quiet_ShiftLeft;
++   
++end FZ_QShft;
+diff -uNr a/ffa/libffa/fz_qshft.ads b/ffa/libffa/fz_qshft.ads
+--- a/ffa/libffa/fz_qshft.ads false
++++ b/ffa/libffa/fz_qshft.ads 095afd026948c5a102c32a9b442d3d4a1f721a59396b90b40479eadd243c6c66e362698749a500de2784445860cb7b6b1b38fa5c1d07f4c86d742e40c7fac36d
+@@ -0,0 +1,52 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_QShft is
++   
++   pragma Pure;
++   
++   -- Constant-time subword shift, for where there is no barrel shifter
++   procedure FZ_Quiet_ShiftRight_SubW_Soft(N        : in FZ;
++                                           ShiftedN : in out FZ;
++                                           Count    : in WBit_Index);
++   pragma Inline_Always(FZ_Quiet_ShiftRight_SubW_Soft);
++   
++   -- Constant-time subword shift, for where there is no barrel shifter
++   procedure FZ_Quiet_ShiftLeft_SubW_Soft(N        : in FZ;
++                                          ShiftedN : in out FZ;
++                                          Count    : in WBit_Index);
++   pragma Inline_Always(FZ_Quiet_ShiftLeft_SubW_Soft);
++   
++   -- Constant-time arbitrary right-shift.
++   procedure FZ_Quiet_ShiftRight(N        : in     FZ;
++                                 ShiftedN : in out FZ;
++                                 Count    : in     FZBit_Index);
++   pragma Inline_Always(FZ_Quiet_ShiftRight);
++   
++   -- Constant-time arbitrary left-shift.
++   procedure FZ_Quiet_ShiftLeft(N        : in     FZ;
++                                ShiftedN : in out FZ;
++                                Count    : in     FZBit_Index);
++   pragma Inline_Always(FZ_Quiet_ShiftLeft);
++   
++end FZ_QShft;
+diff -uNr a/ffa/libffa/iron.ads b/ffa/libffa/iron.ads
+--- a/ffa/libffa/iron.ads 9be8930649f097919664873a6f502d6c0a2e67bb36df1f61db80b291162b2de3644837694290ff253e045499f9ebd138d84cc7d127a3b7c91838e550dc01836d
++++ b/ffa/libffa/iron.ads c2a8101914bb78150becc64de77a0560fa05859bc2908f14e4ce933f6d5682cfeff4f28982e655321e6e9ee8e1e5b0b884acf1048db28af0efffa69c493c2bcf
+@@ -38,4 +38,7 @@
+    -- Bits per Byte
+    ByteBits           : constant Positive := 8;
+    
++   -- Whether we have a barrel shifter:
++   HaveBarrelShifter : constant Boolean := True;
++   
+ end Iron;
+diff -uNr a/ffa/libffa/word_ops.adb b/ffa/libffa/word_ops.adb
+--- a/ffa/libffa/word_ops.adb 2d76a6b3e1ea5a1719cffe798ca719a0d80533eed7e4a87b553398db655a5caf2ea888ba48ed2fd700ed292cfd036cf1aa093d38e2c4a22a0154dbe90d7fa112
++++ b/ffa/libffa/word_ops.adb bcb4cc4d9466ec43f01b7b9a2f8e473b013843b6bc0dab034782054ef73b4d961345692a645ecf9aca3451b567f54b5d2b822687bb6f74f031fceca8b41325cd
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -55,9 +55,10 @@
+    --  +-+-+-+-----+--------------+-----+----------------+
+    --  |           | 'Carry' out: |     | 'Borrow' out:  |
+    --  +-+-+-+-----+--------------+-----+----------------+
+-   --  | | | |     |(a and b) or  |     |(~a and b) or   |
+-   --  |A|B|C|A+B+C| ((a or b) and|A-B-C| ((~a or b) and |
+-   --  | | | |     |    ~(A+B+C)) |     |    (A-B-C))    |
++   --  | | | |     |(a and b) or  |     |(b and (A-B-C)) |
++   --  |A|B|C|A+B+C| ((a or b) and|A-B-C|      or        |
++   --  | | | |     |    ~(A+B+C)) |     |((b or (A-B-C)) |
++   --  | | | |     |              |     |  and ~a)       |
+    --  +-+-+-+-----+--------------+-----+----------------+
+    --  |0|0|0|  0  |      0       |  0  |       0        |
+    --  +-+-+-+-----+--------------+-----+----------------+
+@@ -78,7 +79,6 @@
+    -- This base case extends to any N bit register, since
+    -- both equations depend ~strictly~ on A, B, and C.
+    
+-   
+    -- Without any branching: if Sel == 0, return A; if Sel == 1, return B.
+    function W_Mux(A : in Word; B : in Word; Sel : in WBool) return Word is
+    begin

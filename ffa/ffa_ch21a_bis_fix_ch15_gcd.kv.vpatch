@@ -1,0 +1,120 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 645d708e11af079594157a4d878c02d39e63cbffb3d9f411094f4db084b6ad79da728e185faa57765dd7a1d3b236785fe3c4d5d34242a2d012475578c166157d
++++ b/ffa/MANIFEST.TXT d4399061359144b2040dbb4cb55e906423fb89666279365c37897a6ea67323c03187ea14cf2fd60635eadf30ef454b122727aad4c2ee3cd1593fba90134fcef3
+@@ -22,3 +22,4 @@
+  611775 ffa_ch20b_litmus_legacy_hashes "Support for certain ancient hash algos in Litmus."
+  612395 ffa_ch20c_litmus_clearsigned   "Support for 'clearsigned' GPG texts in Litmus."
+  612828 ffa_ch20d_litmus_nested_fix    "Fix for bug where nested 'clearsigned' sigs were rejected."
++ 629424 ffa_ch21a_bis_fix_ch15_gcd     "Fix for lethal flaw in Ch.15's Greatest Common Divisor."
+diff -uNr a/ffa/README b/ffa/README
+--- a/ffa/README a685ae297e995254762e5d2ae4a7fb4180391e26803c6de1761f0cf6023062befa31a00892a12e035be0526a8536b91ad29f03bd451711665b968cf4084db6f0
++++ b/ffa/README 36d6c4db4c584f784aa409d9a3fb585cd47ebc5aab20ab859ecd3b7c49e018d2dcc8a0b09f7513e180d65a1d05e09f223e2b2dc28e16c6dd1b63ea83ffec62c5
+@@ -24,6 +24,4 @@
+ 
+ Questions?
+ 
+-http://webchat.freenode.net/?channels=#trilema&nick=from_ffa
+-
+-Privmsg one of the people speaking and ask politely for 'voice'.
++http://webchat.freenode.net/?channels=#asciilifeform&nick=from_ffa
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads d6e1b802991b5a601e4253d419e72b22add215ace76b8cdd8449c7587d7c6bbdb3a90074d67ddd33c5b7fa9a2584caec81db4a658b817b7659cd3f92af3491d7
++++ b/ffa/libffa/ffa.ads 13553a8eafbc60a349fb364bc26db59b7c4e3a998da325bd725d960a2f1e6f16c96be9eb6c373b5307545b042aa7b37bb0e995c7008516fe7c4016ade21ac524
+@@ -45,7 +45,7 @@
+    --- Current 'deg. Kelvin' Version of FFA
+    ----------------------------------------------------------------------------
+    
+-   FFA_K_Version : constant Natural := 253;
++   FFA_K_Version : constant Natural := 200;
+    
+    ----------------------------------------------------------------------------
+    --- Fundamental Types and Sizes
+diff -uNr a/ffa/libffa/fz_gcd.adb b/ffa/libffa/fz_gcd.adb
+--- a/ffa/libffa/fz_gcd.adb 46157dcf363b52695f6ec10671307155e62702a1ea79861a067f56716b03acb8573988bed3e2350401ad8222f7351f96d22383f2b7b5fc8ebc1d9901e24b6f63
++++ b/ffa/libffa/fz_gcd.adb 4cccfefd78ea3af2ebfc0482e530b2c554721504bb4bb7227ed15e72dce1d29b95f4711a446e46d2025af228d14c46b93f76159bbb836a2cbabaa15a3dcafa41
+@@ -21,6 +21,7 @@
+ with FZ_Shift; use FZ_Shift;
+ with FZ_QShft; use FZ_QShft;
+ with FZ_Arith; use FZ_Arith;
++with FZ_BitOp; use FZ_BitOp;
+ with FZ_Pred;  use FZ_Pred;
+ 
+ 
+@@ -36,15 +37,18 @@
+       subtype Width is Word_Index range X'Range;
+       
+       -- Working buffers for GCD computation, initially equal to the inputs
+-      A      : FZ(Width) := X; -- GCD will appear in A in the end
++      A      : FZ(Width) := X;
+       B      : FZ(Width) := Y;
+       
+       -- Evenness (negation of lowest bit) of A and B respectively
+       Ae, Be : WBool;
+       
+-      -- Common power-of-2 factor
++      -- Common power-of-2 factor: incremented when Ae and Be are both 1
+       Twos   : Word := 0;
+       
++      -- This flag is set when A and B are BOTH ODD
++      OO     : WBool;
++      
+       -- |A - B|
+       D      : FZ(Width);
+       
+@@ -53,35 +57,42 @@
+       
+    begin
+       
+-      -- For convergence, requires number of shots equal to 2 * FZ_Bitness:
+-      for i in 1 .. 2 * FZ_Bitness(X) loop
++      -- To converge, requires number of shots equal to (2 * FZ_Bitness) - 1:
++      for i in 1 .. (2 * FZ_Bitness(X)) - 1 loop
++         
++         -- Whether A and B are currently BOTH ODD :
++         OO := FZ_OddP(A) and FZ_OddP(B);
++         
++         -- D := |A - B|
++         FZ_Sub_Abs(X => A, Y => B, Difference => D, Underflow => A_lt_B);
++         
++         -- IFF A,B both ODD, and A < B : B' := A ; otherwise no change :
++         FZ_Mux(X => B, Y => A, Result => B, Sel => OO and A_lt_B);
++         
++         -- IFF A,B both ODD: A' := |A - B| ; otherwise no change :
++         FZ_Mux(X => A, Y => D, Result => A, Sel => OO);
+          
+-         -- If A is even, A := A >> 1; otherwise A := A
++         -- If A is now EVEN: A := A >> 1; otherwise no change
+          Ae := 1 - FZ_OddP(A);
+          FZ_ShiftRight(A, A, WBit_Index(Ae));
+          
+-         -- If B is even, B := B >> 1; otherwise B := B
++         -- If B is now EVEN: B := B >> 1; otherwise no change
+          Be := 1 - FZ_OddP(B);
+          FZ_ShiftRight(B, B, WBit_Index(Be));
+          
+          -- If both A and B were even, increment the common power-of-two
+          Twos := Twos + (Ae and Be);
+          
+-         -- D := |A - B|
+-         FZ_Sub_Abs(X => A, Y => B, Difference => D, Underflow => A_lt_B);
+-         
+-         -- B' := min(A, B)
+-         FZ_Mux(X => B, Y => A, Result => B, Sel => A_lt_B);
+-         
+-         -- A' := |A - B|
+-         A := D;
+-         
+       end loop;
+       
++      -- Normally, B will contain the GCD, but in the (N,0) N > 0 case -- A.
++      -- The other variable will always equal 0. Hence, take Bitwise-OR(A,B):
++      FZ_Or(X => A, Y => B, Result => A);
++      
+       -- Reintroduce the common power-of-2 factor stored in 'Twos'
+       FZ_Quiet_ShiftLeft(N => A, ShiftedN => A, Count => Indices(Twos));
+       
+-      -- Output final result
++      -- Output final result -- the GCD.
+       Result := A;
+       
+    end FZ_Greatest_Common_Divisor;

@@ -1,0 +1,20 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT e5b1858f8d2c3ad2aeb9c4ba9e1fe28b5c79588305357385db3ac1afe50796268014b8480ca0c48508dcdb3416172e478b1291ef8a62b584b41cd6f9d6bcf988
++++ b/ffa/MANIFEST.TXT 67556c1f32511391b7b63ea9ab889ddedb2150791430ba9aab55471631ff071a768fb351566acd363c6f446a090839b83a4d1632a99022ce53e7bf27ec9a0f53
+@@ -10,3 +10,4 @@
+ xxxxxxx ffa_ch10_karatsuba             "Introducing Karatsuba's Multiplication."
+ xxxxxxx ffa_ch11_tuning_and_api        "Tuning and Unified API."
+  551091 ffa_ch12_karatsuba_redux       "Karatsuba Redux."
++ 551348 ffa_w_borrow_expr diana_coman Replaces expression for calculating borrow bit with more readable version that is also symmetrical to that for carry bit.
+diff -uNr a/ffa/libffa/word_ops.adb b/ffa/libffa/word_ops.adb
+--- a/ffa/libffa/word_ops.adb fb02a2987355f4c355d4fd14c817a53e3b72b5694d53d250fb9b196409606e7b1226e951c5b8c95fee206f39758acaddcf8deccc6c85687ebd5d3e3dd7d10a6d
++++ b/ffa/libffa/word_ops.adb 2d76a6b3e1ea5a1719cffe798ca719a0d80533eed7e4a87b553398db655a5caf2ea888ba48ed2fd700ed292cfd036cf1aa093d38e2c4a22a0154dbe90d7fa112
+@@ -45,7 +45,7 @@
+    function W_Borrow(A : in Word; B : in Word; D : in Word)
+                     return WBool is
+    begin
+-      return WBool(Shift_Right(((not A) and B) or (((not A) or B) and D),
++      return WBool(Shift_Right((B and D) or ((B or D) and (not A)),
+                                Bitness - 1));
+    end W_Borrow;
+    

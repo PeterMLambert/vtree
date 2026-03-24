@@ -1,0 +1,406 @@
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 232107688985724eb11a113032da3f2f4888fe06058ab0abfe8dc7c330f2d699122be8b0106de69a8b2728dfe4b28078153a4af77686834f71291ed7366e7f3d
++++ b/ffa/ffacalc/ffa_calc.adb f614bff382bd7805f2c3510e3d9a5564a153786b3dbe322456c022ec5b4b9dbae202d27504ce213cbc2da9f311fe668164a1d0a6ce34f77a831d716a22236abd
+@@ -380,11 +380,11 @@
+                -- Multiply, give bottom and top halves
+             when '*' =>
+                Want(2);
+-               -- Ch5: slow and simple 'Egyptological' method:
+-               FZ_Mul_Egyptian(X     => Stack(SP - 1),
+-                               Y     => Stack(SP),
+-                               XY_Lo => Stack(SP - 1),
+-                               XY_Hi => Stack(SP));
++               -- Ch9: Comba's algorithm
++               FZ_Mul_Comba(X     => Stack(SP - 1),
++                            Y     => Stack(SP),
++                            XY_Lo => Stack(SP - 1),
++                            XY_Hi => Stack(SP));
+                
+                -- Modular Multiplication
+             when 'M' =>
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb 7dcf2ee0efc97ea57c360131f2ee836775fe2d57195d454c655e74cd030e72aa6d3109e2736a04aae0f305859de52e29edd38005b6249e0548950f1e91f36d4a
++++ b/ffa/libffa/fz_modex.adb f32407a408190634cc0976d939aa12e74a4a20eefcb2f8bf77694c3d4e9b1d64f22283f1eea5b0b219ec84b760b1138d6bac2b96a2b7315255780e8463d1fd0f
+@@ -45,7 +45,7 @@
+    begin
+       
+       -- XY_Lo:XY_Hi := X * Y
+-      FZ_Mul_Egyptian(X, Y, XY_Lo, XY_Hi);
++      FZ_Mul_Comba(X, Y, XY_Lo, XY_Hi);
+       
+       -- Product := XY mod M
+       FZ_Mod(XY, Modulus, Product);
+diff -uNr a/ffa/libffa/fz_mul.adb b/ffa/libffa/fz_mul.adb
+--- a/ffa/libffa/fz_mul.adb 20b94e2b0260dd90aeda5e987c038348070fa29afff8fd41a84bda53cf6bfc15638809387a6c9c44c6f9fcbdc28c5e5afd7e1efa43b0da72f89b9c198f603670
++++ b/ffa/libffa/fz_mul.adb 5cb9ecb938f842b7c34ca7edf99fb92502986d7f660b223659c9b19c6008a24c3be6de8135db37e29e7ff278a451b68c61f6b57d8e404372dcd3fd6d4320ea0a
+@@ -18,71 +18,108 @@
+ ------------------------------------------------------------------------------
+ 
+ with Words;    use Words;
+-with W_Shifts; use W_Shifts;
+-with FZ_Basic; use FZ_Basic;
+-with FZ_Arith; use FZ_Arith;
+-with FZ_Shift; use FZ_Shift;
++with Word_Ops; use Word_Ops;
++with W_Mul;    use W_Mul;
+ 
+ 
+ package body FZ_Mul is
+    
+-   -- 'Egyptological' multiplier. XY_Lo and XY_Hi hold result of X*Y.
+-   procedure FZ_Mul_Egyptian(X     : in  FZ;
+-                             Y     : in  FZ;
+-                             XY_Lo : out FZ;
+-                             XY_Hi : out FZ) is
++   -- Comba's multiplier.
++   procedure FZ_Mul_Comba(X     : in  FZ;
++                          Y     : in  FZ;
++                          XY_Lo : out FZ;
++                          XY_Hi : out FZ) is
+       
+-      L : constant Indices := X'Length;
++      -- Words in each multiplicand
++      L : constant Word_Index := X'Length;
+       
+-      -- Register holding running product
+-      XY : FZ(1 .. X'Length + Y'Length);
++      -- Length of Product, i.e. double the length of either multiplicand
++      LP : constant Word_Index := 2 * L;
+       
+-      -- X-Slide
+-      XS : FZ(1 .. X'Length + Y'Length);
++      -- 3-word Accumulator
++      A2, A1, A0 : Word := 0;
++      
++      -- Register holding Product; indexed from zero
++      XY : FZ(0 .. LP - 1);
++      
++      -- Type for referring to a column of XY
++      subtype ColXY is Word_Index range XY'Range;
++      
++      -- Compute the Nth (indexed from zero) column of the Product
++      procedure Col(N : in ColXY; U : in ColXY; V : in ColXY) is
++         
++         -- The outputs of a Word multiplication
++         Lo, Hi : Word;
++         
++         -- Carry for the Accumulator addition
++         C      : WBool;
++         
++         -- Sum for Accumulator addition
++         Sum    : Word;
++         
++      begin
++         
++         -- For lower half of XY, will go from 0 to N
++         -- For upper half of XY, will go from N - L + 1 to L - 1
++         for j in U .. V loop
++            
++            -- Hi:Lo := j-th Word of X  *  (N - j)-th Word of Y
++            Mul_Word(X(X'First + j),
++                     Y(Y'First - j + N),
++                     Lo, Hi);
++            
++            -- Now add Hi:Lo into the Accumulator:
++            
++            -- A0 += Lo; C := Carry
++            Sum := A0 + Lo;
++            C   := W_Carry(A0, Lo, Sum);
++            A0  := Sum;
++            
++            -- A1 += Hi + C; C := Carry
++            Sum := A1 + Hi + C;
++            C   := W_Carry(A1, Hi, Sum);
++            A1  := Sum;
++            
++            -- A2 += A2 + C
++            A2  := A2 + C;
++            
++         end loop;
++         
++         -- We now have the Nth (indexed from zero) word of XY
++         XY(N) := A0;
++         
++         -- Right-Shift the Accumulator by one Word width:
++         A0 := A1;
++         A1 := A2;
++         A2 := 0;
++         
++      end Col;
++      pragma Inline_Always(Col);
+       
+    begin
+-      -- Product register begins empty
+-      FZ_Clear(XY);
+       
+-      -- X-Slide initially equals X:
+-      XS(1            .. X'Length) := X;
+-      XS(X'Length + 1 .. XS'Last)  := (others => 0);
+-      
+-      -- For each word of Y:
+-      for i in Y'Range loop
+-         
+-         declare
+-            -- Current word of Y
+-            W : Word  := Y(i);
+-            
+-            -- Current cut of XY and XS. Stay ahead by a word to handle carry.
+-            Cut : constant Indices := L + i;
+-            XYc : FZ renames XY(1 .. Cut);
+-            XSc : FZ renames XS(1 .. Cut);
+-            
+-         begin
+-            for b in 1 .. Bitness loop
+-               
+-               -- If current Y bit is 1, X-Slide Cut is added into XY Cut
+-               FZ_Add_Gated(X    => XYc, Y => XSc, Sum => XYc,
+-                            Gate => W and 1);
+-               
+-               -- Crank the next bit of Y into the bottom position of W
+-               W := Shift_Right(W, 1);
+-               
+-               -- X-Slide := X-Slide * 2
+-               FZ_ShiftLeft(XSc, XSc, 1);
+-               
+-            end loop;
+-         end;
++      -- Compute the lower half of the Product:
++      for i in 0 .. L - 1 loop
++         
++         Col(i, 0, i);
++         
++      end loop;
++      
++      -- Compute the upper half (sans last Word) of the Product:
++      for i in L .. LP - 2 loop
++         
++         Col(i, i - L + 1, L - 1);
+          
+       end loop;
+       
+-      -- Write out the Product's lower and upper FZs:
+-      XY_Lo := XY(1                .. XY_Lo'Length);
+-      XY_Hi := XY(XY_Lo'Length + 1 .. XY'Last);
++      -- The very last Word of the Product:
++      XY(XY'Last) := A0;
+       
+-   end FZ_Mul_Egyptian;
+-   pragma Inline_Always(FZ_Mul_Egyptian);
+-
++      -- Output the Product's lower and upper FZs:
++      XY_Lo := XY(0 .. L - 1);
++      XY_Hi := XY(L .. XY'Last);
++      
++   end FZ_Mul_Comba;
++   pragma Inline_Always(FZ_Mul_Comba);
++   
+ end FZ_Mul;
+diff -uNr a/ffa/libffa/fz_mul.ads b/ffa/libffa/fz_mul.ads
+--- a/ffa/libffa/fz_mul.ads 13feafdfafeb27c76e393ce5a2a7fac89360dccdfdade355cb248d66fe7b6be202f71311136a09e729271d468d2dfda6c2d4445c70c03a584e26fe53c458eaf0
++++ b/ffa/libffa/fz_mul.ads bb9f9d07462f2b8d71ccc7ff3d3ec92f0b1bc1c59306d2d9130462e32d4a4fc4c0f89c22404c7b6bb09b08a772053e1582bdff8d2bc2e5a24ddea2ca78b01223
+@@ -24,11 +24,11 @@
+    
+    pragma Pure;
+    
+-   -- 'Egyptological' multiplier. XY_Lo and XY_Hi hold result of X*Y.
+-   procedure FZ_Mul_Egyptian(X     : in  FZ;
+-                             Y     : in  FZ;
+-                             XY_Lo : out FZ;
+-                             XY_Hi : out FZ);
++   -- Comba's multiplier.
++   procedure FZ_Mul_Comba(X     : in  FZ;
++                          Y     : in  FZ;
++                          XY_Lo : out FZ;
++                          XY_Hi : out FZ);
+    pragma Precondition(X'Length = Y'Length and
+                          XY_Lo'Length = XY_Hi'Length and
+                          XY_Lo'Length = ((X'Length + Y'Length) / 2));
+diff -uNr a/ffa/libffa/w_mul.adb b/ffa/libffa/w_mul.adb
+--- a/ffa/libffa/w_mul.adb false
++++ b/ffa/libffa/w_mul.adb 5cb7abb0ae6c0c5d83d867da564c67c84bd775f7f5089219eef842df04f5390c94df546bfc48735e9965a3c363591c97167b99299ee94046c55714b83555e9e0
+@@ -0,0 +1,135 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with W_Shifts; use W_Shifts;
++
++
++package body W_Mul is
++   
++   -- Multiply half-words X and Y, producing a Word-sized product
++   function Mul_HalfWord(X : in HalfWord; Y : in HalfWord) return Word is
++      
++      -- X-Slide
++      XS : Word := X;
++      
++      -- Y-Slide
++      YS : Word := Y;
++      
++      -- Gate Mask
++      GM : Word;
++      
++      -- The Product
++      XY : Word := 0;
++      
++      -- Performed for each bit of HalfWord's bitness:
++      procedure Bit is
++      begin
++         
++         -- Compute the gate mask
++         GM := 0 - (YS and 1);
++         
++         -- Perform the gated addition
++         XY := XY + (XS and GM);
++         
++         -- Crank the next Y-slide bit into position
++         YS := Shift_Right(YS, 1);
++         
++         -- Advance the X-slide by 1 bit
++         XS := Shift_Left(XS, 1);
++         
++      end Bit;
++      pragma Inline_Always(Bit);
++      
++   begin
++      
++      -- For each bit of the Y-Slide (unrolled) :
++      for b in 1 .. HalfByteness loop
++         
++         Bit; Bit; Bit; Bit; Bit; Bit; Bit; Bit;
++         
++      end loop;
++      
++      -- Return the Product
++      return XY;
++      
++   end Mul_HalfWord;
++   pragma Inline_Always(Mul_HalfWord);
++   
++   
++   -- Get the bottom half of a Word
++   function BottomHW(W : in Word) return HalfWord is
++   begin
++      return W and (2**HalfBitness - 1);
++   end BottomHW;
++   pragma Inline_Always(BottomHW);
++   
++   
++   -- Get the top half of a Word
++   function TopHW(W : in Word) return HalfWord is
++   begin
++      return Shift_Right(W, HalfBitness);
++   end TopHW;
++   pragma Inline_Always(TopHW);
++   
++   
++   -- Carry out X*Y mult, return lower word XY_LW and upper word XY_HW.
++   procedure Mul_Word(X       : in  Word;
++                      Y       : in  Word;
++                      XY_LW   : out Word;
++                      XY_HW   : out Word) is
++      
++      -- Bottom half of multiplicand X
++      XL : constant HalfWord := BottomHW(X);
++      
++      -- Top half of multiplicand X
++      XH : constant HalfWord := TopHW(X);
++      
++      -- Bottom half of multiplicand Y
++      YL : constant HalfWord := BottomHW(Y);
++      
++      -- Top half of multiplicand Y
++      YH : constant HalfWord := TopHW(Y);
++      
++      -- XL * YL
++      LL : constant Word := Mul_HalfWord(XL, YL);
++      
++      -- XL * YH
++      LH : constant Word := Mul_HalfWord(XL, YH);
++      
++      -- XH * YL
++      HL : constant Word := Mul_HalfWord(XH, YL);
++      
++      -- XH * YH
++      HH : constant Word := Mul_HalfWord(XH, YH);
++      
++      -- Carry
++      CL : constant Word := TopHW(TopHW(LL) + BottomHW(LH) + BottomHW(HL));
++      
++   begin
++      
++      -- Get the bottom half of the Product:
++      XY_LW := LL + Shift_Left(LH + HL, HalfBitness);
++      
++      -- Get the top half of the Product:
++      XY_HW := HH + TopHW(HL) + TopHW(LH) + CL;
++      
++   end Mul_Word;
++   pragma Inline_Always(Mul_Word);
++   
++end W_Mul;
+diff -uNr a/ffa/libffa/w_mul.ads b/ffa/libffa/w_mul.ads
+--- a/ffa/libffa/w_mul.ads false
++++ b/ffa/libffa/w_mul.ads 0a3c652def28676a7be3a8c8a76c1bf1542c42c993718d9b72ca7b74f87c41ba4491609560f2980d3db266ed00fa3ace57a1d7be43f6bf6837beed880d5b9460
+@@ -0,0 +1,46 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words; use Words;
++
++
++package W_Mul is
++   
++   pragma Pure;
++   
++   -- The bitness of a Half-Word
++   HalfBitness : constant Positive := Bitness / 2;
++   subtype HalfWord is Word range 0 .. 2**HalfBitness;
++   
++   -- The number of bytes in a Half-Word
++   HalfByteness : constant Positive := Byteness / 2;
++   
++   -- Multiply half-words X and Y, producing a Word-sized product
++   function Mul_HalfWord(X : in HalfWord; Y : in HalfWord) return Word;
++   
++   -- Get the bottom half of a Word
++   function BottomHW(W : in Word) return HalfWord;
++   
++   -- Get the top half of a Word
++   function TopHW(W : in Word) return HalfWord;
++   
++   -- Carry out X*Y mult, return lower word XY_LW and upper word XY_HW.
++   procedure Mul_Word(X : in Word; Y : in Word; XY_LW : out Word; XY_HW : out Word);
++   
++end W_Mul;

@@ -1,0 +1,31 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT d35009b556cea183da0e80922a0a46907d16fb2486d4430808c6259a272c3402a298d41b00fc9a4157b4102e3480c13dfc8ee93ecf7e0cbe7644b6c5abf309e0
++++ b/ffa/MANIFEST.TXT 645d708e11af079594157a4d878c02d39e63cbffb3d9f411094f4db084b6ad79da728e185faa57765dd7a1d3b236785fe3c4d5d34242a2d012475578c166157d
+@@ -21,3 +21,4 @@
+  611618 ffa_ch20_litmus                "A Peh-powered verifier for traditional GPG signatures."
+  611775 ffa_ch20b_litmus_legacy_hashes "Support for certain ancient hash algos in Litmus."
+  612395 ffa_ch20c_litmus_clearsigned   "Support for 'clearsigned' GPG texts in Litmus."
++ 612828 ffa_ch20d_litmus_nested_fix    "Fix for bug where nested 'clearsigned' sigs were rejected."
+diff -uNr a/ffa/contrib/litmus/litmus.sh b/ffa/contrib/litmus/litmus.sh
+--- a/ffa/contrib/litmus/litmus.sh 11847537cdcdd430c43ab5e0d9ad598e7f7bfca1dedc7381128ede03c6515c2685ccab90672879eda73e6fe29b711eee3965421c4ad0866d7ae26df72a2ed197
++++ b/ffa/contrib/litmus/litmus.sh a6f142145b954fc7938df34435542376d3d7d2609aec6b7367ad49414e3730960ec4e213b6aa0ede2c8a4714f44224970738c8da938b6c1ae426188491f22c06
+@@ -225,8 +225,8 @@
+ done
+ 
+ # 'ASCII-Armoured' PGP signatures have mandatory start and end markers:
+-START_MARKER="\-\-\-\-\-BEGIN PGP SIGNATURE\-\-\-\-\-"
+-END_MARKER="\-\-\-\-\-END PGP SIGNATURE\-\-\-\-\-"
++START_MARKER="^\-\-\-\-\-BEGIN PGP SIGNATURE\-\-\-\-\-"
++END_MARKER="^\-\-\-\-\-END PGP SIGNATURE\-\-\-\-\-"
+ 
+ # Determine start and end line positions for payload:
+ start_ln=$(grep -m 1 -n "$START_MARKER" $SIGFILE | cut -d ':' -f1)
+@@ -274,7 +274,7 @@
+ if [ $CLEARSIGN_MODE == true ]
+ then
+     # Find position of 'clearsign' payload start marker:
+-    CLEAR_MARKER="\-\-\-\-\-BEGIN PGP SIGNED MESSAGE\-\-\-\-\-"
++    CLEAR_MARKER="^\-\-\-\-\-BEGIN PGP SIGNED MESSAGE\-\-\-\-\-"
+     start_clr=$(grep -m 1 -n "$CLEAR_MARKER" $SIGFILE | cut -d ':' -f1)
+     
+     # If payload start marker was not found:

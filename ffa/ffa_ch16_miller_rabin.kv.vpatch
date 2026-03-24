@@ -1,0 +1,690 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 9b65bb45012cdbe66d613823f63e75e1a8a63ab64b11b2235549fe62bda45d09ade27aeafc8df47c32d905d4400a82f80aee488a6ae7d7795cb91e6408057eab
++++ b/ffa/MANIFEST.TXT 590da100178588e299522d64788d4c3c2732b7645d5a967db505ea91f3b08d5933c3e0642423a7e1e889b3f10a8be3275922cde27d63b1c0e6f25c9f11c4d2f1
+@@ -14,3 +14,4 @@
+  551516 ffa_ch13_measure_and_qshifts   "Measure and Quiet Shifts."
+  555788 ffa_ch14_barrett               "Barrett's Modular Reduction."
+  557938 ffa_ch15_gcd                   "Greatest Common Divisor."
++ 560516 ffa_ch16_miller_rabin          "Miller-Rabin Method."
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb 0dc7983700b4d2eec0cd0fe41d7be166568caf3bee53d635cab6685a0fbfc4057ab6b5836a3cd74ac152973a4a6cbbcfe4c8a514942e03f3591dcd811c8d1aa2
++++ b/ffa/ffacalc/ffa_calc.adb 772aaaf953790fbb7d7fe6afd0bf2deaf77988b1376a7c169fbd21f47f5aaff6df87b2c333b90e8cd373c11379ba4830cedc3a48b36c26767ac7303889ef6a69
+@@ -513,6 +513,29 @@
+                FFA_FZ_Clear(Stack(SP));
+                FFA_FZ_Set_Head(Stack(SP), Word(FFA_K_Version));
+                
++               -- Constant-Time Miller-Rabin Test on N using the given Witness.
++               -- Witness will be used as-is if it conforms to the valid range,
++               -- i.e. 2 <= Witness <= N - 2; else will be transformed into a
++               -- valid Witness via modular arithmetic.
++               -- Outputs ONE if N WAS FOUND composite; ZERO if NOT FOUND.
++               -- Handles degenerate cases of N that M-R per se cannot eat:
++               -- N=0, N=1: ALWAYS 'FOUND COMPOS.'; 2, 3 - ALWAYS 'NOT FOUND'.
++               -- If N is Even and not equal to 2, N is ALWAYS 'FOUND COMPOS.'
++               -- For ALL other N, the output is equal to that of the M-R test.
++               -- At most 1/4 of all possible Witnesses will be 'liars' for
++               -- a particular composite N , i.e. fail to attest to its
++               -- compositivity.
++            when 'P' =>
++               Want(2);
++               declare
++                  MR_Result : WBool := 
++                    FFA_FZ_MR_Composite_On_Witness(N       => Stack(SP - 1),
++                                                   Witness => Stack(SP));
++               begin
++                  FFA_WBool_To_FZ(MR_Result, Stack(SP - 1));
++               end;
++               Drop;
++               
+                --------------
+                -- Prefixes --
+                --------------
+@@ -534,7 +557,7 @@
+                ---------------------------------------------------------
+             when '!' | '@' | '$' | ':' | ';' | ',' |
+                  'H' | 'I' | 'J' | 'K' | 'N' |
+-                 'P' | 'T' | 'X' | 'Y' =>
++                 'T' | 'X' | 'Y' =>
+                
+                E("This Operator is not defined yet: " & C);
+                ---------------------------------------------------------
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads de74b71ad764a1253ca500c7ef1e4f285356b2a9f4ccd056f05deb9fb99f7477488c6c03fe1caee82d8ff153461ee81c9e046d74dc880281c43c5ac565706a07
++++ b/ffa/ffacalc/version.ads 7863511153daaf0b1940927701245ecc7ec8aff31c79b80cc6d8d90852f88fede9458d678b0ae8bc6c09a5d57465ca9ce4c699b3212ebd863bb41d9170e2c08f
+@@ -24,7 +24,7 @@
+    ----------------------------------------------
+    -- Current 'deg. Kelvin' Version of FFACalc --
+    ----------------------------------------------
+-   FFACalc_K_Version : constant Natural := 254;
++   FFACalc_K_Version : constant Natural := 253;
+    ----------------------------------------------
+    
+ end Version;
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads ba6b8ed841ff5c8cbadd59934821b311f6f74200c23bcbda0b3a430c43a151b8242296d255c97c44788c6a5c97afbe7dac8339fd369aaff3b509a70e9ba620f8
++++ b/ffa/libffa/ffa.ads d6e1b802991b5a601e4253d419e72b22add215ace76b8cdd8449c7587d7c6bbdb3a90074d67ddd33c5b7fa9a2584caec81db4a658b817b7659cd3f92af3491d7
+@@ -33,6 +33,7 @@
+ with FZ_Measr;
+ with FZ_QShft;
+ with FZ_LoMul;
++with FZ_Prime;
+ 
+ 
+ -- FFA Exports
+@@ -44,7 +45,7 @@
+    --- Current 'deg. Kelvin' Version of FFA
+    ----------------------------------------------------------------------------
+    
+-   FFA_K_Version : constant Natural := 254;
++   FFA_K_Version : constant Natural := 253;
+    
+    ----------------------------------------------------------------------------
+    --- Fundamental Types and Sizes
+@@ -330,4 +331,17 @@
+                                             Result : out FZ)
+      with Pre => X'Length = Y'Length and X'Length = Result'Length;
+    
++   -- Constant-Time Miller-Rabin Test on N using the given Witness.
++   -- Witness will be used as-is if it conforms to the valid bounds,
++   -- i.e. 2 <= Witness <= N - 2; otherwise will be transformed into a
++   -- valid Witness via modular arithmetic.
++   -- Outputs ONE if N WAS FOUND composite; ZERO if NOT FOUND.
++   -- Handles degenerate cases of N that M-R per se cannot eat:
++   -- N=0, N=1: ALWAYS 'FOUND COMPOSITE'; 2, 3 - ALWAYS 'NOT FOUND'.
++   -- If N is Even and not equal to 2, N is ALWAYS 'FOUND COMPOSITE.'
++   -- For ALL other N, the output is equal to that of the M-R test.
++   function FFA_FZ_MR_Composite_On_Witness(N       : in  FZ;
++                                           Witness : in  FZ) return WBool
++     renames FZ_Prime.FZ_MR_Composite_On_Witness;
++   
+ end FFA;
+diff -uNr a/ffa/libffa/fz_arith.adb b/ffa/libffa/fz_arith.adb
+--- a/ffa/libffa/fz_arith.adb a6774ea126b6431e912686b5269349926976a8685a61817e99fe468b61056842a0881b0569d5ec0de27b904b456bd13350fc4f939286a5633c08a7888dd23c4b
++++ b/ffa/libffa/fz_arith.adb be7752ac12ad772033c57e4e844a62a2451b9e398a6b5f3ca4cd8873b0adaf6ccebe8093c3d4f4d9a4a40cde4fc48282e5e04579d9f284d0170a32b4ddb06777
+@@ -161,6 +161,26 @@
+    end FZ_Sub;
+    
+    
++   -- Difference := X - W; Underflow := Borrow
++   procedure FZ_Sub_W(X          : in  FZ;
++                      W          : in  Word;
++                      Difference : out FZ;
++                      Underflow  : out WBool) is
++      Borrow : Word := W;
++   begin
++      for i in 0 .. Word_Index(X'Length - 1) loop
++         declare
++            A : constant Word := X(X'First + i);
++            S : constant Word := A - Borrow;
++         begin
++            Difference(Difference'First + i) := S;
++            Borrow := W_Borrow(A, 0, S);
++         end;
++      end loop;
++      Underflow := Borrow;
++   end FZ_Sub_W;
++   
++   
+    -- Destructive: If Cond is 1, NotN := ~N; otherwise NotN := N.
+    procedure FZ_Not_Cond_D(N    : in out FZ;
+                            Cond : in     WBool)is
+diff -uNr a/ffa/libffa/fz_arith.ads b/ffa/libffa/fz_arith.ads
+--- a/ffa/libffa/fz_arith.ads 5ad89e1c806e453f5f1a37c024f28b0a37d535395c301de29ac3488a29f4670bf7517fe870eea5b17033ec718b35a02a21cb6127b3a26b95d1f3631b83495f63
++++ b/ffa/libffa/fz_arith.ads 922b4a0cace3230d1cee982c66c0d1237e0510f74d05e5b612947f5998fed01a655960731c392fb4f868af2b8260acbe0ca51e6c8a40e334c9698bdce8f0a54e
+@@ -33,7 +33,7 @@
+                       OF_In      : in     WBool := 0);
+    pragma Inline_Always(FZ_Add_D);
+    
+-      -- Destructive Add: X := X + W; Overflow := Carry
++   -- Destructive Add: X := X + W; Overflow := Carry
+    procedure FZ_Add_D_W(X        : in out FZ;
+                         W        : in     Word;
+                         Overflow : out    WBool);
+@@ -62,12 +62,19 @@
+                           Sum        : out FZ);
+    pragma Inline_Always(FZ_Add_Gated);
+    
+-   -- Destructive Sub: X := X - Y; Underflow := Borrow
++   -- Destructive Subtract: X := X - Y; Underflow := Borrow
+    procedure FZ_Sub_D(X          : in out FZ;
+                       Y          : in     FZ;
+                       Underflow  : out    WBool);
+    pragma Inline_Always(FZ_Sub_D);
+    
++   -- Difference := X - W; Underflow := Borrow
++   procedure FZ_Sub_W(X          : in  FZ;
++                      W          : in  Word;
++                      Difference : out FZ;
++                      Underflow  : out WBool);
++   pragma Inline_Always(FZ_Sub_W);
++   
+    -- Difference := X - Y; Underflow := Borrow
+    procedure FZ_Sub(X          : in  FZ;
+                     Y          : in  FZ;
+diff -uNr a/ffa/libffa/fz_barr.adb b/ffa/libffa/fz_barr.adb
+--- a/ffa/libffa/fz_barr.adb 83d6eb138af7dbbe49a29fbd4af186ea79f8d4441fd84814316e84c20de20614f7b9d69b3bd8e160ba37fc6c30b83aec2ccc26600e289d87225c677686c6072b
++++ b/ffa/libffa/fz_barr.adb baefddb79033f5d5657ec6c1685bbd6ec468f41535215b0d88cacc9089bbbd0ce073352c8ebc287c81ead2be8a33972a0ce6bb4f3dfc19b0cd8a048121173ace
+@@ -51,8 +51,8 @@
+ --  `Md///////+mMMMMys////////sh/-         -yy/////////////////////////dM` --
+ --   -ssssssssymssssssssssssssssso-      .+ossssssssssssssssssssssssssss-  --
+ --                                                                         --
+---Ch. 14A: Barrett’s Modular Reduction:   http://www.loper-os.org/?p=2842  --
+---Ch. 14A-Bis: Barrett’s Physical Bounds: http://www.loper-os.org/?p=2875  --
++--Ch. 14A: Barrett's Modular Reduction:   http://www.loper-os.org/?p=2842  --
++--Ch. 14A-Bis: Barrett's Physical Bounds: http://www.loper-os.org/?p=2875  --
+ --                                                                         --
+ -----------------------------------------------------------------------------
+ 
+diff -uNr a/ffa/libffa/fz_cmp.adb b/ffa/libffa/fz_cmp.adb
+--- a/ffa/libffa/fz_cmp.adb 45e9005159d1d31db9308676b44c7e70ccc98f1e2c01039510e17f332e24cae7c0b95854e043ffb4b245340b2277b8a99ffe92bd7ca1cddbad38bd1b7ee0a7aa
++++ b/ffa/libffa/fz_cmp.adb f868f341de78088c46182617dfe0c6d4ecbe52560fa457ad9c1b2f592566cd292890e8e0345f9799c98a5514192d765d2877f1a16c47a341af7d31099084007c
+@@ -19,6 +19,7 @@
+ 
+ with W_Pred;   use W_Pred;
+ with FZ_Arith; use FZ_Arith;
++with FZ_Pred;  use FZ_Pred;
+ 
+ 
+ package body FZ_Cmp is
+@@ -38,6 +39,13 @@
+    end FZ_EqP;
+    
+    
++   -- 1 iff X == W (branch-free); else 0
++   function FZ_EqP_W(X : in FZ; W : in Word) return WBool is
++   begin
++      return FZ_OneWordP(X) and W_EqP(X(X'First), W);
++   end FZ_EqP_W;
++   
++   
+    -- 1 iff X < Y (branch-free); else 0
+    function FZ_LessThanP(X : in FZ; Y : in FZ) return WBool is
+       Scratch : FZ(X'Range);
+diff -uNr a/ffa/libffa/fz_cmp.ads b/ffa/libffa/fz_cmp.ads
+--- a/ffa/libffa/fz_cmp.ads 81851eedeadde7d3e5cddb55027c3d65224c3600ee45fc378ac509d8578b458f823f93227bd7010000c890ba9574d57d3bc3fff86a795d5a45e614cae0b0aa2b
++++ b/ffa/libffa/fz_cmp.ads 0b578e5293749b2edde1fd1c4e538cdad8c9e806e44471e331230dd9cde52e216d9f318dfa8171ea820e367f55c9071787a952de8e389b50735e622671706e6b
+@@ -33,6 +33,10 @@
+    function FZ_EqP(X : in FZ; Y: in FZ) return WBool
+      with Pre => X'Length = Y'Length;
+    
++   -- 1 iff X == W (branch-free); else 0
++   function FZ_EqP_W(X : in FZ; W : in Word) return WBool;
++   pragma Inline_Always(FZ_EqP_W);
++   
+    -- 1 iff X < Y (branch-free); else 0
+    function FZ_LessThanP(X : in FZ; Y : in FZ) return WBool
+      with Pre => X'Length = Y'Length;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb d1f331872729de629191f57371544da4ac672dce61b7cd9829912eaa07dad4628a297afd91ab2a923b39bf640ab3787f4ba6662119b2a4fd9c7c79b82b11e097
++++ b/ffa/libffa/fz_modex.adb 5d7ffd960a5f49e0fcb3cd30edbd2be5e6d111a820293dab68638966b6b2dc264a97ef05039fbecf0ab7c72e57efb53d8bb665bc2b80d302cb31c1177e10cdb8
+@@ -23,7 +23,6 @@
+ with FZ_Mul;   use FZ_Mul;
+ with FZ_Sqr;   use FZ_Sqr;
+ with FZ_Divis; use FZ_Divis;
+-with FZ_Barr;  use FZ_Barr;
+ 
+ 
+ package body FZ_ModEx is
+@@ -81,11 +80,37 @@
+    end FZ_Mod_Sqr;
+    
+    
+-   -- (Barrettronic) Modular Exponent: Result := Base^Exponent mod Modulus
+-   procedure FZ_Mod_Exp(Base     : in  FZ;
+-                        Exponent : in  FZ;
+-                        Modulus  : in  FZ;
+-                        Result   : out FZ) is
++   -- (Barrettronic) Modular Squaring, using given Barrettoid
++   procedure FZ_Mod_Sqr_Barrett(X        : in  FZ;
++                                Bar      : in  Barretoid;
++                                Product  : out FZ) is
++      
++      -- The wordness of both operands is equal:
++      L     : constant Indices := X'Length;
++      
++      -- Double-width register for squaring and modulus operations
++      XX    : FZ(1 .. L * 2);
++      
++      -- To refer to the lower and upper halves of the working register:
++      XX_Lo : FZ renames XX(1     .. L);
++      XX_Hi : FZ renames XX(L + 1 .. XX'Last);
++   
++   begin
++      
++      -- XX_Lo:XX_Hi := X^2
++      FZ_Square_Buffered(X, XX_Lo, XX_Hi);
++      
++      -- Product := XX mod M
++      FZ_Barrett_Reduce(X => XX, Bar => Bar, XReduced => Product);
++      
++   end FZ_Mod_Sqr_Barrett;
++   
++   
++   -- Barrettronic Modular Exponent, using given Barrettoid
++   procedure FZ_Mod_Exp_Barrett(Base     : in  FZ;
++                                Exponent : in  FZ;
++                                Bar      : in  Barretoid;
++                                Result   : out FZ) is
+       
+       -- Double-width scratch buffer for the modular operations
+       D   : FZ(1 .. Base'Length * 2);
+@@ -99,15 +124,8 @@
+       -- Buffer register for the Result
+       R   : FZ(Result'Range);
+       
+-      -- Space for Barrettoid
+-      Bar : Barretoid(ZXMLength       => Modulus'Length + 1,
+-                      BarretoidLength => 2 * B'Length);
+-      
+    begin
+       
+-      -- First, pre-compute the Barretoid for the given Modulus:
+-      FZ_Make_Barrettoid(Modulus => Modulus, Result => Bar);
+-      
+       -- Result := 1
+       WBool_To_FZ(1, R);
+       
+@@ -149,6 +167,30 @@
+       -- Output the Result:
+       Result := R;
+       
++   end FZ_Mod_Exp_Barrett;
++   
++   
++   -- (Barrettronic) Modular Exponent: Result := Base^Exponent mod Modulus
++   procedure FZ_Mod_Exp(Base     : in  FZ;
++                        Exponent : in  FZ;
++                        Modulus  : in  FZ;
++                        Result   : out FZ) is
++      
++      -- Space for Barrettoid
++      Bar : Barretoid(ZXMLength       => Modulus'Length + 1,
++                      BarretoidLength => 2 * Base'Length);
++      
++   begin
++      
++      -- First, pre-compute the Barretoid for the given Modulus:
++      FZ_Make_Barrettoid(Modulus => Modulus, Result => Bar);
++      
++      -- Compute the modular exponentiation using the above Barrettoid:
++      FZ_Mod_Exp_Barrett(Base     => Base,
++                         Exponent => Exponent,
++                         Bar      => Bar,
++                         Result   => Result);
++      
+    end FZ_Mod_Exp;
+    
+ end FZ_ModEx;
+diff -uNr a/ffa/libffa/fz_modex.ads b/ffa/libffa/fz_modex.ads
+--- a/ffa/libffa/fz_modex.ads 674b3c93ea1db47aa9944896ef8a3d4b47b10176d2e76be0f76de8ab5058b84eaf59cd34e16594f914414cf407ee4d656dddde996a7e078dfa1e4c354a9cbb30
++++ b/ffa/libffa/fz_modex.ads 106c1eaf0de722a10436b1a84aa1a6b0f49d74723d62769c8a1b50b5dddfe9bb6a96ec3448c918a97786058aa8b3f64467cd7324d777fb0ab7711f30ff6f233a
+@@ -18,6 +18,7 @@
+ ------------------------------------------------------------------------------
+ 
+ with FZ_Type; use FZ_Type;
++with FZ_Barr; use FZ_Barr;
+ 
+ 
+ package FZ_ModEx is
+@@ -40,6 +41,19 @@
+      with Pre => Modulus'Length = X'Length and
+      Product'Length = Modulus'Length;
+    
++   -- (Barrettronic) Modular Squaring, using given Barrettoid
++   procedure FZ_Mod_Sqr_Barrett(X        : in  FZ;
++                                Bar      : in  Barretoid;
++                                Product  : out FZ);
++   pragma Inline_Always(FZ_Mod_Sqr_Barrett);
++   
++   -- Barrettronic Modular Exponent, using given Barrettoid
++   procedure FZ_Mod_Exp_Barrett(Base     : in  FZ;
++                                Exponent : in  FZ;
++                                Bar      : in  Barretoid;
++                                Result   : out FZ);
++   pragma Inline_Always(FZ_Mod_Exp_Barrett);
++   
+    -- (Barrettronic) Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FZ_Mod_Exp(Base     : in  FZ;
+                         Exponent : in  FZ;
+diff -uNr a/ffa/libffa/fz_pred.adb b/ffa/libffa/fz_pred.adb
+--- a/ffa/libffa/fz_pred.adb dce7717443c377e450e327ca0f5681883aea87c0ea32c3434a079d0175ea9530355d7e031dc5fcd29df3cb22f1e8da2ec1d57d2cb42e09180abaa1e0d21b84c0
++++ b/ffa/libffa/fz_pred.adb 3d4bbf3635f035298a307c1e245b67b5b47cbd9233be5a26dbeac74f6b65d78d1a53c966e4c58a0a81bd0cf0d1685bd871abc02e32c4570ccdee0997defdd3a3
+@@ -50,4 +50,11 @@
+       return W_OddP(N(N'First));
+    end FZ_OddP;
+    
++   
++   -- 1 iff N fits inside one Word
++   function FZ_OneWordP(N : in FZ) return WBool is
++   begin
++      return FZ_ZeroP(N(N'First + 1 .. N'Last));
++   end FZ_OneWordP;
++   
+ end FZ_Pred;
+diff -uNr a/ffa/libffa/fz_pred.ads b/ffa/libffa/fz_pred.ads
+--- a/ffa/libffa/fz_pred.ads 299605f7227834b125629ade2fff78cb7c8c3c4137f393a79b8c089432da4a74f14fd0bdb97809fe972b6605bacd5d8d40d519708a8926b19b668a637a4021c0
++++ b/ffa/libffa/fz_pred.ads 97c4d64ec6d344dc21475e68b1536006d257568e65fd142080cb9332b603a6717e0f8bb1f3116aacafc59970227ad86ed83655237c53fe179102e4092dde5459
+@@ -41,4 +41,8 @@
+    function FZ_OddP(N : in FZ) return WBool;
+    pragma Inline_Always(FZ_OddP);
+    
++   -- 1 iff N fits inside one Word
++   function FZ_OneWordP(N : in FZ) return WBool;
++   pragma Inline_Always(FZ_OneWordP);
++   
+ end FZ_Pred;
+diff -uNr a/ffa/libffa/fz_prime.adb b/ffa/libffa/fz_prime.adb
+--- a/ffa/libffa/fz_prime.adb false
++++ b/ffa/libffa/fz_prime.adb 78d4c49ffca81897f9e4832f272a46df2dd8258bcd4502fff7c716e4d8b7e67f5c96aea13e193d44374ffadc7bf3487ae14c512257875d95c3414fd37c69f03a
+@@ -0,0 +1,231 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++
++with Word_Ops; use Word_Ops;
++with W_Pred;   use W_Pred;
++with W_Shifts; use W_Shifts;
++
++with FZ_Basic; use FZ_Basic;
++with FZ_QShft; use FZ_QShft;
++with FZ_Arith; use FZ_Arith;
++with FZ_Divis; use FZ_Divis;
++with FZ_Pred;  use FZ_Pred;
++with FZ_Cmp;   use FZ_Cmp;
++with FZ_Barr;  use FZ_Barr;
++with FZ_ModEx; use FZ_ModEx;
++
++
++package body FZ_Prime is
++   
++   -- Find the highest power of 2 which divides N. ( or 0 if N is zero. )
++   function FZ_Count_Bottom_Zeros(N : in FZ) return FZBit_Index is
++      
++      -- The result (default : 0, will remain 0 if N is in fact zero)
++      Index     : Word := 0;
++      
++      -- The currently-examined Word, starting from the highest
++      Ni        : Word;
++      
++      -- The most recently-seen nonzero Word, if indeed any exist
++      W         : Word := 0;
++      
++      -- 1 if currently-examined Word is zero, otherwise 0
++      NiZ       : WBool;
++      
++   begin
++      
++      -- Find lowest non-zero Word (or simply stop at lowest, if N = 0)
++      for i in reverse 0 .. Indices(N'Length - 1) loop
++         Ni    := N(N'First + i);              -- Ni := current Word;
++         NiZ   := W_ZeroP(Ni);                 -- ... is this Word = 0?
++         Index := W_Mux(Word(i), Index, NiZ);  -- If NO, save its Index,
++         W     := W_Mux(Ni,      W,     NiZ);  -- ... and save the Word.
++      end loop;
++      
++      -- Set Index to be the bit-position of the lowest non-zero Word:
++      Index := Shift_Left(Index, BitnessLog2); -- Index := Index * Bitness
++      
++      -- Handle degenerate case: if W is equal to 0, Index is not changed;
++      -- Otherwise, start by advancing Index by an entire Word Bitness:
++      Index := Index + ((0 - W_NZeroP(W)) and Word(Bitness));
++      
++      -- Now crank back the Index by the number of high bits of W (i.e.
++      -- starting from its top) that must be discarded for W to become zero:
++      for b in 1 .. Bitness loop
++         
++         -- If W is non-zero at this time, decrement the Index:
++         Index := Index - W_NZeroP(W);
++         
++         -- Advance W left, i.e. discard the top bit of it:
++         W     := Shift_Left(W, 1);
++         
++      end loop;
++      
++      -- If N = 0, result will be 0; otherwise: length of bottom zeros in N.
++      return FZBit_Index(Index);
++      
++   end FZ_Count_Bottom_Zeros;
++   
++   
++   -- Constant-Time Miller-Rabin Test on N using the given Witness.
++   -- Witness will be used as-is if it conforms to the valid bounds,
++   -- i.e. 2 <= Witness <= N - 2; otherwise will be transformed into a
++   -- valid Witness via modular arithmetic.
++   -- Outputs ONE if N WAS FOUND composite; ZERO if NOT FOUND.
++   -- Handles degenerate cases of N that M-R per se cannot eat:
++   -- N=0, N=1: ALWAYS 'FOUND COMPOSITE'; 2, 3 - ALWAYS 'NOT FOUND'.
++   -- If N is Even and not equal to 2, N is ALWAYS 'FOUND COMPOSITE.'
++   -- For ALL other N, the output is equal to that of the M-R test.
++   function FZ_MR_Composite_On_Witness(N       : in  FZ;
++                                       Witness : in  FZ) return WBool is
++      
++      -- Widths of N, Witness, and Result are equal :
++      subtype Width is Word_Index range N'Range;
++      
++      -- Whether N is 'small' (i.e. 1 Word) and therefore possibly degenerate :
++      N_Is_Small       : constant WBool := FZ_OneWordP(N);
++      
++      -- Head of N, for detecting (and handling) the degenerate-N case :
++      N_Head           : constant Word  := FZ_Get_Head(N);
++      
++      -- Zero and One are defined as COMPOSITE degenerate cases of N :
++      N_Is_Zero_Or_One : constant WBool
++        := N_Is_Small and (W_EqP(N_Head, 0) or W_EqP(N_Head, 1));
++      
++      -- Two and Three are PRIME degenerate cases of N :
++      N_Is_Two         : constant WBool := N_Is_Small and W_EqP(N_Head, 2);
++      N_Is_Three       : constant WBool := N_Is_Small and W_EqP(N_Head, 3);
++      
++      -- The COMPOSITE degenerate case of N where N != 2 and N is Even :
++      N_Ne_2_Is_Even   : constant WBool :=
++        (1 - N_Is_Two) and (1 - W_OddP(N_Head));
++      
++      -- Degeneracy latch. If N is Zero or One, then set immediately :
++      Degen_Composite  : constant WBool := N_Is_Zero_Or_One or N_Ne_2_Is_Even;
++      
++      -- Possible-primality latch. If N is Two or Three, then set immediately :
++      Possibly_Prime   : WBool := N_Is_Two or N_Is_Three;
++      
++      -- The writable copy of N that we will operate on :
++      X                : FZ(Width) := N;
++      
++      -- Potentially-replaced head of X (if degenerate N) :
++      X_Head           : Word := N_Head;
++      
++      -- Will be Barrettoid(X), for operations modulo X :
++      XBar             : Barretoid(ZXMLength       => X'Length + 1,
++                                   BarretoidLength => 2 * X'Length);
++      
++      -- The Bound Witness, constrained to valid range 2 <= BW <= X - 2 :
++      BW               : FZ(Width);
++      
++      -- Head of BW, for detecting crossing of the lower bound :
++      BW_Head          : Word;
++      
++      -- X - 1 (for M-R proper, and to constrain BW) :
++      X_Minus_One      : FZ(Width);
++      
++      -- X - 1 = 2^R * K, with K odd :
++      K                : FZ(Width);
++      R                : FZBit_Index;
++      
++      -- Working register for all M-R modular operations :
++      T                : FZ(Width);
++      
++      -- For subtraction where no underflow can happen, barring cosmic ray:
++      NoCarry          : WZeroOrDie := 0;
++      
++   begin
++      
++      -- First: X, which will remain equal to N unless N is degenerate:
++      
++      -- If N is one of the two prohibited small primes (2,3) X will become 5:
++      X_Head := W_Mux(A => X_Head, B => 5, Sel => Possibly_Prime);
++      
++      -- If one of the two prohibited small composites (0,1), or even, then 9:
++      X_Head := W_Mux(A => X_Head, B => 9, Sel => Degen_Composite);
++      
++      -- Given as we're stuck carrying out M-R even if N is degenerate case,
++      -- then let the M-R do The Right Thing, for added cosmic ray resistance.
++      
++      -- X gets a new head, if N was a degenerate case; else keeps old head:
++      FZ_Set_Head(X, X_Head);
++      
++      -- Compute X - 1. As now X > 3, underflow is not permitted:
++      FZ_Sub_W(X => X, W => 1, Difference => X_Minus_One,
++               Underflow => NoCarry);
++      
++      -- Now, compute BW (Bound Witness), which satisfies 2 <= BW <= X - 2:
++      
++      -- First, BW := Witness mod (X - 1). After this, 0 <= BW <= X - 2:
++      FZ_Mod(Dividend => Witness, Divisor => X_Minus_One, Remainder => BW);
++      
++      -- Now, adjust BW if it is found to be below Two (the lower bound) :
++      
++      -- Get head of BW:
++      BW_Head := FZ_Get_Head(BW);
++      
++      -- If BW is equal to Zero or One, it will be forced to equal Two:
++      BW_Head := W_Mux(A   => BW_Head,
++                       B   => 2,
++                       Sel => FZ_OneWordP(BW) and
++                         (W_EqP(BW_Head, 0) or W_EqP(BW_Head, 1)));
++      
++      -- BW gets the new head, if it must; otherwise keeps its old head:
++      FZ_Set_Head(BW, BW_Head);
++      
++      -- We finished adjusting X and BW for degeneracies, and can now M-R:
++      
++      -- Generate Barrettoid(X) to use in all of the modulo-X operations:
++      FZ_Make_Barrettoid(Modulus => X, Result => XBar);
++      
++      -- Find R >= 1, and odd K, where X − 1 = 2^R * K :
++      
++      -- ... first, find R, the largest power of two which divides X - 1 :
++      R := FZ_Count_Bottom_Zeros(X_Minus_One);
++      
++      -- ... and now obtain K := X / 2^R, i.e., K := X >> R :
++      FZ_Quiet_ShiftRight(N => X_Minus_One, ShiftedN => K, Count => R);
++      
++      -- T := BW^K mod X
++      FZ_Mod_Exp_Barrett(Base => BW, Exponent => K, Bar => XBar, Result => T);
++      
++      -- if T = 1 or T = X - 1, then X is possibly-prime:
++      Possibly_Prime := Possibly_Prime or
++        FZ_EqP_W(T, 1) or FZ_EqP(T, X_Minus_One);
++      
++      -- Needs R - 1 times, but perform for max possible count (gated):
++      for i in 1 .. FZ_Bitness(N) - 1 loop
++         
++         -- T := T^2 mod X
++         FZ_Mod_Sqr_Barrett(X => T, Bar => XBar, Product => T);
++         
++         -- if T = X - 1, and i < R, then X is possibly-prime:
++         Possibly_Prime := Possibly_Prime or 
++           (FZ_EqP(T, X_Minus_One) and W_LtP(Word(i), Word(R)));
++         
++      end loop;
++      
++      -- The output, which will be 1 iff X WAS FOUND to be composite via BW,
++      -- ... or if X was found to equal Zero or One (without regard to BW.)
++      return (1 - Possibly_Prime) or Degen_Composite;
++      -- If X was found to equal Two or Three, output will be 0 (under any BW).
++      
++   end FZ_MR_Composite_On_Witness;
++   
++end FZ_Prime;
+diff -uNr a/ffa/libffa/fz_prime.ads b/ffa/libffa/fz_prime.ads
+--- a/ffa/libffa/fz_prime.ads false
++++ b/ffa/libffa/fz_prime.ads dc79caca9a6a286aec3b4484f21e55f8a61ae1b991ce17909cb3dafe0ef2f761eca6043cf6a86f10ee7e8582dd95f233e271978210dd8778f4140d51ddc8e040
+@@ -0,0 +1,41 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2019 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Prime is
++   
++   pragma Pure;
++   
++   -- Constant-Time Miller-Rabin Test on N using the given Witness.
++   -- Witness will be used as-is if it conforms to the valid bounds,
++   -- i.e. 2 <= Witness <= N - 2; otherwise will be transformed into a
++   -- valid Witness via modular arithmetic.
++   -- Outputs ONE if N WAS FOUND composite; ZERO if NOT FOUND.
++   -- Handles degenerate cases of N that M-R per se cannot eat:
++   -- N=0, N=1: ALWAYS 'FOUND COMPOSITE'; 2, 3 - ALWAYS 'NOT FOUND'.
++   -- If N is Even and not equal to 2, N is ALWAYS 'FOUND COMPOSITE.'
++   -- For ALL other N, the output is equal to that of the M-R test.
++   function FZ_MR_Composite_On_Witness(N       : in  FZ;
++                                       Witness : in  FZ) return WBool
++     with Pre => N'Length = Witness'Length;
++   
++end FZ_Prime;
+diff -uNr a/ffa/libffa/w_pred.adb b/ffa/libffa/w_pred.adb
+--- a/ffa/libffa/w_pred.adb 7ec39ee4a3ad6422dc9a47cb6c2b2f54c617f935817f8abb8ed43608921a6a401673bcb2444a1aaffe937792073f9b339edaba117f709d280ffc98fda9d70d6f
++++ b/ffa/libffa/w_pred.adb 674ef3017128d99c18659b510929dc1ca0a242e3e05873e356a377552aba62728a24f0a0d8836b0f014fb33f85e95b7a3beeb9b9a0a4f728d43c9bee23379d99
+@@ -19,6 +19,7 @@
+ 
+ with Word_Ops; use Word_Ops;
+ 
++
+ -- Elementary Predicates on Words:
+ package body W_Pred is
+    
+@@ -56,4 +57,11 @@
+       return W_ZeroP(A xor B);
+    end W_EqP;
+    
++   
++   -- Return 1 if A is less than B ; otherwise return 0.
++   function W_LtP(A : in Word; B : in Word) return WBool is
++   begin
++      return W_Borrow(A, B, A - B);
++   end W_LtP;
++   
+ end W_Pred;
+diff -uNr a/ffa/libffa/w_pred.ads b/ffa/libffa/w_pred.ads
+--- a/ffa/libffa/w_pred.ads 030953eda47712590600cf57f24df3b0a828ef877446545f47b35b151b82fa94cd1f20d5e0eb96afc8f971182112ca955407f54dafb5c6b4a66b8fc1fe0a1023
++++ b/ffa/libffa/w_pred.ads 58712eb4c343cd4d5980a895dc2f092e847398f4e70f64edaaa644b20a3964fc919bcc3ca8a047fb6cf3b89e1ded009bef35dab19e223316edbafe6ce306d157
+@@ -44,4 +44,8 @@
+    function W_EqP(A : in Word; B : in Word) return WBool;
+    pragma Inline_Always(W_EqP);
+    
++   -- Return 1 if A is less than B ; otherwise return 0.
++   function W_LtP(A : in Word; B : in Word) return WBool;
++   pragma Inline_Always(W_LtP);
++   
+ end W_Pred;

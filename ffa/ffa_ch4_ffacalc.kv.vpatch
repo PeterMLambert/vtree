@@ -1,0 +1,1126 @@
+diff -uNr a/ffa/ffacalc/README b/ffa/ffacalc/README
+--- a/ffa/ffacalc/README false
++++ b/ffa/ffacalc/README e61da32cd223c6eb8b83c5161d88dbfad3779a744baccbedd1af357e941d0e17b324e3ff1177c72300d76a8c71486a15a473ff635005238b296bd939a85e0eda
+@@ -0,0 +1,36 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++to clean:
++gprclean
++
++to build:
++gprbuild
++
++to build debug, or on crapple:
++gprbuild -Xmode=debug
++
++
++'libffa' will build recursively.
++
++to run:
++./bin/ffa_calc WIDTH HEIGHT
++
++WIDTH  must be a... see libffa/fz_lim.ads.
++HEIGHT must be equal to or great than 1.
+diff -uNr a/ffa/ffacalc/bin/README b/ffa/ffacalc/bin/README
+--- a/ffa/ffacalc/bin/README false
++++ b/ffa/ffacalc/bin/README 5fdbae897eb301a711bf95707f329517db540e34c182a5beec96e93d5d0d856cec2ed6b01c1191f865e8d1c45709a462c70c3005d4aa3676eb445d1479edf2e5
+@@ -0,0 +1 @@
++Placeholder.
+diff -uNr a/ffa/ffacalc/cmdline.adb b/ffa/ffacalc/cmdline.adb
+--- a/ffa/ffacalc/cmdline.adb false
++++ b/ffa/ffacalc/cmdline.adb ee9ad64e37cfc68344afe8f1d5dfa4683b808e7d4719b16d1b5605661c9736ae7d99631c97fcc55f03416a2df6d717216884e34612080c3f7c887e3ea00ff903
+@@ -0,0 +1,60 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with System; use System;
++
++package body CmdLine is
++   
++   -- Test if GNAT's cmdline mechanism is available
++   function Initialized return Boolean is
++      gnat_argv : System.Address;
++      pragma Import (C, gnat_argv, "gnat_argv");
++
++   begin
++      return gnat_argv /= System.Null_Address;
++   end Initialized;
++   
++   
++   -- Fill the provided string with the text of Number-th cmdline arg
++   procedure Get_Argument(Number : in  Natural;
++                          Result : out String) is
++   begin
++      if Number >= Arg_Count or (not Initialized) then
++         raise Constraint_Error;
++      end if;
++      
++      declare
++         L   : constant Integer := Len_Arg(Number);
++         Arg : aliased String(1 .. L);
++      begin
++         -- Will it fit into the available space?
++         if L > Result'Length then
++            raise Constraint_Error;
++         end if;
++         
++         -- Get this arg string from where GNAT stowed it
++         Fill_Arg(Arg'Address, Number);
++         
++         -- Copy it to Result:
++         Result := (others => ' ');
++         Result(Arg'Range) := Arg;
++      end;
++   end Get_Argument;
++   
++end CmdLine;
+diff -uNr a/ffa/ffacalc/cmdline.ads b/ffa/ffacalc/cmdline.ads
+--- a/ffa/ffacalc/cmdline.ads false
++++ b/ffa/ffacalc/cmdline.ads 80b0a736f6d5de9cb0c563a254465cc6ab2cd3a045bfbfecbb347069ce8a748aa9cd9c9268fe578ce10f29595a5a3efb4c67adc3f46ece432a2a8c7663bb2ca3
+@@ -0,0 +1,45 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with System;
++
++package CmdLine is
++   
++   -- IMHO this is reasonable.
++   CmdLineArg_Length : constant Positive := 256;
++   
++   subtype CmdLineArg is String(1 .. CmdLineArg_Length);
++   
++   function Initialized return Boolean;
++   
++   function Arg_Count return Natural;
++   pragma Import(C, Arg_Count, "__gnat_arg_count");
++   
++   procedure Get_Argument(Number : in  Natural;
++                          Result : out String);
++   
++private
++   
++   procedure Fill_Arg (A : System.Address; Arg_Num : Integer);
++   pragma Import(C, Fill_Arg, "__gnat_fill_arg");
++   
++   function Len_Arg (Arg_Num : Integer) return Integer;
++   pragma Import(C, Len_Arg, "__gnat_len_arg");
++   
++end CmdLine;
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb false
++++ b/ffa/ffacalc/ffa_calc.adb 4775dcd387fd903f856a9ec5ad9a1a526c4dee9c146b5393a958608e2abde97c75a92f32891804b3058c4316aa0399fca0713f17c78319e836d76cc93baaddf4
+@@ -0,0 +1,479 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++-- Basics
++with OS;          use OS;
++with CmdLine;     use CmdLine;
++
++-- FFA
++with FZ_Lim;   use FZ_Lim;
++with Words;    use Words;
++with W_Pred;   use W_Pred;
++with FZ_Type;  use FZ_Type;
++with FZ_Basic; use FZ_Basic;
++with FZ_Arith; use FZ_Arith;
++with FZ_Cmp;   use FZ_Cmp;
++with FZ_Pred;  use FZ_Pred;
++with FZ_BitOp; use FZ_BitOp;
++with FZ_Shift; use FZ_Shift;
++
++-- For Output
++with FFA_IO;   use FFA_IO;
++
++
++procedure FFA_Calc is
++   
++   Width  : Positive; -- Desired FFA Width
++   Height : Positive; -- Desired Height of Stack
++   
++begin
++   if Arg_Count /= 3 then
++      Eggog("Usage: ./ffa_calc WIDTH HEIGHT");
++   end if;
++   
++   declare
++      Arg1 : CmdLineArg;
++      Arg2 : CmdLineArg;
++   begin
++      -- Get commandline args:
++      Get_Argument(1, Arg1); -- First arg
++      Get_Argument(2, Arg2); -- Second arg
++      
++      -- Parse into Positives:
++      Width  := Positive'Value(Arg1);
++      Height := Positive'Value(Arg2);
++   exception
++      when others =>
++         Eggog("Invalid arguments!");
++   end;
++   
++   -- Test if proposed Width is permissible:
++   if not FZ_Valid_Bitness_P(Width) then
++      Eggog("Invalid Width: " & FZ_Validity_Rule_Doc);
++   end if;
++   
++   -- The Calculator itself:
++   declare
++      
++      -- The number of Words required to make a FZ of the given Bitness.
++      Wordness : Indices := Indices(Width / Bitness);
++      
++      --------------------------------------------------------
++      -- State --
++      --------------------------------------------------------
++      -- The Stack:
++      subtype Stack_Positions is Natural range 0 .. Height;
++      type Stacks is array(Stack_Positions range <>) of FZ(1 .. Wordness);
++      Stack      : Stacks(Stack_Positions'Range);
++      
++      -- Stack Pointer:
++      SP         : Stack_Positions := Stack_Positions'First;
++      
++      -- Carry/Borrow Flag:
++      Flag       : WBool   := 0;
++      
++      -- Odometer:
++      Pos        : Natural := 0;
++      
++      -- The current levels of the three types of nestedness:
++      QuoteLevel : Natural := 0;
++      CommLevel  : Natural := 0;
++      CondLevel  : Natural := 0;
++      --------------------------------------------------------
++      
++      
++      -- Clear the stack and set SP to bottom.
++      procedure Zap is
++      begin
++         -- Clear the stack
++         for i in Stack'Range loop
++            FZ_Clear(Stack(i));
++         end loop;
++         -- Set SP to bottom
++         SP   := Stack_Positions'First;
++         -- Clear Overflow flag
++         Flag := 0;
++      end Zap;
++      
++      
++      -- Report a fatal error condition at the current symbol
++      procedure E(S : in String) is
++      begin
++         Eggog("Pos:" & Natural'Image(Pos) & ": " & S);
++      end E;
++      
++      
++      -- Move SP up
++      procedure Push is
++      begin
++         if SP = Stack_Positions'Last then
++            E("Stack Overflow!");
++         else
++            SP := SP + 1;
++         end if;
++      end Push;
++      
++      
++      -- Discard the top of the stack
++      procedure Drop is
++      begin
++         FZ_Clear(Stack(SP));
++         SP := SP - 1;
++      end Drop;
++      
++      
++      -- Check if stack has the necessary N items
++      procedure Want(N : in Positive) is
++      begin
++         if SP < N then
++            E("Stack Underflow!");
++         end if;
++      end Want;
++      
++      
++      -- Slide a new hex digit into the FZ on top of stack
++      procedure Ins_Hex_Digit(N : in out FZ;
++                              D : in Nibble) is
++         Overflow : Word := 0;
++      begin
++         -- Make room in this FZ for one additional hex digit
++         FZ_ShiftLeft_O(N        => N,
++                        ShiftedN => N,
++                        Count    => 4,
++                        Overflow => Overflow);
++         
++         -- Constants which exceed the Width are forbidden:
++         if W_NZeroP(Overflow) = 1 then
++            E("Constant Exceeds Bitness!");
++         end if;
++         
++         -- Set the new digit
++         FZ_Or_W(N, D);
++      end;
++      
++      
++      -- Execute a Normal Op
++      procedure Op_Normal(C : in Character) is
++         
++         -- Over/underflow output from certain ops
++         F : Word;
++         
++      begin
++         
++         case C is
++            
++            --------------
++            -- Stickies --
++            --------------
++            -- Enter Commented
++            when '(' =>
++               CommLevel := 1;
++               
++               -- Exit Commented (but we aren't in it!)
++            when ')' =>
++               E("Mismatched close-comment parenthesis !");
++               
++               -- Enter Quoted
++            when '[' =>
++               QuoteLevel := 1;
++               
++               -- Exit Quoted (but we aren't in it!)
++            when ']' =>
++               E("Mismatched close-quote bracket !");
++               
++               -- Enter a ~taken~ Conditional branch:
++            when '{' =>
++               Want(1);
++               if FZ_ZeroP(Stack(SP)) = 1 then
++                  CondLevel := 1;
++               end if;
++               Drop;
++               
++               -- Exit from a ~non-taken~ Conditional branch:
++               -- ... we push a 0, to suppress the 'else' clause
++            when '}' =>
++               Push;
++               WBool_To_FZ(0, Stack(SP));
++               
++               ----------------
++               -- Immediates --
++               ----------------
++               
++               -- These operate on the FZ ~currently~ at top of the stack;
++               -- and this means that the stack may NOT be empty.
++               
++            when '0' .. '9' =>
++               Want(1);
++               Ins_Hex_Digit(Stack(SP),
++                             Character'Pos(C) - Character'Pos('0'));
++               
++            when 'A' .. 'F' =>
++               Want(1);
++               Ins_Hex_Digit(Stack(SP),
++                             10 + Character'Pos(C) - Character'Pos('A'));
++               
++            when 'a' .. 'f' =>
++               Want(1);
++               Ins_Hex_Digit(Stack(SP),
++                             10 + Character'Pos(C) - Character'Pos('a'));
++               
++               ------------------
++               -- Stack Motion --
++               ------------------
++               
++               -- Push a 0 onto the stack
++            when '.' =>
++               Push;
++               FZ_Clear(Stack(SP));
++               
++               -- Dup
++            when '"' =>
++               Want(1);
++               Push;
++               Stack(SP) := Stack(SP - 1);
++               
++               -- Drop
++            when '_' =>
++               Want(1);
++               Drop;
++               
++               -- Swap
++            when ''' =>
++               Want(2);
++               FZ_Swap(Stack(SP), Stack(SP - 1));
++               
++               -- Over
++            when '`' =>
++               Want(2);
++               Push;
++               Stack(SP) := Stack(SP - 2);
++               
++               ----------------
++               -- Predicates --
++               ----------------
++               
++               -- Equality
++            when '=' =>
++               Want(2);
++               WBool_To_FZ(FZ_Eqp(X => Stack(SP),
++                                  Y => Stack(SP - 1)),
++                           Stack(SP - 1));
++               Drop;
++               
++               -- Less-Than
++            when '<' =>
++               Want(2);
++               WBool_To_FZ(FZ_LessThanP(X => Stack(SP - 1),
++                                        Y => Stack(SP)),
++                           Stack(SP - 1));
++               Drop;
++               
++               -- Greater-Than
++            when '>' =>
++               Want(2);
++               WBool_To_FZ(FZ_GreaterThanP(X => Stack(SP - 1),
++                                           Y => Stack(SP)),
++                           Stack(SP - 1));
++               Drop;
++               
++               ----------------
++               -- Arithmetic --
++               ----------------
++               
++               -- Subtract
++            when '-' =>
++               Want(2);
++               FZ_Sub(X          => Stack(SP - 1),
++                      Y          => Stack(SP),
++                      Difference => Stack(SP - 1),
++                      Underflow  => F);
++               Flag := W_NZeroP(F);
++               Drop;
++               
++               -- Add
++            when '+' =>
++               Want(2);
++               FZ_Add(X        => Stack(SP - 1),
++                      Y        => Stack(SP),
++                      Sum      => Stack(SP - 1),
++                      Overflow => F);
++               Flag := W_NZeroP(F);
++               Drop;
++               
++               -----------------
++               -- Bitwise Ops --
++               -----------------
++               
++               -- Bitwise-And
++            when '&' =>
++               Want(2);
++               FZ_And(X      => Stack(SP - 1),
++                      Y      => Stack(SP),
++                      Result => Stack(SP - 1));
++               Drop;
++               
++               -- Bitwise-Or
++            when '|' =>
++               Want(2);
++               FZ_Or(X      => Stack(SP - 1),
++                     Y      => Stack(SP),
++                     Result => Stack(SP - 1));
++               Drop;
++               
++               -- Bitwise-Xor
++            when '^' =>
++               Want(2);
++               FZ_Xor(X      => Stack(SP - 1),
++                      Y      => Stack(SP),
++                      Result => Stack(SP - 1));
++               Drop;
++               
++               -- Bitwise-Not (1s-Complement)
++            when '~' =>
++               Want(1);
++               FZ_Not(Stack(SP), Stack(SP));
++               
++               -----------
++               -- Other --
++               -----------
++               
++               -- mUx
++            when 'U' =>
++               Want(3);
++               FZ_Mux(X      => Stack(SP - 2),
++                      Y      => Stack(SP - 1),
++                      Result => Stack(SP - 2),
++                      Sel    => FZ_NZeroP(Stack(SP)));
++               Drop;
++               Drop;
++               
++               -- Put the Overflow flag on the stack
++            when 'O' =>
++               Push;
++               WBool_To_FZ(Flag, Stack(SP));
++               
++               -- Print the FZ on the top of the stack
++            when '#' =>
++               Want(1);
++               Dump(Stack(SP));
++               Drop;
++               
++               -- Zap (reset)
++            when 'Z' =>
++               Zap;
++               
++               -- Quit with Stack Trace
++            when 'Q' =>
++               for I in reverse Stack'First + 1 .. SP loop
++                  Dump(Stack(I));
++               end loop;
++               Quit(0);
++               
++               ----------
++               -- NOPs --
++               ----------
++               
++               -- Ops we have not yet spoken of -- do nothing
++            when others =>
++               null;
++               
++         end case;
++         
++      end Op_Normal;
++      
++      
++      -- Process a Symbol
++      procedure Op(C : in Character) is
++      begin
++         -- First, see whether we are in a state of nestedness:
++         
++         -- ... in a Comment block:
++         if CommLevel > 0 then
++            case C is
++               when ')' =>  -- Drop a nesting level:
++                  CommLevel := CommLevel - 1;
++               when '(' =>  -- Add a nesting level:
++                  CommLevel := CommLevel + 1;
++               when others =>
++                  null; -- Other symbols have no effect at all
++            end case;
++            
++            -- ... in a Quote block:
++         elsif QuoteLevel > 0 then
++            case C is
++               when ']' =>   -- Drop a nesting level:
++                  QuoteLevel := QuoteLevel - 1;
++               when '[' =>   -- Add a nesting level:
++                  QuoteLevel := QuoteLevel + 1;
++               when others =>
++                  null; -- Other symbols have no effect on the level
++            end case;
++            
++            -- If we aren't the mode-exiting ']', print current symbol:
++            if QuoteLevel > 0 then
++               Write_Char(C);
++            end if;
++            
++            --- ... in a ~taken~ Conditional branch:
++         elsif CondLevel > 0 then
++            case C is
++               when '}' =>   -- Drop a nesting level:
++                  CondLevel := CondLevel - 1;
++                  
++                  -- If we exited the Conditional as a result,
++                  -- we push a 1 to trigger the possible 'else' clause:
++                  if CondLevel = 0 then
++                     Push;
++                     WBool_To_FZ(1, Stack(SP));
++                  end if;
++                  
++               when '{' =>   -- Add a nesting level:
++                  CondLevel := CondLevel + 1;
++               when others =>
++                  null; -- Other symbols have no effect on the level
++            end case;
++         else
++            -- This is a Normal Op, so proceed with the normal rules.
++            Op_Normal(C);
++         end if;
++         
++      end Op;
++      
++      
++      -- Current Character
++      C : Character;
++      
++   begin
++      -- Reset the Calculator      
++      Zap;
++      -- Process characters until EOF:
++      loop
++         if Read_Char(C) then
++            -- Execute Op:
++            Op(C);
++            -- Advance Odometer
++            Pos := Pos + 1;
++         else
++            Zap;
++            Quit(0); -- if EOF, we're done
++         end if;
++      end loop;
++   end;
++   
++end FFA_Calc;
+diff -uNr a/ffa/ffacalc/ffa_calc.gpr b/ffa/ffacalc/ffa_calc.gpr
+--- a/ffa/ffacalc/ffa_calc.gpr false
++++ b/ffa/ffacalc/ffa_calc.gpr 9721da8826da76aa03974927e9869b598a1f8ce3c8dba308343c08ae7d27124a9ba65aee35afdb704ed5eee3ec319cb036ecc97266388c833a458dd889a9a1f1
+@@ -0,0 +1,69 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with "../libffa/ffa.gpr";
++
++project FFA_Calc is
++  
++  for Object_Dir use "obj";
++  
++  type Mode_Type is ("debug", "release");
++  Mode : Mode_Type := external ("mode", "release");
++  
++  for Languages   use ("Ada");
++  for Source_Dirs use (".");
++  for Exec_Dir    use "bin";
++  for Main        use ("ffa_calc.adb");
++  
++  package Compiler is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ("-g");
++        when "release" =>
++           for Switches ("Ada")
++             use ("-O2", "-fdump-scos", "-gnata", "-fstack-check",
++                  "-fdata-sections", "-ffunction-sections");
++     end case;
++  end Compiler;
++
++  package Binder is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-static");
++     end case;
++  end Binder;
++
++  package Linker is
++     case Mode is
++        when "debug" =>
++           for Switches ("Ada")
++             use ();
++        when "release" =>
++           for Switches ("Ada")
++             use ("-Wl,--gc-sections",
++                  "-static");
++     end case;
++  end Linker;
++  
++end FFA_Calc;
+diff -uNr a/ffa/ffacalc/ffa_io.adb b/ffa/ffacalc/ffa_io.adb
+--- a/ffa/ffacalc/ffa_io.adb false
++++ b/ffa/ffacalc/ffa_io.adb 0af3b0f9472f5c3aa25c62e3038e27dbb016bfa0451a28a86acfc52cf7b31bd3e51067bf679c5331beea94419d92dbce45351bb00143f2865d07e44e86c5168c
+@@ -0,0 +1,65 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with OS;       use OS;
++
++
++with Words;    use Words;
++with W_Shifts; use W_Shifts;
++with FZ_Type;  use FZ_Type;
++
++
++package body FFA_IO is
++   
++   -- Obtain the WChars corresponding to the given Word
++   function W_To_WChars(N : Word) return WChars is
++      H      : constant array(0 .. 15) of Character := "0123456789ABCDEF";
++      W      : Word := N;
++      Result : WChars;
++   begin
++      for b in WChars'Range loop               -- From bottom to top:
++         Result(B) := H(Natural(W and 16#F#)); -- Get current nibble.
++         W         := Shift_Right(W, 4);       -- Get the next nibble.
++      end loop;
++      return Result;
++   end W_To_WChars;
++   
++   
++   -- Display a hex representation of W to stdout
++   procedure Dump(W : in Word) is
++      T : WChars := W_To_WChars(W);
++   begin
++      for i in reverse T'Range loop
++         Write_Char(T(i));
++      end loop;
++   end Dump;
++   
++   
++   -- Display a hex representation of N to stdout
++   procedure Dump(N : in FZ) is
++   begin
++      for i in reverse N'Range loop
++         Dump(N(i));
++      end loop;
++      
++      -- Newline, for clarity.
++      Write_Newline;
++   end Dump;
++   
++end FFA_IO;
+diff -uNr a/ffa/ffacalc/ffa_io.ads b/ffa/ffacalc/ffa_io.ads
+--- a/ffa/ffacalc/ffa_io.ads false
++++ b/ffa/ffacalc/ffa_io.ads de4ff4dfc81df4a4febc2b5a1c359df912969821fb3790d51d78eed6352fa52d03eb70a9226ef896cee16dcfc40ab2facb9fd49d54110fb86f3febd8caf29e64
+@@ -0,0 +1,37 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++package FFA_IO is
++   
++   -- Character representation of a Word
++   type WChars is array(1 .. 2 * Byteness) of Character;
++   
++   -- Obtain the WChars corresponding to the given Word
++   function W_To_WChars(N : Word) return WChars;
++   
++   -- Display a hex representation of W to stdout
++   procedure Dump(W : in Word);
++   
++   -- Display a hex representation of N to stdout
++   procedure Dump(N : in FZ);
++   
++end FFA_IO;
+diff -uNr a/ffa/ffacalc/obj/README b/ffa/ffacalc/obj/README
+--- a/ffa/ffacalc/obj/README false
++++ b/ffa/ffacalc/obj/README 5fdbae897eb301a711bf95707f329517db540e34c182a5beec96e93d5d0d856cec2ed6b01c1191f865e8d1c45709a462c70c3005d4aa3676eb445d1479edf2e5
+@@ -0,0 +1 @@
++Placeholder.
+diff -uNr a/ffa/ffacalc/os.adb b/ffa/ffacalc/os.adb
+--- a/ffa/ffacalc/os.adb false
++++ b/ffa/ffacalc/os.adb 0d869ed1df92233694f2909b5e1f747e2d6a10bb249295db47a6a06291adffbc091a29b025175fb99adadbda319408ef11a95be26fbd0a92ceaceddee0a03b36
+@@ -0,0 +1,66 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package body OS is
++   
++   -- Receive a character from the TTY, and True if success (False if EOF)
++   function Read_Char(C : out Character) return Boolean is
++      i : int;
++      Result : Boolean := False;
++   begin
++      i := GetChar;
++      if i /= EOF then
++         C := Character'Val(i);
++         Result := True;
++      end if;
++      return Result;
++   end Read_Char;
++   
++   
++   -- Send a character to the TTY.
++   procedure Write_Char(C : in Character) is
++      R : int;
++      pragma Unreferenced(R);
++   begin
++      R := PutChar(int(Character'Pos(C)));
++   end Write_Char;
++   
++   
++   -- Send a Newline to the TTY.
++   procedure Write_Newline is
++   begin
++      Write_Char(Character'Val(16#A#));
++   end Write_Newline;
++   
++   
++   -- Exit with an error condition report.
++   procedure Eggog(M : String) is
++   begin
++      for i in 1 .. M'Length loop
++         To_Stderr(M(I));
++      end loop;
++      
++      -- Emit LF
++      To_Stderr(Character'Val(16#A#));
++      
++      -- Exit
++      Quit(Sadness_Code);
++   end;
++   
++end OS;
+diff -uNr a/ffa/ffacalc/os.ads b/ffa/ffacalc/os.ads
+--- a/ffa/ffacalc/os.ads false
++++ b/ffa/ffacalc/os.ads a07e5c21c783da495725bd3ffdbf6903b9b309ca4b13d31675b11c22359ee2c9d1db6a9690109075030a02779eb3ebd9d4c9e4f69354651c0c097f11bd5c38bd
+@@ -0,0 +1,61 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Interfaces;   use Interfaces;
++with Interfaces.C; use Interfaces.C;
++
++
++package OS is
++   
++   -- Receive a character from the TTY, and True if success (False if EOF)
++   function Read_Char(C : out Character) return Boolean;
++   
++   -- Send a character to the TTY.
++   procedure Write_Char(C : in Character);
++   
++   -- Send a Newline to the TTY.
++   procedure Write_Newline;
++   
++   -- Exit with an error condition report.
++   procedure Eggog(M : String);
++   
++   procedure Quit(Return_Code : Integer);
++   pragma Import
++     (Convention    => C,
++      Entity        => Quit,
++      External_Name => "exit");
++   
++private
++   
++   -- POSIX stdio:   
++   EOF : constant int := -1;
++
++   function GetChar return int;
++   pragma Import(C, getchar);
++   
++   function PutChar(item: int) return int;
++   pragma Import(C, putchar);
++   
++   -- GNATistic
++   procedure To_Stderr(C : Character);
++   pragma Import(Ada, To_Stderr, "__gnat_to_stderr_char");
++   
++   Sadness_Code : constant Integer := -1;
++   
++end OS;
+diff -uNr a/ffa/libffa/fz_basic.adb b/ffa/libffa/fz_basic.adb
+--- a/ffa/libffa/fz_basic.adb 445a0eea698ac3f75014034fd7d9e74d8253862ad5d62b77881db9e986ab0d82d24c88fb227b12ea9c41fdffaebbf685a21780e42a8353cd81c74c8818c67898
++++ b/ffa/libffa/fz_basic.adb 6460958067c44f2c661e4a19590a65d33615bad5cbf436f155499a11e8015e81cef9b4f036a41bf280fc2cb1dbdb885bb56edd7d4a79f9276b93dd0470c91659
+@@ -34,6 +34,15 @@
+    pragma Inline_Always(FZ_Clear);
+    
+    
++   -- Set given FZ to a given truth value
++   procedure WBool_To_FZ(V : in WBool; N : out FZ) is
++   begin
++      FZ_Clear(N);
++      FZ_Set_Head(N, V);
++   end WBool_To_FZ;
++   pragma Inline_Always(WBool_To_FZ);
++   
++   
+    -- First word of N := Source
+    procedure FZ_Set_Head(N : out FZ; Source : in Word) is
+    begin
+diff -uNr a/ffa/libffa/fz_basic.ads b/ffa/libffa/fz_basic.ads
+--- a/ffa/libffa/fz_basic.ads 5ae6fb91aabcfb353c9c2f5cc465795bc91fed25b5a98dd9a97b06fa959380e581f3f020d18717d791c858622f94c7ec13430d6fba2476274e0a1d5985b8cc90
++++ b/ffa/libffa/fz_basic.ads 9c1f0228b71059605c53d22a88c44e14705f5c82eb3877131228e30c62549e83187278b5370697c858f10aa8373d666fbc42b8831d39c1923fc544847b75a31c
+@@ -28,6 +28,9 @@
+    -- N := 0
+    procedure FZ_Clear(N : out FZ);
+    
++   -- Set given FZ to a given truth value
++   procedure WBool_To_FZ(V : in WBool; N : out FZ);
++   
+    -- First word of N := Source
+    procedure FZ_Set_Head(N : out FZ; Source : in Word);
+    
+diff -uNr a/ffa/libffa/fz_lim.adb b/ffa/libffa/fz_lim.adb
+--- a/ffa/libffa/fz_lim.adb false
++++ b/ffa/libffa/fz_lim.adb f6117d2b425e46e65421abdab29fdb3ee664b657b36930a8249ec3e4983be09258ca4bd6b24c0b81050623c39f58bf6b2eeabda579a2066176f439d664cd2053
+@@ -0,0 +1,46 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package body FZ_Lim is
++   
++   -- Determine if a proposed FFA Bitness is valid.
++   function FZ_Valid_Bitness_P(B : in Positive) return Boolean is
++      Result   : Boolean := False;
++      T        : Natural := B;
++      PopCount : Natural := 0;
++   begin
++      -- Supposing we meet the minimal bitness:
++      if B >= FZ_Minimal_Bitness then
++         while T > 0 loop
++            if T mod 2 = 1 then
++               PopCount := PopCount + 1;
++            end if;
++            T := T / 2;
++         end loop;
++         
++         -- Is B a power of 2?
++         if PopCount = 1 then
++            Result := True;
++         end if;
++      end if;
++      
++      return Result;
++   end FZ_Valid_Bitness_P;
++   
++end FZ_Lim;
+diff -uNr a/ffa/libffa/fz_lim.ads b/ffa/libffa/fz_lim.ads
+--- a/ffa/libffa/fz_lim.ads false
++++ b/ffa/libffa/fz_lim.ads a447e0654cef6958cb6c0b03094fe8b900b6ec0cda812355565c1972051973398c8390d968eaf5719d8b0b97d4d5f0b0d503e906645e020c97d479169429f332
+@@ -0,0 +1,32 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package FZ_Lim is
++   
++   pragma Pure;
++   
++   FZ_Minimal_Bitness : constant Positive := 256;
++   
++   FZ_Validity_Rule_Doc : constant String
++     := "Must be greater than or equal to 256, and a power of 2.";
++   
++   -- Determine if a proposed FFA Bitness is valid.
++   function FZ_Valid_Bitness_P(B : in Positive) return Boolean;
++   
++end FZ_Lim;
+diff -uNr a/ffa/libffa/fz_pred.adb b/ffa/libffa/fz_pred.adb
+--- a/ffa/libffa/fz_pred.adb 0e7912475e7c658bb6371c563d6a8a95b45d22ce5a6fa9bee0c8dddb839a361ea7791c8a8ebfbcc8c325562a9a52e2ad66c984ccd8bba1931b1ec4874efbfd21
++++ b/ffa/libffa/fz_pred.adb 512c0f2246ad097087f88a96449fc5a9122f70d069081ecc6a058d17b152ea908f34c834d10f696467cd9321ed656556ec4f62efb0cb37d7307ae15edd2cd4a9
+@@ -38,6 +38,14 @@
+    pragma Inline_Always(FZ_ZeroP);
+    
+    
++   -- 1 iff N != 0 (branch-free); else 0
++   function FZ_NZeroP(N : in FZ) return WBool is
++   begin
++      return 1 xor FZ_ZeroP(N);
++   end FZ_NZeroP;
++   pragma Inline_Always(FZ_NZeroP);
++   
++   
+    -- 1 iff N is odd
+    function FZ_OddP(N : in FZ) return WBool is
+    begin
+diff -uNr a/ffa/libffa/fz_pred.ads b/ffa/libffa/fz_pred.ads
+--- a/ffa/libffa/fz_pred.ads 019c293f79d46bd5c0895a0f92143884a40072b67a1e22335d96d1557c8f1f760985b5aca1a892905791656acda957014e1b67a927ec0946dc1cf8ae53592bb5
++++ b/ffa/libffa/fz_pred.ads c2cc1622f1b54ec8bd19fa3ba7e5fb70c78e5e0e5072f308ebbfd8dfcc8f479d6cccc6c7d0dcf1ff0310c035e5ff4ca790c3b5f9c181978f536c605bf6f53c63
+@@ -32,6 +32,9 @@
+    -- 1 iff N == 0 (branch-free); else 0
+    function FZ_ZeroP(N : in FZ) return WBool;
+    
++   -- 1 iff N != 0 (branch-free); else 0
++   function FZ_NZeroP(N : in FZ) return WBool;
++   
+    -- 1 iff N is odd
+    function FZ_OddP(N : in FZ) return WBool;
+    
+diff -uNr a/ffa/libffa/words.ads b/ffa/libffa/words.ads
+--- a/ffa/libffa/words.ads 81a4bf46abd4b92f58b791872c94193606e9847f7c232aa604f91b71412f0b9732d23be295810596355b68b8111ef5102bb7778dcb2fe987c948490a95b49ccd
++++ b/ffa/libffa/words.ads 2223da25c192f8bab7a0924518ab9543a66d1793b86c2ca37a0b9e1e59162b8358dbbce6442811ec4813fb215e25890fda740679e32b6b2e5b6fd0fb71036dbc
+@@ -40,6 +40,9 @@
+    -- The very same Word, but its only legal values are 0 and 1.
+    subtype WBool is Word range 0 .. 1;
+    
++   -- Word, restricted to Nibble range.
++   subtype Nibble is Word range 0 .. 16#F#;
++   
+    -- When we must refer to individual bit positions of a machine word:
+    subtype WBit_Index is Natural range 0 .. Bitness - 1;
+    

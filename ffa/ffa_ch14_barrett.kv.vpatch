@@ -1,0 +1,1129 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT 6b79786e1249c1470ad1233f54de117bab8b9cc5a68224f31d21b07772d42f255a909d8fa17c5ee240481b8c48fbcd942fd3a82c3ba0cc2b2bdb8b07f3c12225
++++ b/ffa/MANIFEST.TXT a38b616095bbf9035689c8bf9be759a0e958d99249ddbc68a675eef479e211d7916a93ac702ecb3c5627cd5f0940a0e43d870ac488d063b1b1b7654bb3e4e243
+@@ -12,3 +12,4 @@
+  551091 ffa_ch12_karatsuba_redux       "Karatsuba Redux."
+  551348 ffa_w_borrow_expr diana_coman Replaces expression for calculating borrow bit with more readable version that is also symmetrical to that for carry bit.
+  551516 ffa_ch13_measure_and_qshifts   "Measure and Quiet Shifts."
++ 555788 ffa_ch14_barrett               "Barrett's Modular Reduction."
+diff -uNr a/ffa/README b/ffa/README
+--- a/ffa/README 1e1522f2aeb7eeb67f9f420498e76e141f39197818ef5768eab4dbda5a34af29253f0a48e059b9adee583a96d76a4321a66030774886512b0003a5c1a0722e2a
++++ b/ffa/README e6ef90e8e81e2504052a9c3b4ebcf1f7f7aba62e8b2330e96eaf48978e1749a0d655261b8ac31028af0abbd1f50ab9fd7492dd2a80852b8e8e6958a55e00ecb9
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -17,9 +17,10 @@
+ ------------------------------------------------------------------------------
+ ------------------------------------------------------------------------------
+ 
+-See HISTORY.TXT for full chronology of changes.
++See MANIFEST.TXT for full chronology of changes.
+ 
+ Project WWW: http://www.loper-os.org/?cat=49
++             ( Start with Chapter 1 : http://www.loper-os.org/?p=1913 )
+ 
+ Questions?
+ 
+diff -uNr a/ffa/ffacalc/cmdline.adb b/ffa/ffacalc/cmdline.adb
+--- a/ffa/ffacalc/cmdline.adb ee9ad64e37cfc68344afe8f1d5dfa4683b808e7d4719b16d1b5605661c9736ae7d99631c97fcc55f03416a2df6d717216884e34612080c3f7c887e3ea00ff903
++++ b/ffa/ffacalc/cmdline.adb 888b4f60e7068f0069d7293242209ac500a7ba7f5b6f01f8eef23da1d52b26eaf47bc80465c9fbd5278aa677afb27cb955427ed0d7e9a8409ef50eb763bb09f8
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -33,7 +33,7 @@
+    
+    -- Fill the provided string with the text of Number-th cmdline arg
+    procedure Get_Argument(Number : in  Natural;
+-                          Result : out String) is
++                          Result : out CmdLineArg) is
+    begin
+       if Number >= Arg_Count or (not Initialized) then
+          raise Constraint_Error;
+diff -uNr a/ffa/ffacalc/cmdline.ads b/ffa/ffacalc/cmdline.ads
+--- a/ffa/ffacalc/cmdline.ads e0ad759605b591a052d598c055ecb9c0bc4856536cdedf2bd616d040e71a5a2b2c3b3d98781707199d1642538f1d76eb12b0e47aa159f449993116e00a95c52e
++++ b/ffa/ffacalc/cmdline.ads 064971bb7e0a8a48fa00b523083a4332b9a4589bf83bb03ca236ef15bc977ba40f7375b00a06deaac84081fff7615b0bc4463eeeded57976b1b084fb37657f46
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -32,7 +32,7 @@
+    pragma Import(C, Arg_Count, "__gnat_arg_count");
+    
+    procedure Get_Argument(Number : in  Natural;
+-                          Result : out String);
++                          Result : out CmdLineArg);
+    
+    function Len_Arg (Arg_Num : Integer) return Integer;
+    pragma Import(C, Len_Arg, "__gnat_len_arg");
+diff -uNr a/ffa/ffacalc/ffa_calc.adb b/ffa/ffacalc/ffa_calc.adb
+--- a/ffa/ffacalc/ffa_calc.adb fa29011671fb6e7c802d18c92d4b94c2d32bb54145a929ece7780830ace49582a6ea090ad4678b55a403fa5ebec34aa091c8672ce1d060e18ed6c87d554e87e9
++++ b/ffa/ffacalc/ffa_calc.adb c6ce2b2efec9bf6172130008c0ea7703d08d07862296a2ca5b1d790352697c3e05d2d233bfcf3f533164e45027a9bfa2815445fdb1e75807f5092335f99b03a4
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -18,6 +18,7 @@
+ ------------------------------------------------------------------------------
+ 
+ -- Basics
++with Version;  use Version;
+ with OS;       use OS;
+ with CmdLine;  use CmdLine;
+ 
+@@ -33,9 +34,9 @@
+ 
+ procedure FFA_Calc is
+    
+-   Width  : Positive;   -- Desired FFA Width
+-   Height : Positive;   -- Desired Height of Stack
+-   RNG    : RNG_Device; -- The active RNG device.
++   Width   : Positive;   -- Desired FFA Width
++   Height  : Positive;   -- Desired Height of Stack
++   RNG     : RNG_Device; -- The active RNG device.
+    
+ begin
+    if Arg_Count < 3 or Arg_Count > 4 then
+@@ -449,13 +450,12 @@
+             when 'W' =>
+                Want(1);
+                declare
+-                  Measure : Word;
+-               begin
+                   -- Find the measure ( 0 if no 1s, or 1 .. FZBitness )
+-                  Measure := FFA_FZ_Measure(Stack(SP));
++                  Measure : FZBit_Index := FFA_FZ_Measure(Stack(SP));
++               begin
+                   -- Put on top of stack
+                   FFA_FZ_Clear(Stack(SP));
+-                  FFA_FZ_Set_Head(Stack(SP), Measure);
++                  FFA_FZ_Set_Head(Stack(SP), Word(Measure));
+                end;
+                
+                -- Put the Overflow flag on the stack
+@@ -480,6 +480,18 @@
+                end loop;
+                Quit(0);
+                
++               -- Put the FFACalc Program Version on the stack,
++               -- followed by FFA Program Version.
++            when 'V' =>
++               Push;
++               Push;
++               -- FFACalc Version:
++               FFA_FZ_Clear(Stack(SP - 1));
++               FFA_FZ_Set_Head(Stack(SP - 1), Word(FFACalc_K_Version));
++               -- FFA Version:
++               FFA_FZ_Clear(Stack(SP));
++               FFA_FZ_Set_Head(Stack(SP), Word(FFA_K_Version));
++               
+                -- Square, give bottom and top halves
+             when 'S' =>
+                Want(1);
+@@ -509,7 +521,7 @@
+                ---------------------------------------------------------
+             when '!' | '@' | '$' | ':' | ';' | ',' |
+                  'G' | 'H' | 'I' | 'J' | 'K' | 'N' |
+-                 'P' | 'T' | 'V' | 'X' | 'Y' =>
++                 'P' | 'T' | 'X' | 'Y' =>
+                
+                E("This Operator is not defined yet: " & C);
+                ---------------------------------------------------------
+diff -uNr a/ffa/ffacalc/version.ads b/ffa/ffacalc/version.ads
+--- a/ffa/ffacalc/version.ads false
++++ b/ffa/ffacalc/version.ads 24fbdeb64a2e0f728092b5e6be2f55d40276cbe30e500a92554b3e702ff9f128d5860664ad4bbb1e4d3ddfb4b0189e043fba946acec305c24a2f216e757b8d86
+@@ -0,0 +1,30 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++package Version is
++   
++   pragma Pure;
++   
++   ----------------------------------------------
++   -- Current 'deg. Kelvin' Version of FFACalc --
++   ----------------------------------------------
++   FFACalc_K_Version : constant Natural := 255;
++   ----------------------------------------------
++   
++end Version;
+diff -uNr a/ffa/libffa/ffa.ads b/ffa/libffa/ffa.ads
+--- a/ffa/libffa/ffa.ads 325d1b598f4588db145a10e3c6344707c6d5bf12fe83acce5210e420034bbc6cfaddc3b23152f515710f467a2d4baa08408dc8bbf5b258cd34d29e289c38998a
++++ b/ffa/libffa/ffa.ads 364f816604e2ee0fc4a07429824e32292032806456afc794d306ee7f9a41180d9a517fb2563311f1f526f9b6512597e974321dca2ac61251d36da4033f18578d
+@@ -40,6 +40,12 @@
+    pragma Pure;
+    
+    ----------------------------------------------------------------------------
++   --- Current 'deg. Kelvin' Version of FFA
++   ----------------------------------------------------------------------------
++   
++   FFA_K_Version : constant Natural := 255;
++   
++   ----------------------------------------------------------------------------
+    --- Fundamental Types and Sizes
+    ----------------------------------------------------------------------------
+    
+@@ -290,7 +296,7 @@
+    ----------------------------------------------------------------------------
+    
+    -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
+-   function FFA_FZ_Measure(N : in FZ) return Word
++   function FFA_FZ_Measure(N : in FZ) return FZBit_Index
+      renames FZ_Measr.FZ_Measure;
+    
+    -- Constant-time arbitrary right-shift.
+diff -uNr a/ffa/libffa/fz_barr.adb b/ffa/libffa/fz_barr.adb
+--- a/ffa/libffa/fz_barr.adb false
++++ b/ffa/libffa/fz_barr.adb 8c306bd23d12315a8d62f760968b2cf32bda6f49279b3f995df7a100587c7b273e79c327c295521e42beda4d1e0a9f0e7f4c5293d57e92843b82c69a353f4687
+@@ -0,0 +1,300 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++
++-----------------------------------------------------------------------------
++--          BEFORE YOU EVEN *THINK* ABOUT MODIFYING THIS PROGRAM:          --
++-----------------------------------------------------------------------------
++--                                    `dMMd`   +NMMMMMMMNo                 --
++--                                 .dM++Md..oNMMMMMMmo`                    --
++--                                 /mM+  +MmmMMMMMMNo.                     --
++--                               /NM+    +MMMMMMNo`     /                  --
++--                              /Nd-   `sNMMMMMy.-oohNNm`                  --
++--                            `yNd-   -yMMMMMMMNNNMMMMs.                   --
++--                            hMd::. -mMMMMMdNMMMMMMm+`                    --
++--                          :hNs.`.:yNyyyo--/sNMMMMy`                      --
++--                         -o..    `..        `.sNh`                       --
++--                       ..`RRR   EEE   AA  DDD  !+:`                      --
++--                     `:   R  R  E    A  A D  D ! .o-                     --
++--                    .s    RRR   EEE  AAAA D  D !  .:`                    --
++--                    .. `` R  R  E    A  A D  D     ys.                   --
++--                   -h  /: R   R EEE  A  A DDD  !/  :mm-                  --
++--                  -mm  `/-    THE PROOFS!!!    -y   sMm-                 --
++--                 -mNy `++` YES THAT MEANS YOU! .s. .`-Nm-                --
++--               `oNN-`:/y``:////:`       `-////``-o.+. -NNo`              --
++--              `oNN: `+:::hNMMMMNyo.   `smNMMMMmy`++    :NNo`             --
++--             `oNy-   .: sMMMMMMMMM:   -MMMMMMMMMs/s.    -yNh-            --
++--            -dNy.   `s. sMMMMMMMmo.----mMMMMMMMNo `.`    .yMd-           --
++--           .dmo.    `o` /mNNNmyo.`sNMMy.+ymNNNNh  `-`     .omd.          --
++--          .mN/       -o` .---.  `oNMNMNs  .----. -/.        /Nm.         --
++--         +mN/        .hhs:.. `  .hMN-MMy   ` `.-+-`          /Nm+        --
++--        +NN:        :hMMMs/m`d   -y- dy    -`:/y              :NN+       --
++--       +Nd:    /: `hMMMmm/ y:Ns::.`````.:oh--                  :dNs.     --
++--     .sNh.    .h+:hMMMy./-  -yMMMyyod+dssMM:. `:                .hMh.    --
++--    .hMy.     +MNMMMMh`   `  `yNMhmsNsmhNh:   /`                  +Mh.   --
++--   -hN+      -dMMMMMNso+- :s   .ymmNMmyh+-   +                     +Nh-  --
++--  `MN+       /MMMMMMh:-    :-      :: :    .+                       +NM` --
++--  `Md///////+mMMMMys////////sh/-         -yy/////////////////////////dM` --
++--   -ssssssssymssssssssssssssssso-      .+ossssssssssssssssssssssssssss-  --
++--                                                                         --
++--Ch. 14A: Barrett’s Modular Reduction:   http://www.loper-os.org/?p=2842  --
++--Ch. 14A-Bis: Barrett’s Physical Bounds: http://www.loper-os.org/?p=2875  --
++--                                                                         --
++-----------------------------------------------------------------------------
++
++with W_Pred;   use W_Pred;
++with W_Shifts; use W_Shifts;
++with FZ_Basic; use FZ_Basic;
++with FZ_Shift; use FZ_Shift;
++with FZ_Arith; use FZ_Arith;
++with FZ_Mul;   use FZ_Mul;
++with FZ_LoMul; use FZ_LoMul;
++with FZ_Measr; use FZ_Measr;
++with FZ_QShft; use FZ_QShft;
++
++
++package body FZ_Barr is
++   
++   -- Prepare the precomputed Barrettoid corresponding to a given Modulus
++   procedure FZ_Make_Barrettoid(Modulus    : in  FZ;
++                                Result     : out Barretoid) is
++      
++      -- Length of Modulus and Remainder
++      Lm : constant Indices := Modulus'Length;
++      
++      -- Remainder register, starts as zero
++      Remainder : FZ(1 .. Lm) := (others => 0);
++      
++      -- Length of Quotient, with an extra Word for top bit (if Degenerate)
++      Lq : constant Indices := (2 * Lm) + 1;
++      
++      -- Valid indices into Quotient, using the above
++      subtype Quotient_Index is Word_Index range 1 .. Lq;
++      
++      -- The Quotient we need, i.e. 2^(2 * ModulusBitness) / Modulus
++      Quotient : FZ(Quotient_Index);
++      
++      -- Permissible 'cuts' for the Slice operation
++      subtype Divisor_Cuts is Word_Index range 2 .. Lm;
++      
++      -- Current bit of Pseudo-Dividend; high bit is 1, all others 0
++      Pb  : WBool := 1;
++      
++      -- Performs Restoring Division on a given segment
++      procedure Slice(Index : Quotient_Index;
++                      Cut   : Divisor_Cuts;
++                      Bits  : Positive) is
++      begin
++         
++         declare
++            
++            -- Borrow, from comparator
++            C   : WBool;
++            
++            -- Left-Shift Overflow
++            LsO : WBool;
++            
++            -- Current cut of Remainder register
++            Rs  : FZ renames Remainder(1 .. Cut);
++            
++            -- Current cut of Divisor
++            Ds  : FZ renames   Modulus(1 .. Cut);
++            
++            -- Current Word of Quotient being made, starting from the highest
++            W   : Word := 0;
++            
++            -- Current bit of Quotient (inverted)
++            nQb : WBool;
++            
++         begin
++            
++            -- For each bit in the current Pseudo-Dividend Word:
++            for b in 1 .. Bits loop
++               
++               -- Advance Rs, shifting in the current Pseudo-Dividend bit:
++               FZ_ShiftLeft_O_I(N        => Rs,
++                                ShiftedN => Rs,
++                                Count    => 1,
++                                OF_In    => Pb, -- Current Pseudo-Dividend bit
++                                Overflow => LsO);
++               
++               -- Subtract Divisor-Cut from R-Cut; Underflow goes into C:
++               FZ_Sub(X => Rs, Y => Ds, Difference => Rs, Underflow => C);
++               
++               -- Negation of current Quotient bit
++               nQb := C and W_Not(LsO);
++               
++               -- If C=1, the subtraction underflowed, and we must undo it:
++               FZ_Add_Gated(X => Rs, Y => Ds, Sum => Rs,
++                            Gate => nQb);
++               
++               -- Save the bit of Quotient that we have found:
++               W := Shift_Left(W, 1) or (1 - nQb); -- i.e. inverse of nQb
++               
++            end loop;
++            
++            -- We made a complete Word of the Quotient; save it:
++            Quotient(Quotient'Last + 1 - Index) := W; -- Indexed from end
++            
++         end;
++         
++      end Slice;
++      pragma Inline_Always(Slice);
++      
++      -- Measure of the Modulus
++      ModulusMeasure : constant FZBit_Index := FZ_Measure(Modulus);
++      
++   begin
++      
++      -- First, process the high Word of the Pseudo-Dividend:
++      Slice(1, 2, 1); -- ... it has just one bit: a 1 at the bottom position
++      
++      -- Once we ate the top 1 bit of Pseudo-Dividend, rest of its bits are 0
++      Pb := 0;
++      
++      -- Process the Modulus-sized segment below the top Word:
++      for i in 2 .. Lm - 1 loop
++         
++         Slice(i, i + 1, Bitness); -- stay ahead by a word to handle carry
++         
++      end loop;
++      
++      -- Process remaining Words:
++      for i in Lm .. Lq loop
++         
++         Slice(i, Lm, Bitness);
++         
++      end loop;
++      
++      -- Record the Quotient (i.e. the Barrettoid proper, Bm)
++      Result.B                    := Quotient(Result.B'Range);
++      
++      -- Record whether we have the Degenerate Case (1 iff Modulus = 1)
++      Result.Degenerate           := W_NZeroP(Quotient(Lq));
++      
++      -- Record a copy of the Modulus, extended with zero Word:
++      Result.ZXM(Modulus'Range)   := Modulus;
++      Result.ZXM(Result.ZXM'Last) := 0;
++      
++      -- Record the parameter Jm:
++      Result.J                    := ModulusMeasure - 1;
++      
++      -- Wm - Jm
++      Result.ZSlide :=
++        FZBit_Index(Bitness * Modulus'Length) - ModulusMeasure + 1;
++      
++   end FZ_Make_Barrettoid;
++   
++   
++   -- Reduce X using the given precomputed Barrettoid.
++   procedure FZ_Barrett_Reduce(X          : in     FZ;
++                               Bar        : in     Barretoid;
++                               XReduced   : in out FZ) is
++      
++      -- Wordness of X, the quantity being reduced
++      Xl      : constant Indices := X'Length;
++      
++      -- Wordness of XReduced (result), one-half of Xl, and same as of Modulus
++      Ml      : constant Indices := XReduced'Length; -- i.e. # of Words in Wm.
++      
++      -- The Modulus we will reduce X by
++      Modulus : FZ renames Bar.ZXM(1 .. Ml);
++      
++      -- Shifted X
++      Xs      : FZ(X'Range);
++      
++      -- Z := Xs * Bm (has twice the length of X)
++      Z       : FZ(1 .. 2 * Xl);
++      
++      -- Upper 3Wm-bit segment of Z that gets shifted to form Zs
++      ZHi     : FZ renames   Z(Ml       + 1  ..  Z'Last       );
++      
++      -- Middle 2Wm-bit segment of Z, that gets multiplied by M to form Q
++      Zs      : FZ renames   Z(Z'First  + Ml ..  Z'Last  - Ml );
++      
++      -- Sub-terms of the Zs * M multiplication:
++      ZsLo    : FZ renames  Zs(Zs'First      .. Zs'Last  - Ml );
++      ZsHi    : FZ renames  Zs(Zs'First + Ml .. Zs'Last       );
++      ZsHiM   : FZ(1 .. Ml);
++      
++      -- Q := Modulus * Zs, i.e. floor(X / M)*M + E*M
++      Q       : FZ(1 .. Xl);
++      QHi     : FZ renames   Q(Q'First  + Ml ..  Q'Last       );
++      
++      -- R is made one Word longer than Modulus (see proof re: why)
++      Rl      : constant Indices := Ml + 1;
++      
++      -- Reduction estimate, overshot by 0, 1, or 2 multiple of Modulus
++      R       : FZ(1 .. Rl);
++      
++      -- Scratch for the outputs of the gated subtractions
++      S       : FZ(1 .. Rl);
++      
++      -- Borrow from the gated subtractions
++      C       : WBool;
++      
++      -- Barring cosmic ray, no underflow can take place in (4) and (5)
++      NoCarry : WZeroOrDie := 0;
++      
++   begin
++      
++      -- Result is initially zero (and will stay zero if Modulus = 1)
++      FZ_Clear(XReduced);
++      
++      -- (1) Ns := X >> Jm
++      FZ_Quiet_ShiftRight(N => X, ShiftedN => Xs, Count => Bar.J);
++      
++      -- (2) Z  := X * Bm
++      FZ_Multiply_Unbuffered(X => Bar.B, Y => Xs, XY => Z);
++      
++      -- (3) Zs := Z >> 2Wm - Jm (already thrown lower Wm, so only Wm - Jm now)
++      FZ_Quiet_ShiftRight(N => ZHi, ShiftedN => ZHi, Count => Bar.ZSlide);
++      
++      -- (4) Q  := Zs * M (this is split into three operations, see below)
++      
++      -- ... first, Q := ZsLo * M,
++      FZ_Multiply_Unbuffered(ZsLo, Modulus, Q);
++      
++      -- ... then, compute ZsHiM := ZsHi * M,
++      FZ_Low_Multiply_Unbuffered(ZsHi, Modulus, ZsHiM);
++      
++      -- ... finally, add ZsHiM to upper half of Q.
++      FZ_Add_D(X => QHi, Y => ZsHiM, Overflow => NoCarry);
++      
++      -- (5) R  := X - Q (we only need Rl-sized segments of X and Q here)
++      FZ_Sub(X => X(1 .. Rl), Y => Q(1 .. Rl),
++             Difference => R, Underflow => NoCarry);
++      
++      -- (6) S1 := R - M, C1 := Borrow (1st gated subtraction of Modulus)
++      FZ_Sub(X => R, Y => Bar.ZXM, Difference => S, Underflow => C);
++      
++      -- (7) R := {C1=0 -> S1, C1=1 -> R}
++      FZ_Mux(X => S, Y => R, Result => R, Sel => C);
++      
++      -- (8) S2 := R - M, C2 := Borrow (2nd gated subtraction of Modulus)
++      FZ_Sub(X => R, Y => Bar.ZXM, Difference => S, Underflow => C);
++      
++      -- (9) R := {C2=0 -> S2, C2=1 -> R}
++      FZ_Mux(X => S, Y => R, Result => R, Sel => C);
++      
++      -- (10) RFinal := {DM=0 -> R, DM=1 -> 0} (handle the degenerate case)
++      FZ_Mux(X => R(1 .. Ml), Y => XReduced, Result => XReduced,
++             Sel => Bar.Degenerate); -- If Modulus = 1, then XReduced is 0.
++      
++   end FZ_Barrett_Reduce;
++   
++end FZ_Barr;
+diff -uNr a/ffa/libffa/fz_barr.ads b/ffa/libffa/fz_barr.ads
+--- a/ffa/libffa/fz_barr.ads false
++++ b/ffa/libffa/fz_barr.ads a61e949eb6a9d5ea3a15661a3e85f563512425bb3b9b88e611d7d4d1b185998b8da2f51c730ef2453a71174ecb0b787fede98f5c98acdd8434ef6af1c03853e3
+@@ -0,0 +1,53 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;   use Words;
++with FZ_Type; use FZ_Type;
++
++
++package FZ_Barr is
++   
++   pragma Pure;
++   
++   -- Precomputed data for Barrett's Modular Reduction
++   type Barretoid(ZXMLength       : Indices;
++                  BarretoidLength : Indices) is
++      record
++         ZXM            : FZ(1 .. ZXMLength);       -- Zero-Extended Modulus
++         J              : FZBit_Index;              -- Jm
++         B              : FZ(1 .. BarretoidLength); -- The Barrettoid itself
++         ZSlide         : FZBit_Index;              -- Amount to slide Z
++         Degenerate     : WBool;                    -- Is it degenerate case?
++      end record;
++   
++   
++   -- Prepare the precomputed Barrettoid corresponding to a given Modulus
++   procedure FZ_Make_Barrettoid(Modulus    : in  FZ;
++                                Result     : out Barretoid)
++     with Pre => Result.B'Length = 2 * Modulus'Length and
++     Result.ZXM'Length = Modulus'Length + 1;
++   
++   
++   -- Reduce N using the given precomputed Barrettoid.
++   procedure FZ_Barrett_Reduce(X          : in     FZ;
++                               Bar        : in     Barretoid;
++                               XReduced   : in out FZ);
++   pragma Inline_Always(FZ_Barrett_Reduce);
++   
++end FZ_Barr;
+diff -uNr a/ffa/libffa/fz_lomul.adb b/ffa/libffa/fz_lomul.adb
+--- a/ffa/libffa/fz_lomul.adb false
++++ b/ffa/libffa/fz_lomul.adb b4df4be19361f59ae40b0e80f90e1317fd28f95f32c7f6ce98c3d028679e5f6f2b90c2749e03ce029bf924bcfafb953226ee8173d48490e86e600e7989aa6344
+@@ -0,0 +1,179 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with Words;    use Words;
++with Word_Ops; use Word_Ops;
++with W_Mul;    use W_Mul;
++with FZ_Arith; use FZ_Arith;
++with FZ_Mul;   use FZ_Mul;
++
++
++-- "Low Multiplication" computes only the bottom half of the product XY.
++-- Presently, it is used solely in Barrett's Modular Reduction.
++
++package body FZ_LoMul is
++      
++   -- Low-Only Comba's multiplier. (CAUTION: UNBUFFERED)
++   procedure FZ_Low_Mul_Comba(X     : in  FZ;
++                              Y     : in  FZ;
++                              XY    : out FZ) is
++      
++      -- Words in each multiplicand (and also in the half-product)
++      L : constant Word_Index := X'Length;
++      
++      -- 3-word Accumulator
++      A2, A1, A0 : Word := 0;
++      
++   begin
++      
++      -- Compute the lower half of the Product, which is all we want:
++      for N in 0 .. L - 1 loop
++         
++         -- Compute the Nth (indexed from zero) column of the Half-Product
++         declare
++            
++            -- The outputs of a Word multiplication
++            Lo, Hi : Word;
++            
++            -- Carry for the Accumulator addition
++            C      : WBool;
++            
++            -- Sum for Accumulator addition
++            Sum    : Word;
++            
++         begin
++            
++            -- For lower half of XY, will go from 0 to N
++            -- For upper half of XY, will go from N - L + 1 to L - 1
++            for j in 0 .. N loop
++               
++               -- Hi:Lo := j-th Word of X  *  (N - j)-th Word of Y
++               Mul_Word(X(X'First + j),
++                        Y(Y'First - j + N),
++                        Lo, Hi);
++               
++               -- Now add Hi:Lo into the Accumulator:
++               
++               -- A0 += Lo; C := Carry
++               Sum := A0 + Lo;
++               C   := W_Carry(A0, Lo, Sum);
++               A0  := Sum;
++               
++               -- A1 += Hi + C; C := Carry
++               Sum := A1 + Hi + C;
++               C   := W_Carry(A1, Hi, Sum);
++               A1  := Sum;
++               
++               -- A2 += A2 + C
++               A2  := A2 + C;
++               
++            end loop;
++            
++            -- We now have the Nth (indexed from zero) word of XY
++            XY(XY'First + N) := A0;
++            
++            -- Right-Shift the Accumulator by one Word width:
++            A0 := A1;
++            A1 := A2;
++            A2 := 0;
++         end;
++         
++      end loop;
++      
++   end FZ_Low_Mul_Comba;
++   
++   
++   -- Low-Only Multiplier. (CAUTION: UNBUFFERED)
++   procedure Low_Mul(X  : in  FZ;
++                     Y  : in  FZ;
++                     XY : out FZ) is
++      
++      -- L is the wordness of a multiplicand. Guaranteed to be a power of two.
++      L : constant Word_Count := X'Length;
++      
++      -- K is HALF of the length of a multiplicand.
++      K : constant Word_Index := L / 2;
++      
++      -- A 'KSeg' is the same length as HALF of a multiplicand.
++      subtype KSeg is FZ(1 .. K);
++      
++      -- The two K-sized variables of the half-product equation:
++      LH, HL : KSeg;
++      
++      -- Bottom and Top K-sized halves of the multiplicand X.
++      XLo        : KSeg  renames    X(  X'First       ..   X'Last - K );
++      XHi        : KSeg  renames    X(  X'First + K   ..   X'Last     );
++      
++      -- Bottom and Top K-sized halves of the multiplicand Y.
++      YLo        : KSeg  renames    Y(  Y'First       ..   Y'Last - K );
++      YHi        : KSeg  renames    Y(  Y'First + K   ..   Y'Last     );
++      
++      -- Top K-sized half of the half-product XY.
++      XYHi       : KSeg  renames   XY( XY'First + K   ..  XY'Last     );
++      
++      -- Carry from individual term additions.
++      C          : WBool;
++      pragma Unreferenced(C);
++      
++   begin
++      
++      -- Recurse to FULL-width multiplication: XY := XLo * YLo
++      FZ_Multiply_Unbuffered(XLo, YLo, XY);
++      
++      -- Recurse to HALF-width multiplication: LH := XLo * YHi
++      FZ_Low_Multiply_Unbuffered(XLo, YHi, LH);
++      
++      -- Recurse to HALF-width multiplication: HL := XHi * YLo
++      FZ_Low_Multiply_Unbuffered(XHi, YLo, HL);
++      
++      -- XY += 2^(K * Bitness) * LH
++      FZ_Add_D(X => XYHi, Y => LH, Overflow => C);
++      
++      -- XY += 2^(K * Bitness) * HL
++      FZ_Add_D(X => XYHi, Y => HL, Overflow => C);
++      
++   end Low_Mul;
++   -- CAUTION: Inlining prohibited for Low_Mul !
++   
++   
++   -- Low-Only Multiplier. (CAUTION: UNBUFFERED)
++   procedure FZ_Low_Multiply_Unbuffered(X     : in  FZ;
++                                        Y     : in  FZ;
++                                        XY    : out FZ) is
++      
++      -- The length of either multiplicand
++      L : constant Word_Count := X'Length;
++      
++   begin
++      
++      if L <= Low_Mul_Thresh then
++         
++         -- Base case:
++         FZ_Low_Mul_Comba(X, Y, XY);
++         
++      else
++         
++         -- Recursive case:
++         Low_Mul(X, Y, XY);
++         
++      end if;
++      
++   end FZ_Low_Multiply_Unbuffered;
++   
++end FZ_LoMul;
+diff -uNr a/ffa/libffa/fz_lomul.ads b/ffa/libffa/fz_lomul.ads
+--- a/ffa/libffa/fz_lomul.ads false
++++ b/ffa/libffa/fz_lomul.ads a773d77d13dc90e23e4bdb7612c9330d5789078ff5f6e0947e90ee4060d4e254ad93758e6d3f487c3c6932fcf9e6fa2a0b479264d4cde7b160ff4c53dd70e720
+@@ -0,0 +1,54 @@
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++-- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
++--                                                                          --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
++--                                                                          --
++-- You do not have, nor can you ever acquire the right to use, copy or      --
++-- distribute this software ; Should you use this software for any purpose, --
++-- or copy and distribute it to anyone or in any manner, you are breaking   --
++-- the laws of whatever soi-disant jurisdiction, and you promise to         --
++-- continue doing so for the indefinite future. In any case, please         --
++-- always : read and understand any software ; verify any PGP signatures    --
++-- that you use - for any purpose.                                          --
++--                                                                          --
++-- See also http://trilema.com/2015/a-new-software-licensing-paradigm .     --
++------------------------------------------------------------------------------
++------------------------------------------------------------------------------
++
++with FZ_Type; use FZ_Type;
++
++
++-- "Low Multiplication" computes only the bottom half of the product XY.
++-- Presently, it is used solely in Barrett's Modular Reduction.
++
++package FZ_LoMul is
++   
++   pragma Pure;
++   
++   -- Threshhold for Low Mul - at or below this many Words, we use Comba mult.
++   Low_Mul_Thresh : constant Indices := 8;
++   
++   -- Multiply. (CAUTION: UNBUFFERED)
++   procedure FZ_Low_Multiply_Unbuffered(X     : in  FZ;
++                                        Y     : in  FZ;
++                                        XY    : out FZ);
++   pragma Inline_Always(FZ_Low_Multiply_Unbuffered);
++   
++   -- Comba's multiplier. (CAUTION: UNBUFFERED)
++   procedure FZ_Low_Mul_Comba(X     : in  FZ;
++                              Y     : in  FZ;
++                              XY    : out FZ);
++   pragma Inline_Always(FZ_Low_Mul_Comba);
++   
++   -- Low Multiplier. (CAUTION: UNBUFFERED)
++   procedure Low_Mul(X  : in  FZ;
++                     Y  : in  FZ;
++                     XY : out FZ)
++     with Pre => X'Length = Y'Length and
++     XY'Length = X'Length and
++     X'Length mod 2 = 0;
++   -- CAUTION: Inlining prohibited for Low_Mul !
++   
++end FZ_LoMul;
+diff -uNr a/ffa/libffa/fz_measr.adb b/ffa/libffa/fz_measr.adb
+--- a/ffa/libffa/fz_measr.adb 5235054f1a2ffc6f2560122d8623a3acdd486b15f85a930cb6099622008571ec59b56a423af2d061fc39931bf624b231425212d28bbd06e9faea148ebe3a5148
++++ b/ffa/libffa/fz_measr.adb 3e868323d9fb836971dbb971a2996ff7868407df3b7cca05e2ae02c24a919b8d0c6277f93b1a9073d612c0092d0e1280afafbf3996f452c053b4c1433f529c54
+@@ -17,6 +17,7 @@
+ ------------------------------------------------------------------------------
+ ------------------------------------------------------------------------------
+ 
++with Words;    use Words;
+ with Word_Ops; use Word_Ops;
+ with W_Pred;   use W_Pred;
+ with W_Shifts; use W_Shifts;
+@@ -25,7 +26,7 @@
+ package body FZ_Measr is
+    
+    -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
+-   function FZ_Measure(N : in FZ) return Word is
++   function FZ_Measure(N : in FZ) return FZBit_Index is
+       
+       -- The result (default : 0, will remain 0 if N is in fact zero)
+       Index     : Word := 0;
+@@ -54,14 +55,17 @@
+       
+       -- Find, in constant time, eldest non-zero bit in that Word:
+       for b in 1 .. Bitness loop
++         
+          -- If W is non-zero, advance the Index...
+-         Index := W_Mux(Index + 1, Index, W_ZeroP(W));
++         Index := Index + W_NZeroP(W);
++         
+          -- ... in either case, advance W:
+          W     := Shift_Right(W, 1);
++         
+       end loop;
+       
+       -- If N = 0, result will be 0; otherwise: index of the eldest 1 bit.
+-      return Index;
++      return FZBit_Index(Index);
+       
+    end FZ_Measure;
+    
+diff -uNr a/ffa/libffa/fz_measr.ads b/ffa/libffa/fz_measr.ads
+--- a/ffa/libffa/fz_measr.ads 287e4cf7a7675b8c9038d229570590b7c013e183c65bd149e08acec898e6829c627e3f7401637407940d31be9102fc0ba2020d22885e9ae022d6ada1d231efcd
++++ b/ffa/libffa/fz_measr.ads f4b728be332da4162214657e54df4a241b02dfe4781ac47e34df24138661c9c0e0d7835e3cf34377a3e152051a17a6c7adf0d24c793a80f93f47c117f471b3b1
+@@ -17,7 +17,6 @@
+ ------------------------------------------------------------------------------
+ ------------------------------------------------------------------------------
+ 
+-with Words;   use Words;
+ with FZ_Type; use FZ_Type;
+ 
+ 
+@@ -26,7 +25,7 @@
+    pragma Pure;
+    
+    -- Find the index of eldest nonzero bit ( 0 if none, or 1 .. FZBitness )
+-   function FZ_Measure(N : in FZ) return Word;
++   function FZ_Measure(N : in FZ) return FZBit_Index;
+    pragma Inline_Always(FZ_Measure);
+    
+ end FZ_Measr;
+diff -uNr a/ffa/libffa/fz_modex.adb b/ffa/libffa/fz_modex.adb
+--- a/ffa/libffa/fz_modex.adb 84c9976aa492f507f8f21c8bbeb3b7dc671f8aa45c9479808dffda6b62fd23a1891f08740937d5d61b8d5fad9da7ad9e890aaa79059c0a1ee69096d877a93577
++++ b/ffa/libffa/fz_modex.adb 321cc7f54066ca6f0c7be85a195a028919076a6775510f99b5c9802f093cb08042770e08e8579376a7558ceb4ba1a0f0f43d437847fd2a89ca30ec8bc48c6177
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -17,17 +17,18 @@
+ ------------------------------------------------------------------------------
+ ------------------------------------------------------------------------------
+ 
++with Words;    use Words;
++with W_Shifts; use W_Shifts;
+ with FZ_Basic; use FZ_Basic;
+-with FZ_Pred;  use FZ_Pred;
+-with FZ_Shift; use FZ_Shift;
+ with FZ_Mul;   use FZ_Mul;
+ with FZ_Sqr;   use FZ_Sqr;
+ with FZ_Divis; use FZ_Divis;
++with FZ_Barr;  use FZ_Barr;
+ 
+ 
+ package body FZ_ModEx is
+    
+-   -- Modular Multiply: Product := X*Y mod Modulus
++   -- (Conventional) Modular Multiply: Product := X*Y mod Modulus
+    procedure FZ_Mod_Mul(X        : in  FZ;
+                         Y        : in  FZ;
+                         Modulus  : in  FZ;
+@@ -54,7 +55,7 @@
+    end FZ_Mod_Mul;
+    
+    
+-   -- Modular Squaring: Product := X*X mod Modulus
++   -- (Conventional) Modular Squaring: Product := X*X mod Modulus
+    procedure FZ_Mod_Sqr(X        : in  FZ;
+                         Modulus  : in  FZ;
+                         Product  : out FZ) is
+@@ -80,44 +81,68 @@
+    end FZ_Mod_Sqr;
+    
+    
+-   -- Modular Exponent: Result := Base^Exponent mod Modulus
++   -- (Barrettronic) Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FZ_Mod_Exp(Base     : in  FZ;
+                         Exponent : in  FZ;
+                         Modulus  : in  FZ;
+                         Result   : out FZ) is
+       
+-      -- Working register for the squaring; initially is copy of Base
+-      B : FZ(Base'Range)     := Base;
++      -- Double-width scratch buffer for the modular operations
++      D   : FZ(1 .. Base'Length * 2);
+       
+-      -- Copy of Exponent, for cycling through its bits
+-      E : FZ(Exponent'Range) := Exponent;
++      -- Working register for the squaring; initially is copy of Base
++      B   : FZ(Base'Range) := Base;
+       
+       -- Register for the Mux operation
+-      T : FZ(Result'Range);
++      T   : FZ(Result'Range);
+       
+       -- Buffer register for the Result
+-      R : FZ(Result'Range);
++      R   : FZ(Result'Range);
++      
++      -- Space for Barrettoid
++      Bar : Barretoid(ZXMLength       => Modulus'Length + 1,
++                      BarretoidLength => 2 * B'Length);
+       
+    begin
++      
++      -- First, pre-compute the Barretoid for the given Modulus:
++      FZ_Make_Barrettoid(Modulus => Modulus, Result => Bar);
++      
+       -- Result := 1
+       WBool_To_FZ(1, R);
+       
+-      -- For each bit of R width:
+-      for i in 1 .. FZ_Bitness(R) loop
+-         
+-         -- T := Result * B mod Modulus
+-         FZ_Mod_Mul(X => R, Y => B, Modulus => Modulus, Product => T);
+-         
+-         -- Sel is the current low bit of E;
+-         --    When Sel=0 -> Result := Result;
+-         --    When Sel=1 -> Result := T
+-         FZ_Mux(X => R, Y => T, Result => R, Sel => FZ_OddP(E));
++      -- For each Word of the Exponent:
++      for i in Exponent'Range loop
+          
+-         -- Advance to the next bit of E
+-         FZ_ShiftRight(E, E, 1);
++         declare
++            
++            -- The current Word of the Exponent
++            Wi : Word := Exponent(i);
++            
++         begin
++            
++            -- For each bit of Wi:
++            for j in 1 .. Bitness loop
++               
++               -- T := Result * B mod Modulus
++               FZ_Multiply_Unbuffered(X => R, Y => B, XY => D);
++               FZ_Barrett_Reduce(X => D, Bar => Bar, XReduced => T);
++               
++               -- Sel is the current bit of Exponent;
++               --    When Sel=0 -> Result := Result;
++               --    When Sel=1 -> Result := T
++               FZ_Mux(X => R, Y => T, Result => R, Sel => Wi and 1);
++               
++               -- Advance to the next bit of Wi (i.e. next bit of Exponent)
++               Wi := Shift_Right(Wi, 1);
++               
++               -- B := B^2 mod Modulus
++               FZ_Square_Unbuffered(X => B, XX => D);
++               FZ_Barrett_Reduce(X => D, Bar => Bar, XReduced => B);
++               
++            end loop;
+          
+-         -- B := B^2 mod Modulus
+-         FZ_Mod_Sqr(X => B, Modulus => Modulus, Product => B);
++         end;
+          
+       end loop;
+       
+diff -uNr a/ffa/libffa/fz_modex.ads b/ffa/libffa/fz_modex.ads
+--- a/ffa/libffa/fz_modex.ads 4d75a96582c1897f5a85da8983033487653b0b0678d88bc3c7f895fcbb4a0a63b9019426d119cb3eddf959856959cbba295bc1d46ae36b0c4b7f4a6f9e2a00a7
++++ b/ffa/libffa/fz_modex.ads 7d2ee2b7147b289a76b8731543adf6cc049b35350c031d1d11bbe0b1d475a879b483368b95c535af0d10061626060f2ca1438f0aa15f198da74b0b1f449183b2
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -24,7 +24,7 @@
+    
+    pragma Pure;
+    
+-   -- Modular Multiply: Product := X*Y mod Modulus
++   -- (Conventional) Modular Multiply: Product := X*Y mod Modulus
+    procedure FZ_Mod_Mul(X        : in  FZ;
+                         Y        : in  FZ;
+                         Modulus  : in  FZ;
+@@ -33,14 +33,14 @@
+      Modulus'Length = X'Length and
+      Product'Length = Modulus'Length;
+    
+-   -- Modular Square: Product := X*X mod Modulus
++   -- (Conventional) Modular Squaring: Product := X*X mod Modulus
+    procedure FZ_Mod_Sqr(X        : in  FZ;
+                         Modulus  : in  FZ;
+                         Product  : out FZ)
+      with Pre => Modulus'Length = X'Length and
+      Product'Length = Modulus'Length;
+    
+-   -- Modular Exponent: Result := Base^Exponent mod Modulus
++   -- (Barrettronic) Modular Exponent: Result := Base^Exponent mod Modulus
+    procedure FZ_Mod_Exp(Base     : in  FZ;
+                         Exponent : in  FZ;
+                         Modulus  : in  FZ;
+diff -uNr a/ffa/libffa/fz_shift.adb b/ffa/libffa/fz_shift.adb
+--- a/ffa/libffa/fz_shift.adb 1a74ee33f52e9cabc886be4c6fefd3e861a6196b937ff207c2a711d0945424cbfb607205db86db8b835d813f910c4d1abcf406fdf361af28fa729568a059b620
++++ b/ffa/libffa/fz_shift.adb 631501f444d2718e57c7433d448ed6f4612d3d8e5be36b78e651bc8f54c032bd0361cc42899b69bcdefc8b8c50f97ba64814840dcf2ebf058b40bd660872a680
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -27,6 +27,7 @@
+    --------------------------------------------------------------
+    
+    -- ShiftedN := N >> Count (with Overflow Input and Output)
++   -- WARNING: OF_in MUST be of valid bit-width for the shift!
+    procedure FZ_ShiftRight_O_I(N        : in  FZ;
+                                ShiftedN : out FZ;
+                                Count    : in  WBit_Index;
+@@ -69,6 +70,7 @@
+    --------------------------------------------------------------
+    
+    -- ShiftedN := N << Count (with Overflow Input and Output)
++   -- WARNING: OF_in MUST be of valid bit-width for the shift!
+    procedure FZ_ShiftLeft_O_I(N        : in  FZ;
+                               ShiftedN : out FZ;
+                               Count    : in  WBit_Index;
+diff -uNr a/ffa/libffa/fz_shift.ads b/ffa/libffa/fz_shift.ads
+--- a/ffa/libffa/fz_shift.ads 1570d6bfa1ee2a3eb93a9255b60ede80878bd262017fe490a263a0957451eafd218c8fc257bbabfd9e6b31fed71a0bf5c1a0ee4831a5f988779e37ad04793c39
++++ b/ffa/libffa/fz_shift.ads 4ee469c436ed539003d13f9247cef562fa9ab00133a68e91c2550fd734ff4916153ec6fc3c4a4dde4afb25b0da9e95ea6dd91dad4ca16c984deda6bba3bc5906
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -26,10 +26,16 @@
+    pragma Pure;
+    
+    --------------------------------------------------------------
++   -- WARNING: These ops are not precondition-shielded, and
++   -- must never be directly exposed via the user API ( ffa.ads )
++   --------------------------------------------------------------
++   
++   --------------------------------------------------------------
+    -- Shift Right
+    --------------------------------------------------------------
+    
+    -- ShiftedN := N >> Count (with Overflow Input and Output)
++   -- WARNING: OF_in MUST be of valid bit-width for the shift!
+    procedure FZ_ShiftRight_O_I(N        : in  FZ;
+                                ShiftedN : out FZ;
+                                Count    : in  WBit_Index;
+@@ -55,6 +61,7 @@
+    --------------------------------------------------------------
+ 
+    -- ShiftedN := N << Count (with Overflow Input and Output)
++   -- WARNING: OF_in MUST be of valid bit-width for the shift!
+    procedure FZ_ShiftLeft_O_I(N        : in  FZ;
+                               ShiftedN : out FZ;
+                               Count    : in  WBit_Index;
+diff -uNr a/ffa/libffa/iron.ads b/ffa/libffa/iron.ads
+--- a/ffa/libffa/iron.ads c2a8101914bb78150becc64de77a0560fa05859bc2908f14e4ce933f6d5682cfeff4f28982e655321e6e9ee8e1e5b0b884acf1048db28af0efffa69c493c2bcf
++++ b/ffa/libffa/iron.ads 528072d08137c29163c651c1fcd9a56787f4e6cbcc72bd7a090d24588f79889a81fad33b1bfcf6ce611c5b3ecd07642bfec7cb3db63699832059d97d0bff0717
+@@ -2,7 +2,7 @@
+ ------------------------------------------------------------------------------
+ -- This file is part of 'Finite Field Arithmetic', aka 'FFA'.               --
+ --                                                                          --
+--- (C) 2017 Stanislav Datskovskiy ( www.loper-os.org )                      --
++-- (C) 2018 Stanislav Datskovskiy ( www.loper-os.org )                      --
+ -- http://wot.deedbot.org/17215D118B7239507FAFED98B98228A001ABFFC7.html     --
+ --                                                                          --
+ -- You do not have, nor can you ever acquire the right to use, copy or      --
+@@ -39,6 +39,6 @@
+    ByteBits           : constant Positive := 8;
+    
+    -- Whether we have a barrel shifter:
+-   HaveBarrelShifter : constant Boolean := True;
++   HaveBarrelShifter  : constant Boolean  := True;
+    
+ end Iron;

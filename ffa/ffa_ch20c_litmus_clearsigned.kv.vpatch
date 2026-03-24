@@ -1,0 +1,211 @@
+diff -uNr a/ffa/MANIFEST.TXT b/ffa/MANIFEST.TXT
+--- a/ffa/MANIFEST.TXT f744632a28817fdbb938352b58b697341fcd593afec07b8c22b5e332145a212bc0f19784d8b876ebad15446814191297b469733fa151750b4894129a23259278
++++ b/ffa/MANIFEST.TXT d35009b556cea183da0e80922a0a46907d16fb2486d4430808c6259a272c3402a298d41b00fc9a4157b4102e3480c13dfc8ee93ecf7e0cbe7644b6c5abf309e0
+@@ -20,3 +20,4 @@
+  578827 ffa_ch19_peh_tuning_and_demos  "Peh Tuning and Demo Tapes."
+  611618 ffa_ch20_litmus                "A Peh-powered verifier for traditional GPG signatures."
+  611775 ffa_ch20b_litmus_legacy_hashes "Support for certain ancient hash algos in Litmus."
++ 612395 ffa_ch20c_litmus_clearsigned   "Support for 'clearsigned' GPG texts in Litmus."
+diff -uNr a/ffa/contrib/litmus/litmus.sh b/ffa/contrib/litmus/litmus.sh
+--- a/ffa/contrib/litmus/litmus.sh e53145647493dd0343293f522c93fe9668147dd05b5ad4c3af763856126ed03bd6a53c51ed76ceb233678eb480e73175ada59af4a71a0d3da4fbc32392f2c5bd
++++ b/ffa/contrib/litmus/litmus.sh 11847537cdcdd430c43ab5e0d9ad598e7f7bfca1dedc7381128ede03c6515c2685ccab90672879eda73e6fe29b711eee3965421c4ad0866d7ae26df72a2ed197
+@@ -5,8 +5,9 @@
+ #                                                                          #
+ # Usage: ./litmus.sh publickey.peh signature.sig datafile                  #
+ #                                                                          #
+-# Currently, supports only RSA 'detached' sigs made with the following     #
+-# hashes: SHA1 (warns: known-breakable!), SHA224, SHA256, SHA384, SHA512.  #
++# Currently, supports RSA 'clearsigned' and 'detached' sigs made with the  #
++# following hashes:                                                        #
++# SHA1 (warns: known-breakable!), SHA224, SHA256, SHA384, SHA512.          #
+ #                                                                          #
+ # See instructions re: converting traditional GPG public keys for use with #
+ # this program.                                                            #
+@@ -27,8 +28,8 @@
+ ############################################################################
+ 
+ # External programs that are required (if not found, will eggog) :
+-EXTERNALS="peh xxd hexdump base64 shasum cut tr sed wc grep printf"
+-
++EXTERNALS="peh xxd hexdump base64 shasum cut tr sed wc grep printf 
++mktemp awk truncate"
+ 
+ # Return Codes:
+ 
+@@ -75,6 +76,12 @@
+     exit $RET_EGGOG
+ }
+ 
++# Malformed 'clearsigned' text file:
++eggog_broken_clearsigned() {
++        echo "$SIGFILE does not contain a clearsigned PGP message!" >&2
++        exit $RET_EGGOG
++}
++
+ # Failure from bad Peh :
+ eggog_peh() {
+     echo "EGGOG in executing Peh tape! Please check Public Key." >&2
+@@ -87,31 +94,59 @@
+ }
+ 
+ 
+-# Number of Arguments required by this program:
+-REQD_ARGS=3
++# First argument is always the given public key file (a Peh tape, see docs)
++PUBFILE=$1
++
++# The given Detached GPG Signature file to be verified.
++# In 'clearsigned' mode, contains both signature and payload to be verified.
++SIGFILE=$2
+ 
+-# If invalid arg count, print usage and abort:
+-if [ "$#" -ne $REQD_ARGS ]; then
+-    echo "Usage: $0 publickey.peh signature.sig datafile"
+-    exit $RET_EGGOG
+-fi
++# Get total number of arguments on command line:
++ARGCOUNT="$#"
++
++# On exit (if in 'clearsign' mode) :
++remove_temp_file() {
++    rm -f $DATAFILE
++}
++
++# Whether we are working on a 'clearsigned text'
++CLEARSIGN_MODE=false
++
++# Set up in the selected mode:
++case $ARGCOUNT in
++    2) # If given two arguments, verify a 'clearsigned' text file:
++        CLEARSIGN_MODE=true
++        # The processed payload will end up in a temporary file:
++        DATAFILE=$(mktemp) || { echo "Failed to create temp file!" >&2; \
++            exit $RET_EGGOG; }
++        # On exit, if in 'clearsign' mode, remove temporary file with payload:
++        trap remove_temp_file EXIT
++        # Expect 'Canonical Text Signature' in GPG sig packet turd
++        expect_sig_class=1
++        ;;
++    3) # Verify Detached Signature on given Data File (third argument is path):
++        # The given Data file to be verified against the Signature
++        DATAFILE=$3 # i.e. path given on command line
++        # Expect 'Detached Binary Signature' in GPG sig packet turd
++        expect_sig_class=0
++        ;;
++    *) # If invalid arg count -- print usage and abort:
++        echo "Usage: $0 publickey.peh signature.sig datafile"
++        echo "   or: $0 publickey.peh clearsigned.txt"
++        exit $RET_EGGOG
++        ;;
++esac
+ 
+ 
+ # Minimal Peh Width (used for non-arithmetical ops, e.g. 'Owner')
+ MIN_PEH_WIDTH=256
+ 
++# Peh data stack height for public key operations
++PEH_HEIGHT=3
++
+ # Peh RNG (NOT USED in verifications, but needed to silence warning)
+ PEH_RNG_DEV="/dev/random"
+ 
+-# The given public key file (a Peh tape, see docs)
+-PUBFILE=$1
+-
+-# The given Detached GPG Signature file to be verified
+-SIGFILE=$2
+-
+-# The given Data file to be verified against the Signature
+-DATAFILE=$3
+-
+ # Verify that each of the given input files exists:
+ FILES=($PUBFILE $SIGFILE $DATAFILE)
+ for f in ${FILES[@]}; do
+@@ -185,7 +220,7 @@
+ for i in $EXTERNALS
+ do
+     command -v $i >/dev/null && continue || \
+-        { echo "$i is required but was not found! Please install it."; \
++        { echo "$i is required but was not found! Please install it." >&2 ; \
+         exit $RET_EGGOG; }
+ done
+ 
+@@ -233,6 +268,54 @@
+     eggog_sig_armour
+ fi
+ 
++# If we are operating on a 'clearsigned' text file, $DATAFILE will be
++# an empty temporary file, and the payload is to be extracted to it,
++# with certain munges (see http://tools.ietf.org/html/rfc4880#section-7.1)
++if [ $CLEARSIGN_MODE == true ]
++then
++    # Find position of 'clearsign' payload start marker:
++    CLEAR_MARKER="\-\-\-\-\-BEGIN PGP SIGNED MESSAGE\-\-\-\-\-"
++    start_clr=$(grep -m 1 -n "$CLEAR_MARKER" $SIGFILE | cut -d ':' -f1)
++    
++    # If payload start marker was not found:
++    if [ "$start_clr" == "" ]
++    then
++        eggog_broken_clearsigned
++    fi
++    
++    # Discard the start marker:
++    start_clr=$(($start_clr + 1))
++    
++    # The payload ends with the line preceding the sig start:
++    end_clr=$((start_ln - 2))
++
++    # Find any 'Hash:' headers:
++    start_body=$(tail -n "+$start_clr" $SIGFILE | \
++        grep -v -n -m 1 "^Hash:" | cut -d ':' -f1)
++    
++    # Skip the above headers and mandatory empty line:
++    start_clr=$(($start_clr + $start_body))
++    
++    # If there is no payload, or the markers are misplaced, abort:
++    if [ $start_clr -ge $end_clr ]
++    then
++        eggog_broken_clearsigned
++    fi
++    
++    # Extract the 'clearsign' payload to the temporary file:
++    cat $SIGFILE | sed -n "$start_clr,$end_clr p" | \
++        sed 's/[ \t]*$//; s/^- //' | \
++        awk '{printf("%s\r\n",$0)}' \
++            > $DATAFILE
++    
++    # Remove the trailing CR,LF ending:
++    truncate -s -2 $DATAFILE
++    
++    # After this, proceed exactly like with 'detached' sigs, but
++    # with the expected 'class' being 1 rather than 0.
++fi
++
++
+ # Number of bytes in the sig file
+ sig_len=${#sig_bytes[@]}
+ 
+@@ -300,11 +383,12 @@
+ sig_version=$r
+ sig_field_mandatory "Version" $sig_version 04
+ 
+-# Class (only class 0 is supported)
++# Class (must be 'detached' or 'clearsign')
+ get_sig_bytes 1
+ turd+=$r
++hex_to_int
+ sig_class=$r
+-sig_field_mandatory "Class" $sig_class 00
++sig_field_mandatory "Class" $sig_class $expect_sig_class
+ 
+ # Public Key Algo (only RSA is supported)
+ get_sig_bytes 1
+@@ -485,7 +569,7 @@
+ tape=".$rsa_sig@Public-Op!.$pkcs={[Valid]QY}{[Invalid]QN}_"
+ 
+ # Execute the tape:
+-run_peh_tape $tape $rsa_width 3
++run_peh_tape $tape $rsa_width $PEH_HEIGHT
+ 
+ # 'Belt and suspenders' -- test both output and return code:
+ # If verification succeeded, return code will be 1, and output 'Valid':
