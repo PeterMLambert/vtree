@@ -1,0 +1,1039 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp b860454af0cea61da456cccd4fe4b7152d0e4df57f974259e7b1153ab0b1954ba526cef89cfb85676cdd3e7d212c09576437e431ec9d71409d5c37c839fd4837
++++ b/bitcoin/src/bitcoinrpc.cpp d064c6c28ba9016a427fe89f42e8c46caf45755b9289a4b485dc05d35ccd02541181da072f2c0ada36290d23208f5f9b600417e653ac24a57020ce0f620c2c42
+@@ -2422,11 +2422,6 @@
+ #ifdef TEST
+ int main(int argc, char *argv[])
+ {
+-#ifdef _MSC_VER
+-    // Turn off microsoft heap dump noise
+-    _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
+-    _CrtSetReportFile(_CRT_WARN, CreateFile("NUL", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0));
+-#endif
+     setbuf(stdin, NULL);
+     setbuf(stdout, NULL);
+     setbuf(stderr, NULL);
+diff -uNr a/bitcoin/src/crypter.cpp b/bitcoin/src/crypter.cpp
+--- a/bitcoin/src/crypter.cpp 7c19985746214e45bf75c9044c5f13230195376e74b6c013659cfbe89390fd575e7bb1935f82f0d42f01b93f58ee980af16bd99101e4241eabd585b6fec09b0f
++++ b/bitcoin/src/crypter.cpp 9ad9a4bd21d57594a27623378ae8969f00504822da8d2ef89821f0790494d80726c3b39ded57dae9ed17ad257f0c1a38cb7d69f513d0d403f34ccb914757605c
+@@ -7,9 +7,6 @@
+ #include <vector>
+ #include <string>
+ #include "headers.h"
+-#ifdef WIN32
+-#include <windows.h>
+-#endif
+ 
+ #include "crypter.h"
+ #include "main.h"
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp d6224a6fe15bd7712174fd0d420d8b289204712d5cbde94aef0cc6ef96ec2fe60aabe4cd71360d32a2464e87c6bfaff59d0464fde880302bb8180dea4371ce57
++++ b/bitcoin/src/db.cpp 0e9401061876b3c91016108ab88a45aa8dc5f57f1b6e0487a62e540a78c52d11062de7c2d23e4a6545dd19992375199a243d099db730c58dd11f9f27d707872b
+@@ -768,11 +768,9 @@
+     bool fIsEncrypted = false;
+ 
+     // Modify defaults
+-#ifndef WIN32
+     // Tray icon sometimes disappears on 9.10 karmic koala 64-bit, leaving no way to access the program
+     fMinimizeToTray = false;
+     fMinimizeOnClose = false;
+-#endif
+ 
+     //// todo: shouldn't we catch exceptions and try to recover and continue?
+     CRITICAL_BLOCK(pwallet->cs_wallet)
+diff -uNr a/bitcoin/src/headers.h b/bitcoin/src/headers.h
+--- a/bitcoin/src/headers.h df1306462a92466a6661e4e98b4091fe0de3ff53c781a8dc5fd6c575f052ca4adc47e5e1a37b6904ccfeb107bf7899335dd5bbb4428e647da6acfffd2e0ca6c6
++++ b/bitcoin/src/headers.h aae9b590747c266d9bacdc30a73f2d3ed9c7a5cc4ff42798d4f7df3e7a28af0bc8d70c4402fcc36779e77ddd3f4bcc41c1eef08336207999efbac352817c1972
+@@ -3,22 +3,6 @@
+ // Distributed under the MIT/X11 software license, see the accompanying
+ // file license.txt or http://www.opensource.org/licenses/mit-license.php.
+ 
+-#ifdef _MSC_VER
+-#pragma warning(disable:4786)
+-#pragma warning(disable:4804)
+-#pragma warning(disable:4805)
+-#pragma warning(disable:4717)
+-#endif
+-#ifdef _WIN32_WINNT
+-#undef _WIN32_WINNT
+-#endif
+-#define _WIN32_WINNT 0x0500
+-#ifdef _WIN32_IE
+-#undef _WIN32_IE
+-#endif
+-#define _WIN32_IE 0x0400
+-#define WIN32_LEAN_AND_MEAN 1
+-
+ // Include boost/foreach here as it defines __STDC_LIMIT_MACROS on some systems.
+ #include <boost/foreach.hpp>
+ #ifndef __STDC_LIMIT_MACROS
+@@ -55,16 +39,6 @@
+ #include <deque>
+ #include <map>
+ 
+-#ifdef WIN32
+-#include <windows.h>
+-#include <winsock2.h>
+-#include <mswsock.h>
+-#include <shlobj.h>
+-#include <shlwapi.h>
+-#include <io.h>
+-#include <process.h>
+-#include <malloc.h>
+-#else
+ #include <sys/time.h>
+ #include <sys/resource.h>
+ #include <sys/socket.h>
+@@ -77,7 +51,7 @@
+ #include <ifaddrs.h>
+ #include <fcntl.h>
+ #include <signal.h>
+-#endif
++
+ #ifdef BSD
+ #include <netinet/in.h>
+ #endif
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 352283739438e0d213f66b3d94a728ecf280ace2280615a2c700e5d94bf32bbd3518f512fab55f7071ff5e8f02ec988cc1be71ec15597af3c3933d7cb833efc4
++++ b/bitcoin/src/init.cpp 5580d0fa04b103fddff3b029385134345ce8f1968688e4d69fc4bd0ef13f87be7a380476829fb761b82ad0069d003948b5fcff7470941ab8298df82e93c9b80a
+@@ -25,10 +25,6 @@
+ 
+ void ExitTimeout(void* parg)
+ {
+-#ifdef WIN32
+-    Sleep(5000);
+-    ExitProcess(0);
+-#endif
+ }
+ 
+ void Shutdown(void* parg)
+@@ -113,19 +109,8 @@
+ 
+ bool AppInit2(int argc, char* argv[])
+ {
+-#ifdef _MSC_VER
+-    // Turn off microsoft heap dump noise
+-    _CrtSetReportMode(_CRT_WARN, _CRTDBG_MODE_FILE);
+-    _CrtSetReportFile(_CRT_WARN, CreateFileA("NUL", GENERIC_WRITE, 0, NULL, OPEN_EXISTING, 0, 0));
+-#endif
+-#if _MSC_VER >= 1400
+-    // Disable confusing "helpful" text message on abort, ctrl-c
+-    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+-#endif
+-#ifndef WIN32
+     umask(077);
+-#endif
+-#ifndef WIN32
++
+     // Clean shutdown on SIGTERM
+     struct sigaction sa;
+     sa.sa_handler = HandleSIGTERM;
+@@ -134,7 +119,6 @@
+     sigaction(SIGTERM, &sa, NULL);
+     sigaction(SIGINT, &sa, NULL);
+     sigaction(SIGHUP, &sa, NULL);
+-#endif
+ 
+     //
+     // Parameters
+@@ -189,16 +173,11 @@
+             "  -maxreceivebuffer=<n>\t  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 10000)\n") +
+             "  -maxsendbuffer=<n>\t  "   + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 10000)\n") +
+             "  -paytxfee=<amt>  \t  "   + _("Fee per kB to add to transactions you send\n") +
+-#if !defined(WIN32)
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+-#endif
+             "  -testnet         \t\t  " + _("Use the test network\n") +
+             "  -debug           \t\t  " + _("Output extra debugging information\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+             "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file\n") +
+-#ifdef WIN32
+-            "  -printtodebugger \t  "   + _("Send trace/debug info to debugger\n") +
+-#endif
+             "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections\n") +
+             "  -rpcpassword=<pw>\t  "   + _("Password for JSON-RPC connections\n") +
+             "  -rpcport=<port>  \t\t  " + _("Listen for JSON-RPC connections on <port> (default: 8332)\n") +
+@@ -218,12 +197,7 @@
+ 
+     fTestNet = GetBoolArg("-testnet");
+     fDebug = GetBoolArg("-debug");
+-
+-#if !defined(WIN32)
+     fDaemon = GetBoolArg("-daemon");
+-#else
+-    fDaemon = false;
+-#endif
+ 
+     if (fDaemon)
+         fServer = true;
+@@ -246,7 +220,6 @@
+         exit(ret);
+     }
+ 
+-#if !defined(WIN32)
+     if (fDaemon)
+     {
+         // Daemonize
+@@ -266,7 +239,6 @@
+         if (sid < 0)
+             fprintf(stderr, "Error: setsid() returned %d errno %d\n", sid, errno);
+     }
+-#endif
+ 
+     if (!fDebug && !pszSetDataDir[0])
+         ShrinkDebugFile();
+diff -uNr a/bitcoin/src/main.h b/bitcoin/src/main.h
+--- a/bitcoin/src/main.h 265f35217e2a79155aa98dc832a62f1a24879f70aa594237811392d5f14ec182de78cabaccf7f9d0af07504ff4e37f39ea4c4c6dac7d6d1b8890258ab40c2d33
++++ b/bitcoin/src/main.h 66af7bed57921718a5e073db591e4dc838622df4af4e5662a0b2f46f20ee60c98fec6d967bdb71a4c1cf82e3dc9f2f6e0aeddaef9c7246b7797e6b4db5f1080d
+@@ -923,11 +923,7 @@
+         fflush(fileout);
+         if (!IsInitialBlockDownload() || (nBestHeight+1) % 500 == 0)
+         {
+-#ifdef WIN32
+-            _commit(_fileno(fileout));
+-#else
+             fsync(fileno(fileout));
+-#endif
+         }
+ 
+         return true;
+diff -uNr a/bitcoin/src/makefile.linux-mingw b/bitcoin/src/makefile.linux-mingw
+--- a/bitcoin/src/makefile.linux-mingw 83d546a9c99d9a33cf806b19617dfb36dbe2d51912b3d8b14aa2df4ef64b9f281820d99f2c9cb822c21baf8392389aa1fd543478037aeb734300651f0c9d5392
++++ b/bitcoin/src/makefile.linux-mingw false
+@@ -1,95 +0,0 @@
+-# Copyright (c) 2009-2010 Satoshi Nakamoto
+-# Distributed under the MIT/X11 software license, see the accompanying
+-# file license.txt or http://www.opensource.org/licenses/mit-license.php.
+-
+-DEPSDIR:=/usr/i586-mingw32msvc
+-
+-INCLUDEPATHS= \
+- -I"$(DEPSDIR)/boost_1_47_0" \
+- -I"$(DEPSDIR)/db-4.8.30.NC/build_unix" \
+- -I"$(DEPSDIR)/openssl-1.0.0e/include" \
+- -I"$(DEPSDIR)"
+-
+-LIBPATHS= \
+- -L"$(DEPSDIR)/boost_1_47_0/stage/lib" \
+- -L"$(DEPSDIR)/db-4.8.30.NC/build_unix" \
+- -L"$(DEPSDIR)/openssl-1.0.0e"
+-
+-LIBS= \
+- -l boost_system-mt-s \
+- -l boost_filesystem-mt-s \
+- -l boost_program_options-mt-s \
+- -l boost_thread_win32-mt-s \
+- -l db_cxx \
+- -l ssl \
+- -l crypto
+-
+-DEFS=-D_MT -DWIN32 -D_WINDOWS -DNOPCH -DBOOST_THREAD_USE_LIB
+-DEBUGFLAGS=-g
+-CFLAGS=-O2 -w -Wno-invalid-offsetof -Wformat $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
+-HEADERS = \
+-    base58.h \
+-    bignum.h \
+-    checkpoints.h \
+-    crypter.h \
+-    db.h \
+-    headers.h \
+-    init.h \
+-    irc.h \
+-    key.h \
+-    keystore.h \
+-    main.h \
+-    net.h \
+-    noui.h \
+-    protocol.h \
+-    bitcoinrpc.h \
+-    script.h \
+-    serialize.h \
+-    strlcpy.h \
+-    uint256.h \
+-    util.h \
+-    wallet.h
+-
+-
+-
+-LIBS += -l mingwthrd -l kernel32 -l user32 -l gdi32 -l comdlg32 -l winspool -l winmm -l shell32 -l comctl32 -l ole32 -l oleaut32 -l uuid -l rpcrt4 -l advapi32 -l ws2_32 -l shlwapi
+-
+-OBJS= \
+-    obj/checkpoints.o \
+-    obj/crypter.o \
+-    obj/db.o \
+-    obj/init.o \
+-    obj/irc.o \
+-    obj/keystore.o \
+-    obj/main.o \
+-    obj/net.o \
+-    obj/protocol.o \
+-    obj/bitcoinrpc.o \
+-    obj/script.o \
+-    obj/util.o \
+-    obj/wallet.o
+-
+-all: bitcoind.exe
+-
+-obj/nogui/%.o: %.cpp $(HEADERS)
+-	i586-mingw32msvc-g++ -c $(CFLAGS) -o $@ $<
+-
+-bitcoind.exe: $(OBJS:obj/%=obj/nogui/%)
+-	i586-mingw32msvc-g++ $(CFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS)
+-
+-
+-obj/test/%.o: obj/test/%.cpp $(HEADERS)
+-	i586-mingw32msvc-g++ -c $(CFLAGS) -o $@ $<
+-
+-test_bitcoin.exe: obj/test/test_bitcoin.o $(filter-out obj/nogui/init.o,$(OBJS:obj/%=obj/nogui/%))
+-	i586-mingw32msvc-g++ $(CFLAGS) -o $@ $(LIBPATHS) $^ $(LIBS) -lboost_unit_test_framework-mt-s
+-
+-
+-clean:
+-	-rm -f obj/*.o
+-	-rm -f obj/nogui/*.o
+-	-rm -f obj/test/*.o
+-	-rm -f test/*.o
+-	-rm -f headers.h.gch
+-	-rm -f bitcoind.exe
+-	-rm -f test_bitcoin.exe
+diff -uNr a/bitcoin/src/net.cpp b/bitcoin/src/net.cpp
+--- a/bitcoin/src/net.cpp a1b78a422161c6f5f3ca51a585d8c3f68e9490af3f1ba48b7772cbe4d5a9711619707984376f9a51487aec676f437fbf6df38309d535daccb966873f9608e9f1
++++ b/bitcoin/src/net.cpp 397fa4caf80112ef2a0ef2905ab0af4df49e437b926e5dde97167d888423a21e5b34f42361296bc065d31f49a8bda21aedfc6365684bc9cadd873598803b912c
+@@ -10,10 +10,6 @@
+ #include "init.h"
+ #include "strlcpy.h"
+ 
+-#ifdef WIN32
+-#include <string.h>
+-#endif
+-
+ 
+ using namespace std;
+ using namespace boost;
+@@ -94,13 +90,9 @@
+     bool fProxy = (fUseProxy && addrConnect.IsRoutable());
+     struct sockaddr_in sockaddr = (fProxy ? addrProxy.GetSockAddr() : addrConnect.GetSockAddr());
+ 
+-#ifdef WIN32
+-    u_long fNonblock = 1;
+-    if (ioctlsocket(hSocket, FIONBIO, &fNonblock) == SOCKET_ERROR)
+-#else
+     int fFlags = fcntl(hSocket, F_GETFL, 0);
+     if (fcntl(hSocket, F_SETFL, fFlags | O_NONBLOCK) == -1)
+-#endif
++
+     {
+         closesocket(hSocket);
+         return false;
+@@ -133,11 +125,7 @@
+                 return false;
+             }
+             socklen_t nRetSize = sizeof(nRet);
+-#ifdef WIN32
+-            if (getsockopt(hSocket, SOL_SOCKET, SO_ERROR, (char*)(&nRet), &nRetSize) == SOCKET_ERROR)
+-#else
+             if (getsockopt(hSocket, SOL_SOCKET, SO_ERROR, &nRet, &nRetSize) == SOCKET_ERROR)
+-#endif
+             {
+                 printf("getsockopt() for connection failed: %i\n",WSAGetLastError());
+                 closesocket(hSocket);
+@@ -150,11 +138,7 @@
+                 return false;
+             }
+         }
+-#ifdef WIN32
+-        else if (WSAGetLastError() != WSAEISCONN)
+-#else
+         else
+-#endif
+         {
+             printf("connect() failed: %i\n",WSAGetLastError());
+             closesocket(hSocket);
+@@ -167,13 +151,8 @@
+     CNode::ConnectNode immediately turns the socket back to non-blocking
+     but we'll turn it back to blocking just in case
+     */
+-#ifdef WIN32
+-    fNonblock = 0;
+-    if (ioctlsocket(hSocket, FIONBIO, &fNonblock) == SOCKET_ERROR)
+-#else
+     fFlags = fcntl(hSocket, F_GETFL, 0);
+     if (fcntl(hSocket, F_SETFL, fFlags & !O_NONBLOCK) == SOCKET_ERROR)
+-#endif
+     {
+         closesocket(hSocket);
+         return false;
+@@ -670,14 +649,8 @@
+         printf("connected %s\n", addrConnect.ToString().c_str());
+ 
+         // Set to nonblocking
+-#ifdef WIN32
+-        u_long nOne = 1;
+-        if (ioctlsocket(hSocket, FIONBIO, &nOne) == SOCKET_ERROR)
+-            printf("ConnectSocket() : ioctlsocket nonblocking setting failed, error %d\n", WSAGetLastError());
+-#else
+         if (fcntl(hSocket, F_SETFL, O_NONBLOCK) == SOCKET_ERROR)
+             printf("ConnectSocket() : fcntl nonblocking setting failed, error %d\n", errno);
+-#endif
+ 
+         // Add node
+         CNode* pnode = new CNode(hSocket, addrConnect, false);
+@@ -1564,18 +1537,6 @@
+     int nOne = 1;
+     addrLocalHost.port = htons(GetListenPort());
+ 
+-#ifdef WIN32
+-    // Initialize Windows Sockets
+-    WSADATA wsadata;
+-    int ret = WSAStartup(MAKEWORD(2,2), &wsadata);
+-    if (ret != NO_ERROR)
+-    {
+-        strError = strprintf("Error: TCP/IP socket library failed to start (WSAStartup returned error %d)", ret);
+-        printf("%s\n", strError.c_str());
+-        return false;
+-    }
+-#endif
+-
+     // Create socket for listening for incoming connections
+     hListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+     if (hListenSocket == INVALID_SOCKET)
+@@ -1590,18 +1551,11 @@
+     setsockopt(hListenSocket, SOL_SOCKET, SO_NOSIGPIPE, (void*)&nOne, sizeof(int));
+ #endif
+ 
+-#ifndef WIN32
+     // Allow binding if the port is still in TIME_WAIT state after
+     // the program was closed and restarted.  Not an issue on windows.
+     setsockopt(hListenSocket, SOL_SOCKET, SO_REUSEADDR, (void*)&nOne, sizeof(int));
+-#endif
+ 
+-#ifdef WIN32
+-    // Set to nonblocking, incoming connections will also inherit this
+-    if (ioctlsocket(hListenSocket, FIONBIO, (u_long*)&nOne) == SOCKET_ERROR)
+-#else
+     if (fcntl(hListenSocket, F_SETFL, O_NONBLOCK) == SOCKET_ERROR)
+-#endif
+     {
+         strError = strprintf("Error: Couldn't set properties on socket for incoming connections (error %d)", WSAGetLastError());
+         printf("%s\n", strError.c_str());
+@@ -1643,21 +1597,6 @@
+     if (pnodeLocalHost == NULL)
+         pnodeLocalHost = new CNode(INVALID_SOCKET, CAddress("127.0.0.1", 0, false, nLocalServices));
+ 
+-#ifdef WIN32
+-    // Get local host ip
+-    char pszHostName[1000] = "";
+-    if (gethostname(pszHostName, sizeof(pszHostName)) != SOCKET_ERROR)
+-    {
+-        vector<CAddress> vaddr;
+-        if (Lookup(pszHostName, vaddr, nLocalServices, -1, true))
+-            BOOST_FOREACH (const CAddress &addr, vaddr)
+-                if (addr.GetByte(3) != 127)
+-                {
+-                    addrLocalHost = addr;
+-                    break;
+-                }
+-    }
+-#else
+     // Get local host ip
+     struct ifaddrs* myaddrs;
+     if (getifaddrs(&myaddrs) == 0)
+@@ -1692,7 +1631,7 @@
+         }
+         freeifaddrs(myaddrs);
+     }
+-#endif
++
+     printf("addrLocalHost = %s\n", addrLocalHost.ToString().c_str());
+ 
+     if (fUseProxy || mapArgs.count("-connect") || fNoListen)
+@@ -1778,10 +1717,6 @@
+             if (closesocket(hListenSocket) == SOCKET_ERROR)
+                 printf("closesocket(hListenSocket) failed with error %d\n", WSAGetLastError());
+ 
+-#ifdef WIN32
+-        // Shutdown Windows Sockets
+-        WSACleanup();
+-#endif
+     }
+ }
+ instance_of_cnetcleanup;
+diff -uNr a/bitcoin/src/net.h b/bitcoin/src/net.h
+--- a/bitcoin/src/net.h 82905169cadf6fb364c8c5073f4b80450a9a995219840ffb1e46f756f35bb9649677c75044d55a017b92c27e32ce5dac52cda187a18c3b544756882ff6a57b50
++++ b/bitcoin/src/net.h 0b8486f417ca786accc0335c0381a2fd80393e842f79a9926c556f81d6b09e41615de890477dadad86816f672a07b1df2a495d0b95c85a3bf2fd8a8aa67b2863
+@@ -10,10 +10,6 @@
+ #include <boost/foreach.hpp>
+ #include <openssl/rand.h>
+ 
+-#ifndef WIN32
+-#include <arpa/inet.h>
+-#endif
+-
+ #include "protocol.h"
+ 
+ class CAddrDB;
+diff -uNr a/bitcoin/src/protocol.cpp b/bitcoin/src/protocol.cpp
+--- a/bitcoin/src/protocol.cpp e76ec1350e05c0fef1798a50903586ace4737faa6db134094a88a23a96e2a54d8e135a840b822ef136d336b035b3b03b7ded83a99267c892663b15d11ad00720
++++ b/bitcoin/src/protocol.cpp e5274fe2ff8aa6840ce5be2e7797766dc4a70a19c2e08954bbfd9cfff4ad9e27614606079a4ce7fc5ae150dfaf2906bee118b543d889710da78475bd12f24c56
+@@ -5,10 +5,8 @@
+ 
+ #include "protocol.h"
+ #include "util.h"
++#include <arpa/inet.h>
+ 
+-#ifndef WIN32
+-# include <arpa/inet.h>
+-#endif
+ 
+ // Prototypes from net.h, but that header (currently) stinks, can't #include it without breaking things
+ bool Lookup(const char *pszName, std::vector<CAddress>& vaddr, int nServices, int nMaxSolutions, bool fAllowLookup = false, int portDefault = 0, bool fAllowPort = false);
+@@ -165,11 +163,7 @@
+     ss.reserve(18);
+     ss << FLATDATA(pchReserved) << ip << port;
+ 
+-    #if defined(_MSC_VER) && _MSC_VER < 1300
+-    return std::vector<unsigned char>((unsigned char*)&ss.begin()[0], (unsigned char*)&ss.end()[0]);
+-    #else
+     return std::vector<unsigned char>(ss.begin(), ss.end());
+-    #endif
+ }
+ 
+ struct sockaddr_in CAddress::GetSockAddr() const
+diff -uNr a/bitcoin/src/script.h b/bitcoin/src/script.h
+--- a/bitcoin/src/script.h 6d3cd409eee6a9f7689a3cbbc8af5207e314b39f4b16f8c82f350ffb1afd42b8025effa2c1d2e6f5f511b2c0fdd87bf008206ae6809490e0dd8d06e9b3430ea4
++++ b/bitcoin/src/script.h 5368ab26f0f4d5e439f4c51e7c4081f20c4373b3b6ee9ee92b28335b03a5354e33df645293b11171f483d06b76326528b4b594d59f103fc2f256b6c6e89525d4
+@@ -384,9 +384,7 @@
+     CScript() { }
+     CScript(const CScript& b) : std::vector<unsigned char>(b.begin(), b.end()) { }
+     CScript(const_iterator pbegin, const_iterator pend) : std::vector<unsigned char>(pbegin, pend) { }
+-#ifndef _MSC_VER
+     CScript(const unsigned char* pbegin, const unsigned char* pend) : std::vector<unsigned char>(pbegin, pend) { }
+-#endif
+ 
+     CScript& operator+=(const CScript& b)
+     {
+diff -uNr a/bitcoin/src/serialize.h b/bitcoin/src/serialize.h
+--- a/bitcoin/src/serialize.h 0c9bc8280a5657728cb63da6f822999a40c0791d9c81daaa779181a5a1b241b1130a088b280a0a74777d27db144978d15e43ba21bcce68ce4d202767bd19e297
++++ b/bitcoin/src/serialize.h fa08e3a8029453dca3e5dd6ca382ef541294ce5a7f914975b376f87c4eae2da55b8ca6cea65343ba93e55f39956c4448e96b794ce39b799d65fd100e555262e7
+@@ -19,27 +19,9 @@
+ #include <boost/tuple/tuple_comparison.hpp>
+ #include <boost/tuple/tuple_io.hpp>
+ 
+-#if defined(_MSC_VER) || defined(__BORLANDC__)
+-typedef __int64  int64;
+-typedef unsigned __int64  uint64;
+-#else
+ typedef long long  int64;
+ typedef unsigned long long  uint64;
+-#endif
+-#if defined(_MSC_VER) && _MSC_VER < 1300
+-#define for  if (false) ; else for
+-#endif
+ 
+-#ifdef WIN32
+-#include <windows.h>
+-// This is used to attempt to keep keying material out of swap
+-// Note that VirtualLock does not provide this as a guarantee on Windows,
+-// but, in practice, memory that has been VirtualLock'd almost never gets written to
+-// the pagefile except in rare circumstances where memory is extremely low.
+-#include <windows.h>
+-#define mlock(p, n) VirtualLock((p), (n));
+-#define munlock(p, n) VirtualUnlock((p), (n));
+-#else
+ #include <sys/mman.h>
+ #include <limits.h>
+ /* This comes from limits.h if it's not defined there set a sane default */
+@@ -53,7 +35,6 @@
+ #define munlock(a,b) \
+   munlock(((void *)(((size_t)(a)) & (~((PAGESIZE)-1)))),\
+   (((((size_t)(a)) + (b) - 1) | ((PAGESIZE) - 1)) + 1) - (((size_t)(a)) & (~((PAGESIZE) - 1))))
+-#endif
+ 
+ class CScript;
+ class CDataStream;
+@@ -902,12 +883,10 @@
+         Init(nTypeIn, nVersionIn);
+     }
+ 
+-#if !defined(_MSC_VER) || _MSC_VER >= 1300
+     CDataStream(const char* pbegin, const char* pend, int nTypeIn=SER_NETWORK, int nVersionIn=VERSION) : vch(pbegin, pend)
+     {
+         Init(nTypeIn, nVersionIn);
+     }
+-#endif
+ 
+     CDataStream(const vector_type& vchIn, int nTypeIn=SER_NETWORK, int nVersionIn=VERSION) : vch(vchIn.begin(), vchIn.end())
+     {
+@@ -993,7 +972,6 @@
+             vch.insert(it, first, last);
+     }
+ 
+-#if !defined(_MSC_VER) || _MSC_VER >= 1300
+     void insert(iterator it, const char* first, const char* last)
+     {
+         if (it == vch.begin() + nReadPos && last - first <= nReadPos)
+@@ -1005,7 +983,6 @@
+         else
+             vch.insert(it, first, last);
+     }
+-#endif
+ 
+     iterator erase(iterator it)
+     {
+diff -uNr a/bitcoin/src/uint256.h b/bitcoin/src/uint256.h
+--- a/bitcoin/src/uint256.h 821f3af7a2ce7bb860659e1b5833da377c539c5e6207ffb48c042673dada79b37002e6bd336e54c940cee120bdb132b62966d30732e4afefdd46261eff889bf8
++++ b/bitcoin/src/uint256.h e422bdfd1396bf3be89e700e002a3e232c962582ca358abca81a1e689aa991f077ab81c929d5ece265acb834b41482551012381f63f17f0a972fe7b496caee04
+@@ -11,17 +11,8 @@
+ #include <string>
+ #include <vector>
+ 
+-#if defined(_MSC_VER) || defined(__BORLANDC__)
+-typedef __int64  int64;
+-typedef unsigned __int64  uint64;
+-#else
+ typedef long long  int64;
+ typedef unsigned long long  uint64;
+-#endif
+-#if defined(_MSC_VER) && _MSC_VER < 1300
+-#define for  if (false) ; else for
+-#endif
+-
+ 
+ inline int Testuint256AdHoc(std::vector<std::string> vArg);
+ 
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp c7f92359243328f815311ad714efd61cf038a265aab7f69160caf9add62f0a061807c1b9da4474660c7bcb05800ba0e5265cf92e3934eada359b7b70b42c8786
++++ b/bitcoin/src/util.cpp 73bce315476b665825604c1cfcb777a779de476b774b92656f4c52a49dd6b0740132f73e2348599fecfd6702a1f1629b1f5237a11f3d98b516721c350c358b16
+@@ -64,11 +64,6 @@
+             ppmutexOpenSSL[i] = new boost::interprocess::interprocess_mutex();
+         CRYPTO_set_locking_callback(locking_callback);
+ 
+-#ifdef WIN32
+-        // Seed random number generator with screen scrape and other hardware sources
+-        RAND_screen();
+-#endif
+-
+         // Seed random number generator with performance counter
+         RandAddSeed();
+     }
+@@ -108,21 +103,6 @@
+         return;
+     nLastPerfmon = GetTime();
+ 
+-#ifdef WIN32
+-    // Don't need this on Linux, OpenSSL automatically uses /dev/urandom
+-    // Seed with the entire set of perfmon data
+-    unsigned char pdata[250000];
+-    memset(pdata, 0, sizeof(pdata));
+-    unsigned long nSize = sizeof(pdata);
+-    long ret = RegQueryValueExA(HKEY_PERFORMANCE_DATA, "Global", NULL, NULL, pdata, &nSize);
+-    RegCloseKey(HKEY_PERFORMANCE_DATA);
+-    if (ret == ERROR_SUCCESS)
+-    {
+-        RAND_add(pdata, nSize, nSize/100.0);
+-        memset(pdata, 0, nSize);
+-        printf("%s RandAddSeed() %d bytes\n", DateTimeStrFormat("%x %H:%M", GetTime()).c_str(), nSize);
+-    }
+-#endif
+ }
+ 
+ uint64 GetRand(uint64 nMax)
+@@ -198,48 +178,6 @@
+         }
+     }
+ 
+-#ifdef WIN32
+-    if (fPrintToDebugger)
+-    {
+-        static CCriticalSection cs_OutputDebugStringF;
+-
+-        // accumulate a line at a time
+-        CRITICAL_BLOCK(cs_OutputDebugStringF)
+-        {
+-            static char pszBuffer[50000];
+-            static char* pend;
+-            if (pend == NULL)
+-                pend = pszBuffer;
+-            va_list arg_ptr;
+-            va_start(arg_ptr, pszFormat);
+-            int limit = END(pszBuffer) - pend - 2;
+-            int ret = _vsnprintf(pend, limit, pszFormat, arg_ptr);
+-            va_end(arg_ptr);
+-            if (ret < 0 || ret >= limit)
+-            {
+-                pend = END(pszBuffer) - 2;
+-                *pend++ = '\n';
+-            }
+-            else
+-                pend += ret;
+-            *pend = '\0';
+-            char* p1 = pszBuffer;
+-            char* p2;
+-            while (p2 = strchr(p1, '\n'))
+-            {
+-                p2++;
+-                char c = *p2;
+-                *p2 = '\0';
+-                OutputDebugStringA(p1);
+-                *p2 = c;
+-                p1 = p2;
+-            }
+-            if (p1 != pszBuffer)
+-                memmove(pszBuffer, p1, pend - p1 + 1);
+-            pend -= (p1 - pszBuffer);
+-        }
+-    }
+-#endif
+     return ret;
+ }
+ 
+@@ -457,11 +395,6 @@
+             pszValue = strchr(psz, '=');
+             *pszValue++ = '\0';
+         }
+-        #ifdef WIN32
+-        _strlwr(psz);
+-        if (psz[0] == '/')
+-            psz[0] = '-';
+-        #endif
+         if (psz[0] != '-')
+             break;
+         mapArgs[psz] = pszValue;
+@@ -665,13 +598,7 @@
+ 
+ void FormatException(char* pszMessage, std::exception* pex, const char* pszThread)
+ {
+-#ifdef WIN32
+-    char pszModule[MAX_PATH];
+-    pszModule[0] = '\0';
+-    GetModuleFileNameA(NULL, pszModule, sizeof(pszModule));
+-#else
+     const char* pszModule = "bitcoin";
+-#endif
+     if (pex)
+         snprintf(pszMessage, 1000,
+             "EXCEPTION: %s       \n%s       \n%s in %s       \n", typeid(*pex).name(), pex->what(), pszModule, pszThread);
+@@ -717,67 +644,10 @@
+     strMiscWarning = pszMessage;
+ }
+ 
+-
+-
+-
+-
+-
+-
+-
+-#ifdef WIN32
+-typedef WINSHELLAPI BOOL (WINAPI *PSHGETSPECIALFOLDERPATHA)(HWND hwndOwner, LPSTR lpszPath, int nFolder, BOOL fCreate);
+-
+-string MyGetSpecialFolderPath(int nFolder, bool fCreate)
+-{
+-    char pszPath[MAX_PATH+100] = "";
+-
+-    // SHGetSpecialFolderPath isn't always available on old Windows versions
+-    HMODULE hShell32 = LoadLibraryA("shell32.dll");
+-    if (hShell32)
+-    {
+-        PSHGETSPECIALFOLDERPATHA pSHGetSpecialFolderPath =
+-            (PSHGETSPECIALFOLDERPATHA)GetProcAddress(hShell32, "SHGetSpecialFolderPathA");
+-        bool fSuccess = false;
+-        if (pSHGetSpecialFolderPath)
+-            fSuccess =
+-            (*pSHGetSpecialFolderPath)(NULL, pszPath, nFolder, fCreate);
+-        FreeModule(hShell32);
+-        if (fSuccess)
+-            return pszPath;
+-    }
+-
+-    // Backup option
+-    std::string strPath;
+-    {
+-        const char *pszEnv;
+-        if (nFolder == CSIDL_STARTUP)
+-        {
+-            pszEnv = getenv("USERPROFILE");
+-            if (pszEnv)
+-                strPath = pszEnv;
+-            strPath += "\\Start Menu\\Programs\\Startup";
+-        }
+-        else if (nFolder == CSIDL_APPDATA)
+-        {
+-            pszEnv = getenv("APPDATA");
+-            if (pszEnv)
+-                strPath = pszEnv;
+-        }
+-    }
+-
+-    return strPath;
+-}
+-#endif
+-
+ string GetDefaultDataDir()
+ {
+-    // Windows: C:\Documents and Settings\username\Application Data\Bitcoin
+     // Mac: ~/Library/Application Support/Bitcoin
+     // Unix: ~/.bitcoin
+-#ifdef WIN32
+-    // Windows
+-    return MyGetSpecialFolderPath(CSIDL_APPDATA, true) + "\\Bitcoin";
+-#else
+     char* pszHome = getenv("HOME");
+     if (pszHome == NULL || strlen(pszHome) == 0)
+         pszHome = (char*)"/";
+@@ -793,7 +663,6 @@
+     // Unix
+     return strHome + ".bitcoin";
+ #endif
+-#endif
+ }
+ 
+ void GetDataDir(char* pszDir)
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h a39ea68039e96132373815ada8bcebd6611278868e86ca8c302db31cdd9cf1cdbd73961b062fce4cac43f99fff9f901f07e549d4023569325908c716509856f6
++++ b/bitcoin/src/util.h 53346031ed18521834bdcf32e7e733544ec7a5155f8fc505706eba497cbd76101fca2ef8aa7bbabee77f349b33ecd615dedbe9a03488012435075907b0d46059
+@@ -7,11 +7,10 @@
+ 
+ #include "uint256.h"
+ 
+-#ifndef WIN32
++
+ #include <sys/types.h>
+ #include <sys/time.h>
+ #include <sys/resource.h>
+-#endif
+ #include <map>
+ #include <vector>
+ #include <string>
+@@ -25,19 +24,10 @@
+ #include <openssl/ripemd.h>
+ 
+ 
+-#if defined(_MSC_VER) || defined(__BORLANDC__)
+-typedef __int64  int64;
+-typedef unsigned __int64  uint64;
+-#else
+ typedef long long  int64;
+ typedef unsigned long long  uint64;
+-#endif
+-#if defined(_MSC_VER) && _MSC_VER < 1300
+-#define for  if (false) ; else for
+-#endif
+-#ifndef _MSC_VER
++
+ #define __forceinline  inline
+-#endif
+ 
+ #define loop                for (;;)
+ #define BEGIN(a)            ((char*)&(a))
+@@ -53,16 +43,10 @@
+ #define snprintf my_snprintf
+ 
+ #ifndef PRI64d
+-#if defined(_MSC_VER) || defined(__BORLANDC__) || defined(__MSVCRT__)
+-#define PRI64d  "I64d"
+-#define PRI64u  "I64u"
+-#define PRI64x  "I64x"
+-#else
+ #define PRI64d  "lld"
+ #define PRI64u  "llu"
+ #define PRI64x  "llx"
+ #endif
+-#endif
+ 
+ // This is needed because the foreach macro can't get over the comma in pair<t1, t2>
+ #define PAIRTYPE(t1, t2)    std::pair<t1, t2>
+@@ -81,21 +65,6 @@
+     return u.ptr;
+ }
+ 
+-#ifdef WIN32
+-#define MSG_NOSIGNAL        0
+-#define MSG_DONTWAIT        0
+-#ifndef UINT64_MAX
+-#define UINT64_MAX          _UI64_MAX
+-#define INT64_MAX           _I64_MAX
+-#define INT64_MIN           _I64_MIN
+-#endif
+-#ifndef S_IRUSR
+-#define S_IRUSR             0400
+-#define S_IWUSR             0200
+-#endif
+-#define unlink              _unlink
+-typedef int socklen_t;
+-#else
+ #define WSAGetLastError()   errno
+ #define WSAEINVAL           EINVAL
+ #define WSAEALREADY         EALREADY
+@@ -119,17 +88,13 @@
+       So we clamp our sleeps here to 10 years and hope that boost is fixed by 2028.*/
+     boost::thread::sleep(boost::get_system_time() + boost::posix_time::milliseconds(n>315576000000LL?315576000000LL:n));
+ }
+-#endif
++
+ 
+ inline int myclosesocket(SOCKET& hSocket)
+ {
+     if (hSocket == INVALID_SOCKET)
+         return WSAENOTSOCK;
+-#ifdef WIN32
+-    int ret = closesocket(hSocket);
+-#else
+     int ret = close(hSocket);
+-#endif
+     hSocket = INVALID_SOCKET;
+     return ret;
+ }
+@@ -140,14 +105,6 @@
+ }
+ 
+ 
+-
+-
+-
+-
+-
+-
+-
+-
+ extern std::map<std::string, std::string> mapArgs;
+ extern std::map<std::string, std::vector<std::string> > mapMultiArgs;
+ extern bool fDebug;
+@@ -193,9 +150,6 @@
+ std::string GetPidFile();
+ void CreatePidFile(std::string pidFile, pid_t pid);
+ void ReadConfigFile(std::map<std::string, std::string>& mapSettingsRet, std::map<std::string, std::vector<std::string> >& mapMultiSettingsRet);
+-#ifdef WIN32
+-std::string MyGetSpecialFolderPath(int nFolder, bool fCreate);
+-#endif
+ std::string GetDefaultDataDir();
+ std::string GetDataDir();
+ void ShrinkDebugFile();
+@@ -323,20 +277,12 @@
+ 
+ inline int64 atoi64(const char* psz)
+ {
+-#ifdef _MSC_VER
+-    return _atoi64(psz);
+-#else
+     return strtoll(psz, NULL, 10);
+-#endif
+ }
+ 
+ inline int64 atoi64(const std::string& str)
+ {
+-#ifdef _MSC_VER
+-    return _atoi64(str.c_str());
+-#else
+     return strtoll(str.c_str(), NULL, 10);
+-#endif
+ }
+ 
+ inline int atoi(const std::string& str)
+@@ -411,13 +357,9 @@
+ inline int64 GetPerformanceCounter()
+ {
+     int64 nCounter = 0;
+-#ifdef WIN32
+-    QueryPerformanceCounter((LARGE_INTEGER*)&nCounter);
+-#else
+     timeval t;
+     gettimeofday(&t, NULL);
+     nCounter = t.tv_sec * 1000000 + t.tv_usec;
+-#endif
+     return nCounter;
+ }
+ 
+@@ -445,11 +387,7 @@
+ 
+ inline bool IsSwitchChar(char c)
+ {
+-#ifdef WIN32
+-    return c == '-' || c == '/';
+-#else
+     return c == '-';
+-#endif
+ }
+ 
+ inline std::string GetArg(const std::string& strArg, const std::string& strDefault)
+@@ -505,11 +443,6 @@
+ 
+ inline void heapchk()
+ {
+-#ifdef WIN32
+-    /// for debugging
+-    //if (_heapchk() != _HEAPOK)
+-    //    DebugBreak();
+-#endif
+ }
+ 
+ // Randomize the stack to help protect against buffer overrun exploits
+@@ -664,38 +597,6 @@
+ 
+ // Note: It turns out we might have been able to use boost::thread
+ // by using TerminateThread(boost::thread.native_handle(), 0);
+-#ifdef WIN32
+-typedef HANDLE pthread_t;
+-
+-inline pthread_t CreateThread(void(*pfn)(void*), void* parg, bool fWantHandle=false)
+-{
+-    DWORD nUnused = 0;
+-    HANDLE hthread =
+-        CreateThread(
+-            NULL,                        // default security
+-            0,                           // inherit stack size from parent
+-            (LPTHREAD_START_ROUTINE)pfn, // function pointer
+-            parg,                        // argument
+-            0,                           // creation option, start immediately
+-            &nUnused);                   // thread identifier
+-    if (hthread == NULL)
+-    {
+-        printf("Error: CreateThread() returned %d\n", GetLastError());
+-        return (pthread_t)0;
+-    }
+-    if (!fWantHandle)
+-    {
+-        CloseHandle(hthread);
+-        return (pthread_t)-1;
+-    }
+-    return hthread;
+-}
+-
+-inline void SetThreadPriority(int nPriority)
+-{
+-    SetThreadPriority(GetCurrentThread(), nPriority);
+-}
+-#else
+ inline pthread_t CreateThread(void(*pfn)(void*), void* parg, bool fWantHandle=false)
+ {
+     pthread_t hthread = 0;
+@@ -738,29 +639,11 @@
+ {
+     pthread_exit((void*)nExitCode);
+ }
+-#endif
+-
+-
+ 
+ 
+ 
+ inline bool AffinityBugWorkaround(void(*pfn)(void*))
+ {
+-#ifdef WIN32
+-    // Sometimes after a few hours affinity gets stuck on one processor
+-    DWORD_PTR dwProcessAffinityMask = -1;
+-    DWORD_PTR dwSystemAffinityMask = -1;
+-    GetProcessAffinityMask(GetCurrentProcess(), &dwProcessAffinityMask, &dwSystemAffinityMask);
+-    DWORD dwPrev1 = SetThreadAffinityMask(GetCurrentThread(), dwProcessAffinityMask);
+-    DWORD dwPrev2 = SetThreadAffinityMask(GetCurrentThread(), dwProcessAffinityMask);
+-    if (dwPrev2 != dwProcessAffinityMask)
+-    {
+-        printf("AffinityBugWorkaround() : SetThreadAffinityMask=%d, ProcessAffinityMask=%d, restarting thread\n", dwPrev2, dwProcessAffinityMask);
+-        if (!CreateThread(pfn, NULL))
+-            printf("Error: CreateThread() failed\n");
+-        return true;
+-    }
+-#endif
+     return false;
+ }
+ 

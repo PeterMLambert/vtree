@@ -1,0 +1,162 @@
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 77919b26229f6b0de71504f170a2df528b73604633f286f80628a85c0fe90cf71c18937854436cd243654441d322a8ff29d9b28f2c9ea2628f5f6758d10be8fd
++++ b/bitcoin/src/init.cpp 904ad14979be418243c4ae79867fe1068a05ed2ad5e237a14ed457408abf756d0b6f7ac73f63c4a31a815a717bc2cde3b614b4a716603f85b50c8d98ea43d500
+@@ -175,6 +175,8 @@
+             "  -debug           \t\t  " + _("Output extra debugging information\n") +
+ 	    "  -caneat          \t\t  " + _("Permit the use of 'eatblock'\n") +
+ 	    "  -verifyall       \t\t  " + _("Forbid the skipping of ECDSA signature verification between checkpoints.\n") +
++	    "  -setverstring    \t\t  " + _("Set a custom version string.\n") +
++	    "  -setvernum       \t\t  " + _("Set a custom version number.\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+             "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file\n") +
+             "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections\n") +
+@@ -199,6 +201,16 @@
+     fCanEat = GetBoolArg("-caneat");
+     fVerifyAll = GetBoolArg("-verifyall");
+ 
++    if (mapArgs.count("-setverstring"))
++    {
++        CLIENT_NAME = mapArgs["-setverstring"];
++    }
++
++    if (mapArgs.count("-setvernum"))
++    {
++        VERSION = atoi(mapArgs["-setvernum"]);
++    }
++    
+     if (fDaemon)
+         fServer = true;
+     else
+diff -uNr a/bitcoin/src/knobs.h b/bitcoin/src/knobs.h
+--- a/bitcoin/src/knobs.h false
++++ b/bitcoin/src/knobs.h 4e01d59f75dfdac897735bf28c2414ed8463e12683e1d845272772feac7706615e36c26e6e291250d245f269c2bf8b41a32cc6abb81bbc58b4831b01be0eefd8
+@@ -0,0 +1,7 @@
++#ifndef KNOBS_H
++#define KNOBS_H
++
++#define  DEFAULT_CLIENT_NAME       "therealbitcoin.org"
++#define  DEFAULT_CLIENT_VERSION    99999 /* 50400 */
++
++#endif
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 30ee1c16668cb21cdf3b476a5d82c665ef9a0bbede9eba887692e65d48bae74d639085b52b98313283749ae11398a74270e929fe7aae1794d0d4c8b141292ebe
++++ b/bitcoin/src/main.cpp ddf551d237480f8118d0e4ed033194ada0a229e8d8580354e3ea20467f3e381af1f1d0542f861e8bec628f55326d70172b6faa0e8a3fa007ba79bdadc13c1c29
+@@ -17,6 +17,8 @@
+ // Global state
+ //
+ 
++int VERSION = DEFAULT_CLIENT_VERSION;
++
+ CCriticalSection cs_setpwalletRegistered;
+ set<CWallet*> setpwalletRegistered;
+ 
+diff -uNr a/bitcoin/src/makefile.unix b/bitcoin/src/makefile.unix
+--- a/bitcoin/src/makefile.unix 6ce9f5aa9ba9134f1b98e4aa862c6540bf929c950bf0ca84f35dc4a3fa489121388dd5d43aca001d0e64dc16af5d818485e2ff3bbe645a24abb1fc69eb943a70
++++ b/bitcoin/src/makefile.unix 0233f3b99c1f1c104d41a92f6873409f8083619e281194f0fbfe8333a786a544b468ab385e34d91891cffcea397059b210f3faab17fc4e5a444c553afd3826b1
+@@ -81,6 +81,7 @@
+     init.h \
+     key.h \
+     keystore.h \
++    knobs.h \
+     main.h \
+     net.h \
+     noui.h \
+diff -uNr a/bitcoin/src/net.h b/bitcoin/src/net.h
+--- a/bitcoin/src/net.h 2e06a0b090af91ebb861bc575a121021ef352e4e55f16dde823462413029bce59c45f57d34066bc6d8f9c8e537ba39b6615bdad286b744a581bc41e55d407a58
++++ b/bitcoin/src/net.h 4a3e4156023b21f80de1c46c1466ccbc28008d83f204d9eea1e7ac7cd9a2356a1df5eb1d064a4bfede9d661921ded7afad5bef2e2a3eced51bdff0ef875abf29
+@@ -360,7 +360,7 @@
+         CAddress addrMe = (fUseProxy || !addrLocalHost.IsRoutable() ? CAddress("0.0.0.0") : addrLocalHost);
+         RAND_bytes((unsigned char*)&nLocalHostNonce, sizeof(nLocalHostNonce));
+         PushMessage("version", VERSION, nLocalServices, nTime, addrYou, addrMe,
+-                    nLocalHostNonce, std::string(pszSubVer), nBestHeight);
++                    nLocalHostNonce, FormatSubVersion(CLIENT_NAME, VERSION), nBestHeight);
+     }
+ 
+ 
+diff -uNr a/bitcoin/src/serialize.h b/bitcoin/src/serialize.h
+--- a/bitcoin/src/serialize.h b4e3047ee278c2a47973df102a7a8b59982c23ea5c873a20a3fce83ea5e146fa73f7a3c8c32b43bb9979397a33984b045c561636473d57c97c3383611fc84c2a
++++ b/bitcoin/src/serialize.h 72b2dc097c54ad0e89545676d555c92da97ee6d86b6a7fd9c2b063ad629b027704f791e0b4168a0d33766f8203b7297f95d274627c89be974c749143949c86ef
+@@ -24,6 +24,9 @@
+ 
+ #include <sys/mman.h>
+ #include <limits.h>
++
++#include "knobs.h"
++
+ /* This comes from limits.h if it's not defined there set a sane default */
+ #ifndef PAGESIZE
+ #include <unistd.h>
+@@ -41,9 +44,7 @@
+ class CAutoFile;
+ static const unsigned int MAX_SIZE = 0x02000000;
+ 
+-static const int VERSION = 50400;
+-static const char* pszSubVer = "";
+-static const bool VERSION_IS_BETA = true;
++extern int VERSION;
+ 
+ // Used to bypass the rule against non-const reference to temporary
+ // where it makes sense with wrappers such as CFlatData or CTxDB
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp 9ed13d4723a1daad64658d59ae99a776253505faf10619b4a011173b66b4a64b852007296f81f40537fde60c44af475cb4c168cc725dbf59273d8cea34371909
++++ b/bitcoin/src/util.cpp e74abd10e4e001ca9c202672e2d2678c131f0ad06200e0d8c477728f92b1710644cc15abb7e5773b277f38a00e004a4ec4c7cee799a7e9c82c39297b94d540da
+@@ -2,6 +2,7 @@
+ // Copyright (c) 2009-2012 The Bitcoin developers
+ // Distributed under the MIT/X11 software license, see the accompanying
+ // file license.txt or http://www.opensource.org/licenses/mit-license.php.
++#include "knobs.h"
+ #include "headers.h"
+ #include "strlcpy.h"
+ #include <boost/program_options/detail/config_file.hpp>
+@@ -32,7 +33,7 @@
+ bool fNoListen = false;
+ bool fLogTimestamps = false;
+ 
+-
++std::string CLIENT_NAME(DEFAULT_CLIENT_NAME);
+ 
+ 
+ // Workaround for "multiple definition of `_tls_used'"
+@@ -889,14 +890,18 @@
+ 
+ string FormatFullVersion()
+ {
+-    string s = FormatVersion(VERSION) + pszSubVer;
+-    if (VERSION_IS_BETA) {
+-        s += "-";
+-        s += _("beta");
+-    }
++    string s = FormatVersion(VERSION);
+     return s;
+ }
+ 
++std::string FormatSubVersion(const std::string& name, int nClientVersion)
++{
++    std::ostringstream ss;
++    ss << "/";
++    ss << name << ":" << FormatVersion(nClientVersion);
++    ss << "/";
++    return ss.str();
++}
+ 
+ 
+ 
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h 235c9e2b087f65731a530fc76df548a427a1833ea3a4ef8791a89b938c74553f7d0117861265c687952ce91f7e0301a1f35cb3436c4cc87d230a443fcb197ef6
++++ b/bitcoin/src/util.h 99aa3df7dc2e63380ba9916dae9dfe69d6de7bcbf2bd39809cc528dea2699e3b664294175697d4b6ade7fe39dc42420573f59503653d3c22352270c27cd3c1cc
+@@ -121,6 +121,7 @@
+ extern std::string strMiscWarning;
+ extern bool fNoListen;
+ extern bool fLogTimestamps;
++extern std::string CLIENT_NAME;
+ 
+ void RandAddSeed();
+ void RandAddSeedPerfmon();
+@@ -161,6 +162,7 @@
+ int64 GetAdjustedTime();
+ void AddTimeData(unsigned int ip, int64 nTime);
+ std::string FormatFullVersion();
++std::string FormatSubVersion(const std::string& name, int nClientVersion);
+ 
+ 
+ 

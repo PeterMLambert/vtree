@@ -1,0 +1,56 @@
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 9a13d2ae227fec24eef439a18e75becef4efb5b5e28bd544180908f5a2dda7b6dbd0c6289ebfaf918511da3e27a4ea65f92a8a575985261f8d9a7a49c5fa5322
++++ b/bitcoin/src/main.cpp d54d1d9eb12269b705a06b62900f67cbc0370830b0365bfb7c0504517801d608795fcc660c4fb12dba90b89e4b53912bba43b704b19fa9538030e94ca9099b4e
+@@ -1725,13 +1725,9 @@
+             }
+         }
+ 
+-        // Ask the first connected node for block updates
+-        static int nAskedForBlocks;
+-        if (!pfrom->fClient &&
+-            (pfrom->nVersion < 32000 || pfrom->nVersion >= 32400) &&
+-             (nAskedForBlocks < 1 || vNodes.size() <= 1))
++        // Ask EVERY connected node (other than self) for block updates
++        if (!pfrom->fClient)
+         {
+-            nAskedForBlocks++;
+             pfrom->PushGetBlocks(pindexBest, uint256(0));
+         }
+ 
+diff -uNr a/bitcoin/src/net.cpp b/bitcoin/src/net.cpp
+--- a/bitcoin/src/net.cpp 712c2726313ee78027c22b67db8f148572c19003463d8438f47d64dc4f354376a7b492d5a7bfbe324fe8b8e6023e4836473b2b76099b72f58262d616665d0f41
++++ b/bitcoin/src/net.cpp 6d7c7634cce09792942fc69cf945b64e8f8e77b496ad6bbaed12dccbc5e13c31fc2f1162735cae7951893fb6b3635955703059b1e8ba1607cc483c494c0a126c
+@@ -59,12 +59,6 @@
+ 
+ void CNode::PushGetBlocks(CBlockIndex* pindexBegin, uint256 hashEnd)
+ {
+-    // Filter out duplicate requests
+-    if (pindexBegin == pindexLastGetBlocksBegin && hashEnd == hashLastGetBlocksEnd)
+-        return;
+-    pindexLastGetBlocksBegin = pindexBegin;
+-    hashLastGetBlocksEnd = hashEnd;
+-
+     PushMessage("getblocks", CBlockLocator(pindexBegin), hashEnd);
+ }
+ 
+diff -uNr a/bitcoin/src/net.h b/bitcoin/src/net.h
+--- a/bitcoin/src/net.h 4a3e4156023b21f80de1c46c1466ccbc28008d83f204d9eea1e7ac7cd9a2356a1df5eb1d064a4bfede9d661921ded7afad5bef2e2a3eced51bdff0ef875abf29
++++ b/bitcoin/src/net.h 492c9cc92a504bb8174d75fafcbee6980986182a459efc9bfa1d64766320d98ba2fa971d78d00a777c6cc50f82a5d424997927378e99738b1b3b550bdaa727f7
+@@ -130,8 +130,6 @@
+     std::map<uint256, CRequestTracker> mapRequests;
+     CCriticalSection cs_mapRequests;
+     uint256 hashContinue;
+-    CBlockIndex* pindexLastGetBlocksBegin;
+-    uint256 hashLastGetBlocksEnd;
+     int nStartingHeight;
+ 
+     // flood relay
+@@ -180,8 +178,6 @@
+         nRefCount = 0;
+         nReleaseTime = 0;
+         hashContinue = 0;
+-        pindexLastGetBlocksBegin = 0;
+-        hashLastGetBlocksEnd = 0;
+         nStartingHeight = -1;
+         fGetAddr = false;
+         vfSubscribe.assign(256, false);

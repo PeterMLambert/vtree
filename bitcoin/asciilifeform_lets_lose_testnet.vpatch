@@ -1,0 +1,253 @@
+diff -uNr a/bitcoin/src/base58.h b/bitcoin/src/base58.h
+--- a/bitcoin/src/base58.h c9414dd278719a028b904826086e3d241ac1402bbcbaf265c6e03b2dfe0451833a8e6cc11cdcc90e67e64c41056c9a2725cec1f0a6e251a0ef76835ba3d173b4
++++ b/bitcoin/src/base58.h 935818d95d5e80e25a0992801b4a01d8f18998a63a6949b46832c2d1ae0a6dbbb4ac7cca5ad4e857d1b7a1af3b537c7fcd6a60727c1b211fcfd0723e00d96314
+@@ -252,14 +252,14 @@
+ };
+ 
+ // base58-encoded bitcoin addresses
+-// Addresses have version 0 or 111 (testnet)
++// Addresses have version 0
+ // The data vector contains RIPEMD160(SHA256(pubkey)), where pubkey is the serialized public key
+ class CBitcoinAddress : public CBase58Data
+ {
+ public:
+     bool SetHash160(const uint160& hash160)
+     {
+-        SetData(fTestNet ? 111 : 0, &hash160, 20);
++        SetData(0, &hash160, 20);
+         return true;
+     }
+ 
+@@ -271,20 +271,15 @@
+     bool IsValid() const
+     {
+         int nExpectedSize = 20;
+-        bool fExpectTestNet = false;
+         switch(nVersion)
+         {
+             case 0:
+                 break;
+ 
+-            case 111:
+-                fExpectTestNet = true;
+-                break;
+-
+             default:
+                 return false;
+         }
+-        return fExpectTestNet == fTestNet && vchData.size() == nExpectedSize;
++        return vchData.size() == nExpectedSize;
+     }
+ 
+     CBitcoinAddress()
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp e3d08b1607a11be7b3abd68bdbd93caa378c614c8855ee21bc6e1d8537e443c6f1d496bb9c86f240231065ad226a09f7f8288bb79923075492a2166a87f6ddcb
++++ b/bitcoin/src/bitcoinrpc.cpp ca28a67c52b37d372e22b124eecb4e136925110db1132ae122a1f47b20e60bfc7abdd76abcbb03abf026e6900fd377ced5a983026f1b7b6c9cb26ef3faade0ef
+@@ -303,7 +303,6 @@
+     obj.push_back(Pair("genproclimit",  (int)(fLimitProcessors ? nLimitProcessors : -1)));
+     obj.push_back(Pair("difficulty",    (double)GetDifficulty()));
+     obj.push_back(Pair("hashespersec",  gethashespersec(params, false)));
+-    obj.push_back(Pair("testnet",       fTestNet));
+     obj.push_back(Pair("keypoololdest", (boost::int64_t)pwalletMain->GetOldestKeyPoolTime()));
+     obj.push_back(Pair("keypoolsize",   pwalletMain->GetKeyPoolSize()));
+     obj.push_back(Pair("paytxfee",      ValueFromAmount(nTransactionFee)));
+diff -uNr a/bitcoin/src/checkpoints.cpp b/bitcoin/src/checkpoints.cpp
+--- a/bitcoin/src/checkpoints.cpp 423fe692637903b32d0daea46d9752322a7615ce3cd3cc3ce1f6fb2bf80b8f3c5285db91f0be83c5ab97c951be6a8e46bb2b1a8fa7bdce9780fcb6e5c54e2648
++++ b/bitcoin/src/checkpoints.cpp 6228ceb19ae63bb33c33f5c235283835fad0c84ccdfdd19257f17cb4b63210d91dbdecd67869edb47dcc117c08b181ae5fdc247941fba2980299450439e77f42
+@@ -35,8 +35,6 @@
+ 
+     bool CheckBlock(int nHeight, const uint256& hash)
+     {
+-        if (fTestNet) return true; // Testnet has no checkpoints
+-
+         MapCheckpoints::const_iterator i = mapCheckpoints.find(nHeight);
+         if (i == mapCheckpoints.end()) return true;
+         return hash == i->second;
+@@ -44,15 +42,11 @@
+ 
+     int GetTotalBlocksEstimate()
+     {
+-        if (fTestNet) return 0;
+-
+         return mapCheckpoints.rbegin()->first;
+     }
+ 
+     CBlockIndex* GetLastCheckpoint(const std::map<uint256, CBlockIndex*>& mapBlockIndex)
+     {
+-        if (fTestNet) return NULL;
+-
+         BOOST_REVERSE_FOREACH(const MapCheckpoints::value_type& i, mapCheckpoints)
+         {
+             const uint256& hash = i.second;
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp c51b1b2a979b2dc9e720238808ee63d62037918cafe23cacf018bb1f53cd5bf0706ceab4e73b41ac0b6aeaeb03c38ef7f12399225db8e01f9595aedeee825421
++++ b/bitcoin/src/init.cpp 598bbbd1eab270cfb3e1114e7fa01caba27a2dfd2b57d04043f18ad34c9a1ecdbb896a06eae07a3def03f58a00cd57727af37a14d00353168407700f1ad3307a
+@@ -160,7 +160,7 @@
+             "  -datadir=<dir>   \t\t  " + _("Specify data directory\n") +
+             "  -timeout=<n>     \t  "   + _("Specify connection timeout (in milliseconds)\n") +
+             "  -proxy=<ip:port> \t  "   + _("Connect through socks4 proxy\n") +
+-            "  -port=<port>     \t\t  " + _("Listen for connections on <port> (default: 8333 or testnet: 18333)\n") +
++            "  -port=<port>     \t\t  " + _("Listen for connections on <port> (default: 8333)\n") +
+             "  -maxconnections=<n>\t  " + _("Maintain at most <n> connections to peers (default: 125)\n") +
+             "  -myip=<ip>       \t  "   + _("Set this node's external IP address.\n") +
+             "  -addnode=<ip>    \t  "   + _("Add a node to connect to\n") +
+@@ -172,7 +172,6 @@
+             "  -maxsendbuffer=<n>\t  "   + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 10000)\n") +
+             "  -paytxfee=<amt>  \t  "   + _("Fee per kB to add to transactions you send\n") +
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+-            "  -testnet         \t\t  " + _("Use the test network\n") +
+             "  -debug           \t\t  " + _("Output extra debugging information\n") +
+ 	    "  -caneat          \t\t  " + _("Permit the use of 'eatblock'\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+@@ -194,7 +193,6 @@
+         return false;
+     }
+ 
+-    fTestNet = GetBoolArg("-testnet");
+     fDebug = GetBoolArg("-debug");
+     fDaemon = GetBoolArg("-daemon");
+     fCanEat = GetBoolArg("-caneat");
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 537a12d62802fa25331ce5e27434a9af18f263bbcc4d9cb4092e8c72c314b7a1ce6acb20cfdc3ce17a7668302f466bc5041d7e5a40f7c4531c411a40c86ff767
++++ b/bitcoin/src/main.cpp 16256a693b6dd1ecf2224d2055ec17ccd1d24a9c0f2cb0668ec7329f5f959a3fc0a3db66e1400b18eee1bcc4b3bc5a53d98612282d0a8827f1cc895307fc8d2e
+@@ -311,8 +311,8 @@
+     if (GetSigOpCount() > nSize / 34 || nSize < 100)
+         return error("AcceptToMemoryPool() : transaction with out-of-bounds SigOpCount");
+ 
+-    // Rather not work on nonstandard transactions (unless -testnet)
+-    if (!fTestNet && !IsStandard())
++    // Rather not work on nonstandard transactions
++    if (!IsStandard())
+         return error("AcceptToMemoryPool() : nonstandard transaction type");
+ 
+     // Do we already have it?
+@@ -600,11 +600,6 @@
+ //
+ unsigned int ComputeMinWork(unsigned int nBase, int64 nTime)
+ {
+-    // Testnet has min-difficulty blocks
+-    // after nTargetSpacing*2 time between blocks:
+-    if (fTestNet && nTime > nTargetSpacing*2)
+-        return bnProofOfWorkLimit.GetCompact();
+-
+     CBigNum bnResult;
+     bnResult.SetCompact(nBase);
+     while (nTime > 0 && bnResult < bnProofOfWorkLimit)
+@@ -630,23 +625,6 @@
+     // Only change once per interval
+     if ((pindexLast->nHeight+1) % nInterval != 0)
+     {
+-        // Special rules for testnet after 15 Feb 2012:
+-        if (fTestNet && pblock->nTime > 1329264000)
+-        {
+-            // If the new block's timestamp is more than 2* 10 minutes
+-            // then allow mining of a min-difficulty block.
+-            if (pblock->nTime - pindexLast->nTime > nTargetSpacing*2)
+-                return nProofOfWorkLimit;
+-            else
+-            {
+-                // Return the last non-special-min-difficulty-rules-block
+-                const CBlockIndex* pindex = pindexLast;
+-                while (pindex->pprev && pindex->nHeight % nInterval != 0 && pindex->nBits == nProofOfWorkLimit)
+-                    pindex = pindex->pprev;
+-                return pindex->nBits;
+-            }
+-        }
+-
+         return pindexLast->nBits;
+     }
+ 
+@@ -992,8 +970,7 @@
+     // This logic is not necessary for memory pool transactions, as AcceptToMemoryPool
+     // already refuses previously-known transaction id's entirely.
+     // This rule applies to all blocks whose timestamp is after March 15, 2012, 0:00 UTC.
+-    // On testnet it is enabled as of februari 20, 2012, 0:00 UTC.
+-    if (pindex->nTime > 1331769600 || (fTestNet && pindex->nTime > 1329696000))
++    if (pindex->nTime > 1331769600)
+         BOOST_FOREACH(CTransaction& tx, vtx)
+         {
+             CTxIndex txindexOld;
+@@ -1461,16 +1438,6 @@
+ 
+ bool LoadBlockIndex(bool fAllowNew)
+ {
+-    if (fTestNet)
+-    {
+-        hashGenesisBlock = uint256("0x00000007199508e34a9ff81e6ec0c477a4cccff2a4767a8eee39c11db367b008");
+-        bnProofOfWorkLimit = CBigNum(~uint256(0) >> 28);
+-        pchMessageStart[0] = 0xfa;
+-        pchMessageStart[1] = 0xbf;
+-        pchMessageStart[2] = 0xb5;
+-        pchMessageStart[3] = 0xda;
+-    }
+-
+     //
+     // Load block index
+     //
+@@ -1511,13 +1478,6 @@
+         block.nBits    = 0x1d00ffff;
+         block.nNonce   = 2083236893;
+ 
+-        if (fTestNet)
+-        {
+-            block.nTime    = 1296688602;
+-            block.nBits    = 0x1d07fff8;
+-            block.nNonce   = 384568319;
+-        }
+-
+         //// debug print
+         printf("%s\n", block.GetHash().ToString().c_str());
+         printf("%s\n", hashGenesisBlock.ToString().c_str());
+diff -uNr a/bitcoin/src/protocol.h b/bitcoin/src/protocol.h
+--- a/bitcoin/src/protocol.h ea4fdf494f219f2f3f9215d5dc384554b5dff4f18001cf08eaa39322fad2e5c1d1b74fd2486ea05d40627974df43bafa05d16858c1d98fbd287cb4104006662f
++++ b/bitcoin/src/protocol.h d3eb2f000a4f19d55a5b284f3281ed072b69b0deabf87178db4f2c46e3775ad75a349a98b3b99299b15577c44c50860ee27a8e74a729a854daccd6f858ffab79
+@@ -14,10 +14,9 @@
+ #include <string>
+ #include "uint256.h"
+ 
+-extern bool fTestNet;
+-static inline unsigned short GetDefaultPort(const bool testnet = fTestNet)
++static inline unsigned short GetDefaultPort()
+ {
+-    return testnet ? 18333 : 8333;
++    return 8333;
+ }
+ 
+ //
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp 813c57d2d79f725ccfe04af8d7cee5dfc73c9aba6b3c958334cfc678aacbeef96e9dcf37f78b596b7eb5d7b70e6f7fc3bcbf9c1ebbd2846e35cdb61786e4f801
++++ b/bitcoin/src/util.cpp 29436752078f28a0d8c38c0a8455ae3d4b17eeb8f8bf4cabad0a3dbc2e28ddebcedf5a160ea0efcabd74be32016efbf890bba0df8e09efd2718735379dbbac7b
+@@ -28,7 +28,6 @@
+ bool fServer = false;
+ bool fCommandLine = false;
+ string strMiscWarning;
+-bool fTestNet = false;
+ bool fNoListen = false;
+ bool fLogTimestamps = false;
+ 
+@@ -685,14 +684,6 @@
+         strlcpy(pszDir, pszCachedDir, MAX_PATH);
+         nVariation = 1;
+     }
+-    if (fTestNet)
+-    {
+-        char* p = pszDir + strlen(pszDir);
+-        if (p > pszDir && p[-1] != '/' && p[-1] != '\\')
+-            *p++ = '/';
+-        strcpy(p, "testnet");
+-        nVariation += 2;
+-    }
+     static bool pfMkdir[4];
+     if (!pfMkdir[nVariation])
+     {
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h a3bbbd780ce698a1ec2fe7758063c42836b13a2785044250b504c520b64c07cd9f1be985437a61cd3e72c655a063f21bbb336dd51204c88dc126031dc5ac4093
++++ b/bitcoin/src/util.h 4d2a5c6a0c1f82b5f172a1161e686e54ce17cc65614ef9457b1745f5fb5dddb4056d84ac207d6be1853a576060ea9631fb2cbd0778e0bf022a09b19b24078188
+@@ -118,7 +118,6 @@
+ extern bool fServer;
+ extern bool fCommandLine;
+ extern std::string strMiscWarning;
+-extern bool fTestNet;
+ extern bool fNoListen;
+ extern bool fLogTimestamps;
+ 

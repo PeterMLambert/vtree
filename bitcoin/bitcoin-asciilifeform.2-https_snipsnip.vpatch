@@ -1,0 +1,217 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp 87e6c3d7333251722ad29ff54ec06f4aa276b9430dc12c804bb5fa1513a3e90a0eb206881154e525c88d71857741908f2a82370136876b06bc0506ba53f5873e
++++ b/bitcoin/src/bitcoinrpc.cpp b860454af0cea61da456cccd4fe4b7152d0e4df57f974259e7b1153ab0b1954ba526cef89cfb85676cdd3e7d212c09576437e431ec9d71409d5c37c839fd4837
+@@ -12,12 +12,6 @@
+ #include <boost/iostreams/concepts.hpp>
+ #include <boost/iostreams/stream.hpp>
+ #include <boost/algorithm/string.hpp>
+-#ifdef USE_SSL
+-#include <boost/asio/ssl.hpp> 
+-#include <boost/filesystem.hpp>
+-#include <boost/filesystem/fstream.hpp>
+-typedef boost::asio::ssl::stream<boost::asio::ip::tcp::socket> SSLStream;
+-#endif
+ #include "json/json_spirit_reader_template.h"
+ #include "json/json_spirit_writer_template.h"
+ #include "json/json_spirit_utils.h"
+@@ -2078,60 +2072,6 @@
+     return false;
+ }
+ 
+-#ifdef USE_SSL
+-//
+-// IOStream device that speaks SSL but can also speak non-SSL
+-//
+-class SSLIOStreamDevice : public iostreams::device<iostreams::bidirectional> {
+-public:
+-    SSLIOStreamDevice(SSLStream &streamIn, bool fUseSSLIn) : stream(streamIn)
+-    {
+-        fUseSSL = fUseSSLIn;
+-        fNeedHandshake = fUseSSLIn;
+-    }
+-
+-    void handshake(ssl::stream_base::handshake_type role)
+-    {
+-        if (!fNeedHandshake) return;
+-        fNeedHandshake = false;
+-        stream.handshake(role);
+-    }
+-    std::streamsize read(char* s, std::streamsize n)
+-    {
+-        handshake(ssl::stream_base::server); // HTTPS servers read first
+-        if (fUseSSL) return stream.read_some(asio::buffer(s, n));
+-        return stream.next_layer().read_some(asio::buffer(s, n));
+-    }
+-    std::streamsize write(const char* s, std::streamsize n)
+-    {
+-        handshake(ssl::stream_base::client); // HTTPS clients write first
+-        if (fUseSSL) return asio::write(stream, asio::buffer(s, n));
+-        return asio::write(stream.next_layer(), asio::buffer(s, n));
+-    }
+-    bool connect(const std::string& server, const std::string& port)
+-    {
+-        ip::tcp::resolver resolver(stream.get_io_service());
+-        ip::tcp::resolver::query query(server.c_str(), port.c_str());
+-        ip::tcp::resolver::iterator endpoint_iterator = resolver.resolve(query);
+-        ip::tcp::resolver::iterator end;
+-        boost::system::error_code error = asio::error::host_not_found;
+-        while (error && endpoint_iterator != end)
+-        {
+-            stream.lowest_layer().close();
+-            stream.lowest_layer().connect(*endpoint_iterator++, error);
+-        }
+-        if (error)
+-            return false;
+-        return true;
+-    }
+-
+-private:
+-    bool fNeedHandshake;
+-    bool fUseSSL;
+-    SSLStream& stream;
+-};
+-#endif
+-
+ void ThreadRPCServer(void* parg)
+ {
+     IMPLEMENT_RANDOMIZE_STACK(ThreadRPCServer(parg));
+@@ -2179,7 +2119,6 @@
+         return;
+     }
+ 
+-    bool fUseSSL = GetBoolArg("-rpcssl");
+     asio::ip::address bindAddress = mapArgs.count("-rpcallowip") ? asio::ip::address_v4::any() : asio::ip::address_v4::loopback();
+ 
+     asio::io_service io_service;
+@@ -2188,47 +2127,14 @@
+ 
+     acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+ 
+-#ifdef USE_SSL
+-    ssl::context context(io_service, ssl::context::sslv23);
+-    if (fUseSSL)
+-    {
+-        context.set_options(ssl::context::no_sslv2);
+-        filesystem::path certfile = GetArg("-rpcsslcertificatechainfile", "server.cert");
+-        if (!certfile.is_complete()) certfile = filesystem::path(GetDataDir()) / certfile;
+-        if (filesystem::exists(certfile)) context.use_certificate_chain_file(certfile.string().c_str());
+-        else printf("ThreadRPCServer ERROR: missing server certificate file %s\n", certfile.string().c_str());
+-        filesystem::path pkfile = GetArg("-rpcsslprivatekeyfile", "server.pem");
+-        if (!pkfile.is_complete()) pkfile = filesystem::path(GetDataDir()) / pkfile;
+-        if (filesystem::exists(pkfile)) context.use_private_key_file(pkfile.string().c_str(), ssl::context::pem);
+-        else printf("ThreadRPCServer ERROR: missing server private key file %s\n", pkfile.string().c_str());
+-
+-        string ciphers = GetArg("-rpcsslciphers",
+-                                         "TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH");
+-        SSL_CTX_set_cipher_list(context.impl(), ciphers.c_str());
+-    }
+-#else
+-    if (fUseSSL)
+-        throw runtime_error("-rpcssl=1, but bitcoin compiled without full openssl libraries.");
+-#endif
+-
+     loop
+     {
+         // Accept connection
+-#ifdef USE_SSL
+-        SSLStream sslStream(io_service, context);
+-        SSLIOStreamDevice d(sslStream, fUseSSL);
+-        iostreams::stream<SSLIOStreamDevice> stream(d);
+-#else
+         ip::tcp::iostream stream;
+-#endif
+ 
+         ip::tcp::endpoint peer;
+         vnThreadsRunning[4]--;
+-#ifdef USE_SSL
+-        acceptor.accept(sslStream.lowest_layer(), peer);
+-#else
+         acceptor.accept(*stream.rdbuf(), peer);
+-#endif
+         vnThreadsRunning[4]++;
+         if (fShutdown)
+             return;
+@@ -2236,9 +2142,10 @@
+         // Restrict callers by IP
+         if (!ClientAllowed(peer.address().to_string()))
+         {
++	    // snipsnipsnip
+             // Only send a 403 if we're not using SSL to prevent a DoS during the SSL handshake.
+-            if (!fUseSSL)
+-                stream << HTTPReply(403, "") << std::flush;
++            //if (!fUseSSL)
++            stream << HTTPReply(403, "") << std::flush;
+             continue;
+         }
+ 
+@@ -2354,25 +2261,9 @@
+                 GetConfigFile().c_str()));
+ 
+     // Connect to localhost
+-    bool fUseSSL = GetBoolArg("-rpcssl");
+-#ifdef USE_SSL
+-    asio::io_service io_service;
+-    ssl::context context(io_service, ssl::context::sslv23);
+-    context.set_options(ssl::context::no_sslv2);
+-    SSLStream sslStream(io_service, context);
+-    SSLIOStreamDevice d(sslStream, fUseSSL);
+-    iostreams::stream<SSLIOStreamDevice> stream(d);
+-    if (!d.connect(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "8332")))
+-        throw runtime_error("couldn't connect to server");
+-#else
+-    if (fUseSSL)
+-        throw runtime_error("-rpcssl=1, but bitcoin compiled without full openssl libraries.");
+-
+     ip::tcp::iostream stream(GetArg("-rpcconnect", "127.0.0.1"), GetArg("-rpcport", "8332"));
+     if (stream.fail())
+         throw runtime_error("couldn't connect to server");
+-#endif
+-
+ 
+     // HTTP basic authentication
+     string strUserPass64 = EncodeBase64(mapArgs["-rpcuser"] + ":" + mapArgs["-rpcpassword"]);
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp b94202848156190628ddc0602ec88642916c827888164b435f09433f67b60f37cb43f6d4c6e6769af7ad39e9adec3163bf641d0ac5879f16b7578e4b8e827d66
++++ b/bitcoin/src/init.cpp 352283739438e0d213f66b3d94a728ecf280ace2280615a2c700e5d94bf32bbd3518f512fab55f7071ff5e8f02ec988cc1be71ec15597af3c3933d7cb833efc4
+@@ -207,15 +207,6 @@
+             "  -keypool=<n>     \t  "   + _("Set key pool size to <n> (default: 100)\n") +
+             "  -rescan          \t  "   + _("Rescan the block chain for missing wallet transactions\n");
+ 
+-#ifdef USE_SSL
+-        strUsage += string() +
+-            _("\nSSL options: (see the Bitcoin Wiki for SSL setup instructions)\n") +
+-            "  -rpcssl                                \t  " + _("Use OpenSSL (https) for JSON-RPC connections\n") +
+-            "  -rpcsslcertificatechainfile=<file.cert>\t  " + _("Server certificate file (default: server.cert)\n") +
+-            "  -rpcsslprivatekeyfile=<file.pem>       \t  " + _("Server private key (default: server.pem)\n") +
+-            "  -rpcsslciphers=<ciphers>               \t  " + _("Acceptable ciphers (default: TLSv1+HIGH:!SSLv2:!aNULL:!eNULL:!AH:!3DES:@STRENGTH)\n");
+-#endif
+-
+         strUsage += string() +
+             "  -?               \t\t  " + _("This help message\n");
+ 
+diff -uNr a/bitcoin/src/makefile.linux-mingw b/bitcoin/src/makefile.linux-mingw
+--- a/bitcoin/src/makefile.linux-mingw 655fdd6d8e0c4a783d81c2e8a996f2197d3ef48593bffbf5446d6940d9065150cac12cba72bb1bebdefb92cca4cdbfcde515ccdc5279aa375545ac2ecaed07ba
++++ b/bitcoin/src/makefile.linux-mingw 83d546a9c99d9a33cf806b19617dfb36dbe2d51912b3d8b14aa2df4ef64b9f281820d99f2c9cb822c21baf8392389aa1fd543478037aeb734300651f0c9d5392
+@@ -24,7 +24,7 @@
+  -l ssl \
+  -l crypto
+ 
+-DEFS=-D_MT -DWIN32 -D_WINDOWS -DNOPCH -DUSE_SSL -DBOOST_THREAD_USE_LIB
++DEFS=-D_MT -DWIN32 -D_WINDOWS -DNOPCH -DBOOST_THREAD_USE_LIB
+ DEBUGFLAGS=-g
+ CFLAGS=-O2 -w -Wno-invalid-offsetof -Wformat $(DEBUGFLAGS) $(DEFS) $(INCLUDEPATHS)
+ HEADERS = \
+diff -uNr a/bitcoin/src/makefile.unix b/bitcoin/src/makefile.unix
+--- a/bitcoin/src/makefile.unix 99aa39376bce4d549a2c8b442f48814a4987eb6b329bf7541322bbf90449882016313e6ba15738df617f0535e60c1e1c1b18552aed035c6b69e726514d648e7a
++++ b/bitcoin/src/makefile.unix 85700c20bee5a758709d7d3d1f85afa09d3e036af93c4e5b85e76364ed7fdb9b86b664039f61ddf415e62ef36c8f89a7957d3569fa14cc99349f37bd4d947b47
+@@ -29,10 +29,6 @@
+    -l ssl \
+    -l crypto
+ 
+-ifneq (${USE_SSL}, 0)
+-	DEFS += -DUSE_SSL
+-endif
+-
+ LIBS+= \
+  -Wl,-B$(LMODE2) \
+    -l z \

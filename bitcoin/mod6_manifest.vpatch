@@ -1,0 +1,55 @@
+diff -uNr a/bitcoin/manifest b/bitcoin/manifest
+--- a/bitcoin/manifest false
++++ b/bitcoin/manifest 5b7e8c468b60886f17cf5d3b289f89576bcb510691b7299ebfa37e95ea53d254b8ee5b8b20f8ad7e7e1aa41a105aff056673281885ea26e73787dd1aedf91946
+@@ -0,0 +1,3 @@
++614342 trb_keccak_regrind mod6 Not a vpatch, whole TRB tree keccak regrind; removes UTF-8 char from original genesis.vpatch
++614347 mod6_privkey_tools.vpatch mod6 adds privkey tools
++614351 mod6_manifest.vpatch mod6 Adds TRB manifest; updates version comments
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp ae34bf1f54a0beddfd8679af42cc1e0ab540cdaebff1c1381e2b055970ce80106025148a785debff3c728f16365a05d00e96a30a46aa11a7d01b4acbe4bf4734
++++ b/bitcoin/src/bitcoinrpc.cpp aa281513748dd76b77893f0813d9425dfc7163cb1eca4af74d707fd5371b2ec7e7652c2c7a45a0069ac5c877554ca0ac7ec0504b93f5d7c859b29deed20146c7
+@@ -22,6 +22,8 @@
+ // a certain size around 145MB.  If we need access to json_spirit outside this
+ // file, we could use the compiled json_spirit option.
+ 
++// v0.5.4 RELEASE (keccak)
++
+ using namespace std;
+ using namespace boost;
+ using namespace boost::asio;
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp 491ea0c22fd62170b569629e053fb9d29e9c7ee4044b83841d8fced721130bfeb5820a8759c485ce365ed2673121cc07fc21366d256709c6497e3ddc6b3c50a1
++++ b/bitcoin/src/db.cpp ed121a460f49c601b8c56e5e90e9ab728d6edba0674ddb34111e0e520cf84aea918624c677937ce025fd95405b4dbe30a2a160f007846b32817532cd4faba40b
+@@ -9,7 +9,7 @@
+ #include <boost/filesystem.hpp>
+ #include <boost/filesystem/fstream.hpp>
+ 
+-// v0.5.4 RELEASE
++// v0.5.4 RELEASE (keccak)
+ 
+ using namespace std;
+ using namespace boost;
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 8fcfa796bc50bde6b3960a3b6730c6f0c2ebc33ca05007fd30442d14748e6e813225842416646b0b5ddb32f2c1b678de0fc1444b1358704a12a47836f9948a3c
++++ b/bitcoin/src/init.cpp f80dfd494a79def349b3725d51a5d79b7ec87f623ed8a43ec2fc9edc8a9b6692e032a32575b20ede56ff1173d9d782404b4866f67d5f7fc544079bbd06dcf8d9
+@@ -12,7 +12,7 @@
+ #include <boost/filesystem/fstream.hpp>
+ #include <boost/interprocess/sync/file_lock.hpp>
+ 
+-// v0.5.4 RELEASE
++// v0.5.4 RELEASE (keccak)
+ 
+ using namespace std;
+ using namespace boost;
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp d54d1d9eb12269b705a06b62900f67cbc0370830b0365bfb7c0504517801d608795fcc660c4fb12dba90b89e4b53912bba43b704b19fa9538030e94ca9099b4e
++++ b/bitcoin/src/main.cpp 6424f947d41cd64953a4f2c3aafa97a21e69ceff571caaf9de9175117644ed456f45f1eaa4fbad7d85412d003c121dd9579f5d07a701c5dfd1ba5e209f286dd4
+@@ -10,7 +10,7 @@
+ #include <boost/filesystem.hpp>
+ #include <boost/filesystem/fstream.hpp>
+ 
+-// v0.5.4 RELEASE
++// v0.5.4 RELEASE (keccak)
+ 
+ using namespace std;
+ using namespace boost;

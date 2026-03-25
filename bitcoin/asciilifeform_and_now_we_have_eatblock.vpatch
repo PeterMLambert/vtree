@@ -1,0 +1,81 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp 4731466a24920c9320dc9f20d9537058dd693da77b8646a3cc47a69d710217574452a18a45d81de82231246fd402d7f80fca14aa85ee14156ffa513e064bfc81
++++ b/bitcoin/src/bitcoinrpc.cpp e3d08b1607a11be7b3abd68bdbd93caa378c614c8855ee21bc6e1d8537e443c6f1d496bb9c86f240231065ad226a09f7f8288bb79923075492a2166a87f6ddcb
+@@ -1817,6 +1817,28 @@
+ }
+ 
+ 
++Value eatblock(const Array& params, bool fHelp)
++{
++    if (fHelp || params.size() < 1 || params.size() > 1)
++        throw runtime_error(
++            "eatblock <filename>\n"
++            "Load a candidate for the next block directly from <filename>.");
++
++    if (!fCanEat)
++        throw runtime_error(
++            "'eatblock' is only permitted if bitcoind was started with -caneat flag!");
++
++    // path to load block from
++    string filename = params[0].get_str();
++    
++    printf("Attempting to create block #%d from file %s\n", nBestHeight + 1, filename.c_str());
++    CAutoFile filein = fopen(filename.c_str(), "rb");
++    CBlock block;
++    filein >> block;
++    return ProcessBlock(NULL, &block); // note that 'true' even if it was rejected (bastard, etc)
++} // ... but will return 'false' if we already have the block.
++
++
+ 
+ //
+ // Call Table
+@@ -1865,6 +1887,7 @@
+     make_pair("getmemorypool",          &getmemorypool),
+     make_pair("listsinceblock",        &listsinceblock),
+     make_pair("dumpblock",              &dumpblock),
++    make_pair("eatblock",               &eatblock),
+ };
+ map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
+ 
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 4a6fd3869db3a39835edd505281ad25b8f0feafd30b035369c730e1afadcd17fe3f1f49c8da4b3f59d97daabca37c9b544f57e8e484a43811a8dca044726bf45
++++ b/bitcoin/src/init.cpp c51b1b2a979b2dc9e720238808ee63d62037918cafe23cacf018bb1f53cd5bf0706ceab4e73b41ac0b6aeaeb03c38ef7f12399225db8e01f9595aedeee825421
+@@ -174,6 +174,7 @@
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+             "  -testnet         \t\t  " + _("Use the test network\n") +
+             "  -debug           \t\t  " + _("Output extra debugging information\n") +
++	    "  -caneat          \t\t  " + _("Permit the use of 'eatblock'\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+             "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file\n") +
+             "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections\n") +
+@@ -196,6 +197,7 @@
+     fTestNet = GetBoolArg("-testnet");
+     fDebug = GetBoolArg("-debug");
+     fDaemon = GetBoolArg("-daemon");
++    fCanEat = GetBoolArg("-caneat");
+ 
+     if (fDaemon)
+         fServer = true;
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp 73bce315476b665825604c1cfcb777a779de476b774b92656f4c52a49dd6b0740132f73e2348599fecfd6702a1f1629b1f5237a11f3d98b516721c350c358b16
++++ b/bitcoin/src/util.cpp 813c57d2d79f725ccfe04af8d7cee5dfc73c9aba6b3c958334cfc678aacbeef96e9dcf37f78b596b7eb5d7b70e6f7fc3bcbf9c1ebbd2846e35cdb61786e4f801
+@@ -20,6 +20,7 @@
+ bool fDebug = false;
+ bool fPrintToConsole = false;
+ bool fPrintToDebugger = false;
++bool fCanEat = false;
+ char pszSetDataDir[MAX_PATH] = "";
+ bool fRequestShutdown = false;
+ bool fShutdown = false;
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h 52465ee0a39129774d7100a8731b84ebe0327c822f7b728d9576db9df878366d96f8d87f8a4d154d7f28ba4992fe9fd510641073e4035851cf3d8d82a36d6a3b
++++ b/bitcoin/src/util.h a3bbbd780ce698a1ec2fe7758063c42836b13a2785044250b504c520b64c07cd9f1be985437a61cd3e72c655a063f21bbb336dd51204c88dc126031dc5ac4093
+@@ -110,6 +110,7 @@
+ extern bool fDebug;
+ extern bool fPrintToConsole;
+ extern bool fPrintToDebugger;
++extern bool fCanEat;
+ extern char pszSetDataDir[MAX_PATH];
+ extern bool fRequestShutdown;
+ extern bool fShutdown;

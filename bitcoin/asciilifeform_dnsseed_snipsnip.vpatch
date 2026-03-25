@@ -1,0 +1,144 @@
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 5580d0fa04b103fddff3b029385134345ce8f1968688e4d69fc4bd0ef13f87be7a380476829fb761b82ad0069d003948b5fcff7470941ab8298df82e93c9b80a
++++ b/bitcoin/src/init.cpp d68207833444ea7d6f91bc579cb5543121f9f5bb90a72b713cca1d90a453bca3a4e660afe66e836fd8ad1e3e21ee322ecd54114fc541fb30924ebbb0d6544a41
+@@ -167,7 +167,6 @@
+             "  -connect=<ip>    \t\t  " + _("Connect only to the specified node\n") +
+             "  -noirc           \t  "   + _("Don't find peers using internet relay chat\n") +
+             "  -nolisten        \t  "   + _("Don't accept connections from outside\n") +
+-            "  -nodnsseed       \t  "   + _("Don't bootstrap list of peers using DNS\n") +
+             "  -banscore=<n>    \t  "   + _("Threshold for disconnecting misbehaving peers (default: 100)\n") +
+             "  -bantime=<n>     \t  "   + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)\n") +
+             "  -maxreceivebuffer=<n>\t  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 10000)\n") +
+@@ -415,7 +414,6 @@
+         // Note: the GetBoolArg() calls for all of these must happen later.
+         SoftSetArg("-nolisten", true);
+         SoftSetArg("-noirc", true);
+-        SoftSetArg("-nodnsseed", true);
+         SoftSetArg("-dns", false);
+     }
+ 
+diff -uNr a/bitcoin/src/net.cpp b/bitcoin/src/net.cpp
+--- a/bitcoin/src/net.cpp 397fa4caf80112ef2a0ef2905ab0af4df49e437b926e5dde97167d888423a21e5b34f42361296bc065d31f49a8bda21aedfc6365684bc9cadd873598803b912c
++++ b/bitcoin/src/net.cpp f58c522ef8e2a659bb35fd9607e6f4f97bc8d1d2ccdc543a6b3fb1f834d15258c73899ea7442ee3f0382e6f50aac6a44656446f1548eaf01e7adf1a7959924ba
+@@ -19,7 +19,6 @@
+ void ThreadMessageHandler2(void* parg);
+ void ThreadSocketHandler2(void* parg);
+ void ThreadOpenConnections2(void* parg);
+-void ThreadDNSAddressSeed2(void* parg);
+ bool OpenNetworkConnection(const CAddress& addrConnect);
+ 
+ 
+@@ -1067,92 +1066,6 @@
+ }
+ 
+ 
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-static const char *strDNSSeed[] = {
+-    "bitseed.xf2.org",
+-    "dnsseed.bluematt.me",
+-    "seed.bitcoin.sipa.be",
+-    "dnsseed.bitcoin.dashjr.org",
+-};
+-
+-void ThreadDNSAddressSeed(void* parg)
+-{
+-    IMPLEMENT_RANDOMIZE_STACK(ThreadDNSAddressSeed(parg));
+-    try
+-    {
+-        vnThreadsRunning[6]++;
+-        ThreadDNSAddressSeed2(parg);
+-        vnThreadsRunning[6]--;
+-    }
+-    catch (std::exception& e) {
+-        vnThreadsRunning[6]--;
+-        PrintException(&e, "ThreadDNSAddressSeed()");
+-    } catch (...) {
+-        vnThreadsRunning[6]--;
+-        throw; // support pthread_cancel()
+-    }
+-    printf("ThreadDNSAddressSeed exiting\n");
+-}
+-
+-void ThreadDNSAddressSeed2(void* parg)
+-{
+-    printf("ThreadDNSAddressSeed started\n");
+-    int found = 0;
+-
+-    if (!fTestNet)
+-    {
+-        printf("Loading addresses from DNS seeds (could take a while)\n");
+-
+-        for (int seed_idx = 0; seed_idx < ARRAYLEN(strDNSSeed); seed_idx++) {
+-            vector<CAddress> vaddr;
+-            if (Lookup(strDNSSeed[seed_idx], vaddr, NODE_NETWORK, -1, true))
+-            {
+-                CAddrDB addrDB;
+-                addrDB.TxnBegin();
+-                BOOST_FOREACH (CAddress& addr, vaddr)
+-                {
+-                    if (addr.GetByte(3) != 127)
+-                    {
+-                        addr.nTime = 0;
+-                        AddAddress(addr, 0, &addrDB);
+-                        found++;
+-                    }
+-                }
+-                addrDB.TxnCommit();  // Save addresses (it's ok if this fails)
+-            }
+-        }
+-    }
+-
+-    printf("%d addresses found from DNS seeds\n", found);
+-}
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+-
+ unsigned int pnSeed[] =
+ {
+     0x959bd347, 0xf8de42b2, 0x73bc0518, 0xea6edc50, 0x21b00a4d, 0xc725b43d, 0xd665464d, 0x1a2a770e,
+@@ -1649,12 +1562,6 @@
+     // Start threads
+     //
+ 
+-    if (GetBoolArg("-nodnsseed"))
+-        printf("DNS seeding disabled\n");
+-    else
+-        if (!CreateThread(ThreadDNSAddressSeed, NULL))
+-            printf("Error: CreateThread(ThreadDNSAddressSeed) failed\n");
+-
+     // Get addresses from IRC and advertise ours
+     if (!CreateThread(ThreadIRCSeed, NULL))
+         printf("Error: CreateThread(ThreadIRCSeed) failed\n");
+@@ -1693,7 +1600,6 @@
+     if (vnThreadsRunning[2] > 0) printf("ThreadMessageHandler still running\n");
+     if (vnThreadsRunning[3] > 0) printf("ThreadBitcoinMiner still running\n");
+     if (vnThreadsRunning[4] > 0) printf("ThreadRPCServer still running\n");
+-    if (vnThreadsRunning[6] > 0) printf("ThreadDNSAddressSeed still running\n");
+     while (vnThreadsRunning[2] > 0 || vnThreadsRunning[4] > 0)
+         Sleep(20);
+     Sleep(50);

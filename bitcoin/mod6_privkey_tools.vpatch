@@ -1,0 +1,219 @@
+diff -uNr a/bitcoin/src/base58.h b/bitcoin/src/base58.h
+--- a/bitcoin/src/base58.h 935818d95d5e80e25a0992801b4a01d8f18998a63a6949b46832c2d1ae0a6dbbb4ac7cca5ad4e857d1b7a1af3b537c7fcd6a60727c1b211fcfd0723e00d96314
++++ b/bitcoin/src/base58.h 61e768e9dc7cbb1429a3564fb2a48502a4371c61bd39893914fcb1de262bc3a727e5ae9e1cf84a14abb573e2034d603c3f7d58bceb3700f625e476d5b732afb2
+@@ -18,6 +18,7 @@
+ #include <string>
+ #include <vector>
+ #include "bignum.h"
++#include "key.h"
+ 
+ static const char* pszBase58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+ 
+@@ -315,4 +316,32 @@
+     }
+ };
+ 
++/** A base58-encoded secret key */
++class CBitcoinSecret : public CBase58Data
++{
++public:
++    void SetSecret(const CSecret& vchSecret)
++    { 
++        assert(vchSecret.size() == 32);
++        SetData(128, &vchSecret[0], vchSecret.size());
++    }
++
++    CSecret GetSecret()
++    {
++        CSecret vchSecret;
++        vchSecret.resize(32);
++        memcpy(&vchSecret[0], &vchData[0], 32);
++        return vchSecret;
++    }
++
++    CBitcoinSecret(const CSecret& vchSecret)
++    {
++        SetSecret(vchSecret);
++    }
++
++    CBitcoinSecret()
++    {
++    }
++};
++
+ #endif
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp ca28a67c52b37d372e22b124eecb4e136925110db1132ae122a1f47b20e60bfc7abdd76abcbb03abf026e6900fd377ced5a983026f1b7b6c9cb26ef3faade0ef
++++ b/bitcoin/src/bitcoinrpc.cpp ae34bf1f54a0beddfd8679af42cc1e0ab540cdaebff1c1381e2b055970ce80106025148a785debff3c728f16365a05d00e96a30a46aa11a7d01b4acbe4bf4734
+@@ -7,6 +7,7 @@
+ #include "db.h"
+ #include "net.h"
+ #include "init.h"
++#include "util.h"
+ #undef printf
+ #include <boost/asio.hpp>
+ #include <boost/iostreams/concepts.hpp>
+@@ -584,7 +585,7 @@
+     if (!key.SetCompactSignature(Hash(ss.begin(), ss.end()), vchSig))
+         return false;
+ 
+-    return (key.GetAddress() == addr);
++    return (CBitcoinAddress(key.GetPubKey()) == addr);
+ }
+ 
+ 
+@@ -1838,6 +1839,60 @@
+ } // ... but will return 'false' if we already have the block.
+ 
+ 
++Value importprivkey(const Array& params, bool fHelp)
++{
++    if (fHelp || params.size() < 1 || params.size() > 2)
++        throw runtime_error(
++            "importprivkey <bitcoinprivkey> [label]\n"
++            "Adds a private key (as returned by dumpprivkey) to your wallet.");
++
++    string strSecret = params[0].get_str();
++    string strLabel = "";
++    if (params.size() > 1)
++        strLabel = params[1].get_str();
++    CBitcoinSecret vchSecret;
++    bool fGood = vchSecret.SetString(strSecret);
++
++    if (!fGood) throw JSONRPCError(-5,"Invalid private key");
++
++    CKey key;
++    CSecret secret = vchSecret.GetSecret();
++    key.SetSecret(secret);
++    CBitcoinAddress vchAddress = CBitcoinAddress(key.GetPubKey());
++
++    CRITICAL_BLOCK(cs_main)
++    CRITICAL_BLOCK(pwalletMain->cs_wallet)
++    {
++        pwalletMain->MarkDirty();
++        pwalletMain->SetAddressBookName(vchAddress, strLabel);
++
++        if (!pwalletMain->AddKey(key))
++            throw JSONRPCError(-4,"Error adding key to wallet");
++
++        pwalletMain->ScanForWalletTransactions(pindexGenesisBlock, true);
++        pwalletMain->ReacceptWalletTransactions();
++    }
++
++    return Value::null;
++}
++
++Value dumpprivkey(const Array& params, bool fHelp)
++{
++    if (fHelp || params.size() != 1)
++        throw runtime_error(
++            "dumpprivkey <bitcoinaddress>\n"
++            "Reveals the private key corresponding to <bitcoinaddress>.");
++
++    string strAddress = params[0].get_str();
++    CBitcoinAddress address;
++    if (!address.SetString(strAddress))
++        throw JSONRPCError(-5, "Invalid bitcoin address");
++    CSecret vchSecret;
++    if (!pwalletMain->GetSecret(address, vchSecret))
++        throw JSONRPCError(-4,"Private key for address " + strAddress + " is not known");
++    return CBitcoinSecret(vchSecret).ToString();
++}
++
+ 
+ //
+ // Call Table
+@@ -1887,6 +1942,8 @@
+     make_pair("listsinceblock",        &listsinceblock),
+     make_pair("dumpblock",              &dumpblock),
+     make_pair("eatblock",               &eatblock),
++    make_pair("importprivkey",          &importprivkey),
++    make_pair("dumpprivkey",            &dumpprivkey),
+ };
+ map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
+ 
+diff -uNr a/bitcoin/src/key.h b/bitcoin/src/key.h
+--- a/bitcoin/src/key.h 36ddd67ba47c3860ba5747a2388b11e4cb3ed91ae1bc54a051f773e7958d3ec08cbd029607d1878661d644d34910098027600cd7e1bd08aca059452cf03fd0e8
++++ b/bitcoin/src/key.h 900b12956730c16e78dcf97a12b7559168326a21a163a67556c6b0939577e2c7d8325cc1d5aeaee4f1f00961ace35853eb5785a5fe4be059e7bd46bb285e01d2
+@@ -14,7 +14,6 @@
+ 
+ #include "serialize.h"
+ #include "uint256.h"
+-#include "base58.h"
+ 
+ // secp160k1
+ // const unsigned int PRIVATE_KEY_SIZE = 192;
+@@ -419,12 +418,6 @@
+         return true;
+     }
+ 
+-    // Get the address corresponding to this key
+-    CBitcoinAddress GetAddress() const
+-    {
+-        return CBitcoinAddress(GetPubKey());
+-    }
+-
+     bool IsValid()
+     {
+         if (!fSet)
+diff -uNr a/bitcoin/src/keystore.cpp b/bitcoin/src/keystore.cpp
+--- a/bitcoin/src/keystore.cpp 8e9aabb0569d092a6b1bff5015211a38475530b28614a7163ade52496314094bc00fd443eafb66f1285eaa1c69a680233a3e6044058598d2e2cffcf8797e0cc0
++++ b/bitcoin/src/keystore.cpp 23acfcc108928f23fda3010395311eb99be7d55a519bfabe33630d7c948495ccc7325961c7a379e0efb012c895a28d073435b57ffa4cea8f19f22ce9149989bb
+@@ -29,7 +29,7 @@
+ bool CBasicKeyStore::AddKey(const CKey& key)
+ {
+     CRITICAL_BLOCK(cs_KeyStore)
+-        mapKeys[key.GetAddress()] = key.GetSecret();
++        mapKeys[CBitcoinAddress(key.GetPubKey())] = key.GetSecret();
+     return true;
+ }
+ 
+diff -uNr a/bitcoin/src/keystore.h b/bitcoin/src/keystore.h
+--- a/bitcoin/src/keystore.h 5e302c824b6802e5ac88277f9dcca66b645a2e6932713ef817b6e3352cef123bb4492fdb19acae7236a090715770d9d623c209218bcd2745c1277d3172ef30d5
++++ b/bitcoin/src/keystore.h 8bb123a590f5d5a536628e640847df536f8857afeba467f2503deeb728576ff0cfb2c450159d7e303d6292113dba473a16c364507d57290216edbc73b2a2396c
+@@ -28,6 +28,15 @@
+     // This may succeed even if GetKey fails (e.g., encrypted wallets)
+     virtual bool GetPubKey(const CBitcoinAddress &address, std::vector<unsigned char>& vchPubKeyOut) const;
+ 
++    virtual bool GetSecret(const CBitcoinAddress &address, CSecret& vchSecret) const
++    {
++        CKey key;
++        if (!GetKey(address, key))
++            return false;
++        vchSecret = key.GetSecret();
++        return true;
++    }
++
+     // Generate a new key, and add it to the store
+     virtual std::vector<unsigned char> GenerateNewKey();
+ };
+diff -uNr a/bitcoin/src/wallet.cpp b/bitcoin/src/wallet.cpp
+--- a/bitcoin/src/wallet.cpp c95a36390729d1d846dc7036d5489178a361af69d310dcc250096deae764729550ac117096adf54084fd0f9a7798228c8282656441cba93351d810001f4d311b
++++ b/bitcoin/src/wallet.cpp b1151747313461aaa55b9b7b3a0bf0e560f3d9200b646859de29b07543d3cb746f109004610ac55433c6a803d59c5cd3c092c4d187999997cadfb85a762bda74
+@@ -224,6 +224,15 @@
+     }
+ }
+ 
++void CWallet::MarkDirty()
++{
++    CRITICAL_BLOCK(cs_wallet)
++    {
++        BOOST_FOREACH(PAIRTYPE(const uint256, CWalletTx)& item, mapWallet)
++            item.second.MarkDirty();
++    }
++}
++
+ bool CWallet::AddToWallet(const CWalletTx& wtxIn)
+ {
+     uint256 hash = wtxIn.GetHash();
+diff -uNr a/bitcoin/src/wallet.h b/bitcoin/src/wallet.h
+--- a/bitcoin/src/wallet.h df93b83c3880e14d890fe853d8556eec6377b90d5e83bd696f4c5800042c2cd04c5242b69b8886e22dfceb5b9b16e790fb526e9039cc130c9fb0f12cc8bb19d2
++++ b/bitcoin/src/wallet.h 61326c2a68a1ceef4a6d0512f02c291bfe7025275e52f69744d3bfec0ab8a41fa62e819aaebc151762f42be182ace3e9ef4f506a36aedf24ad204e60284e14a4
+@@ -73,6 +73,7 @@
+     bool Unlock(const SecureString& strWalletPassphrase);
+     bool ChangeWalletPassphrase(const SecureString& strOldWalletPassphrase, const SecureString& strNewWalletPassphrase);
+     bool EncryptWallet(const SecureString& strWalletPassphrase);
++    void MarkDirty();
+ 
+     bool AddToWallet(const CWalletTx& wtxIn);
+     bool AddToWalletIfInvolvingMe(const CTransaction& tx, const CBlock* pblock, bool fUpdate = false);

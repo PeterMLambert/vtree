@@ -1,0 +1,26 @@
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp ddf551d237480f8118d0e4ed033194ada0a229e8d8580354e3ea20467f3e381af1f1d0542f861e8bec628f55326d70172b6faa0e8a3fa007ba79bdadc13c1c29
++++ b/bitcoin/src/main.cpp 4426e28aae0cb5aa58ee73273f937e988e0911893e9eee9e718556d8ebb50fd229169c11f72421498a982f50a01f4c74154f91a7b14ebd4308162c9bac03750e
+@@ -1901,6 +1901,11 @@
+                         pfrom->PushMessage(inv.GetCommand(), (*mi).second);
+                 }
+             }
++            else
++            {
++                pfrom->Misbehaving(100);
++                return error("BANNED peer issuing unknown inv type.");
++            }
+ 
+             // Track requests for our stuff
+             Inventory(inv.hash);
+@@ -2103,7 +2108,9 @@
+ 
+     else
+     {
+-        // Ignore unknown commands for extensibility
++      // He who comes to us with a turd, by the turd shall perish.
++      pfrom->Misbehaving(100);
++      return error("BANNED peer issuing heathen command.");
+     }
+ 
+ 

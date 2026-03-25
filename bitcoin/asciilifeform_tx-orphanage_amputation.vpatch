@@ -1,0 +1,153 @@
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 61852c7c9d4c69ae3e686a3be199bb692875d8e28845d47153b020dd904d08658a10b9ac0437be4af4036ddedb64dc6f0ae5952e9a491d34e0c35763afa1ce94
++++ b/bitcoin/src/main.cpp 537a12d62802fa25331ce5e27434a9af18f263bbcc4d9cb4092e8c72c314b7a1ce6acb20cfdc3ce17a7668302f466bc5041d7e5a40f7c4531c411a40c86ff767
+@@ -40,8 +40,6 @@
+ 
+ CMedianFilter<int> cPeerBlockCounts(5, 0); // Amount of blocks that other nodes claim to have
+ 
+-map<uint256, CDataStream*> mapOrphanTransactions;
+-multimap<uint256, CDataStream*> mapOrphanTransactionsByPrev;
+ 
+ 
+ double dHashesPerSec;
+@@ -148,75 +146,6 @@
+ }
+ 
+ 
+-
+-
+-
+-
+-
+-//////////////////////////////////////////////////////////////////////////////
+-//
+-// mapOrphanTransactions
+-//
+-
+-void AddOrphanTx(const CDataStream& vMsg)
+-{
+-    CTransaction tx;
+-    CDataStream(vMsg) >> tx;
+-    uint256 hash = tx.GetHash();
+-    if (mapOrphanTransactions.count(hash))
+-        return;
+-
+-    CDataStream* pvMsg = mapOrphanTransactions[hash] = new CDataStream(vMsg);
+-    BOOST_FOREACH(const CTxIn& txin, tx.vin)
+-        mapOrphanTransactionsByPrev.insert(make_pair(txin.prevout.hash, pvMsg));
+-}
+-
+-void static EraseOrphanTx(uint256 hash)
+-{
+-    if (!mapOrphanTransactions.count(hash))
+-        return;
+-    const CDataStream* pvMsg = mapOrphanTransactions[hash];
+-    CTransaction tx;
+-    CDataStream(*pvMsg) >> tx;
+-    BOOST_FOREACH(const CTxIn& txin, tx.vin)
+-    {
+-        for (multimap<uint256, CDataStream*>::iterator mi = mapOrphanTransactionsByPrev.lower_bound(txin.prevout.hash);
+-             mi != mapOrphanTransactionsByPrev.upper_bound(txin.prevout.hash);)
+-        {
+-            if ((*mi).second == pvMsg)
+-                mapOrphanTransactionsByPrev.erase(mi++);
+-            else
+-                mi++;
+-        }
+-    }
+-    delete pvMsg;
+-    mapOrphanTransactions.erase(hash);
+-}
+-
+-int LimitOrphanTxSize(int nMaxOrphans)
+-{
+-    int nEvicted = 0;
+-    while (mapOrphanTransactions.size() > nMaxOrphans)
+-    {
+-        // Evict a random orphan:
+-        std::vector<unsigned char> randbytes(32);
+-        RAND_bytes(&randbytes[0], 32);
+-        uint256 randomhash(randbytes);
+-        map<uint256, CDataStream*>::iterator it = mapOrphanTransactions.lower_bound(randomhash);
+-        if (it == mapOrphanTransactions.end())
+-            it = mapOrphanTransactions.begin();
+-        EraseOrphanTx(it->first);
+-        ++nEvicted;
+-    }
+-    return nEvicted;
+-}
+-
+-
+-
+-
+-
+-
+-
+ //////////////////////////////////////////////////////////////////////////////
+ //
+ // CTransaction and CTxIndex
+@@ -1731,7 +1660,7 @@
+ {
+     switch (inv.type)
+     {
+-    case MSG_TX:    return mapTransactions.count(inv.hash) || mapOrphanTransactions.count(inv.hash) || txdb.ContainsTx(inv.hash);
++    case MSG_TX:    return mapTransactions.count(inv.hash) || txdb.ContainsTx(inv.hash);
+     case MSG_BLOCK: return mapBlockIndex.count(inv.hash);
+     }
+     // Don't know what it is, just say we already got one
+@@ -2108,43 +2037,10 @@
+             RelayMessage(inv, vMsg);
+             mapAlreadyAskedFor.erase(inv);
+             vWorkQueue.push_back(inv.hash);
+-
+-            // Recursively process any orphan transactions that depended on this one
+-            for (int i = 0; i < vWorkQueue.size(); i++)
+-            {
+-                uint256 hashPrev = vWorkQueue[i];
+-                for (multimap<uint256, CDataStream*>::iterator mi = mapOrphanTransactionsByPrev.lower_bound(hashPrev);
+-                     mi != mapOrphanTransactionsByPrev.upper_bound(hashPrev);
+-                     ++mi)
+-                {
+-                    const CDataStream& vMsg = *((*mi).second);
+-                    CTransaction tx;
+-                    CDataStream(vMsg) >> tx;
+-                    CInv inv(MSG_TX, tx.GetHash());
+-
+-                    if (tx.AcceptToMemoryPool(true))
+-                    {
+-                        printf("   accepted orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+-                        SyncWithWallets(tx, NULL, true);
+-                        RelayMessage(inv, vMsg);
+-                        mapAlreadyAskedFor.erase(inv);
+-                        vWorkQueue.push_back(inv.hash);
+-                    }
+-                }
+-            }
+-
+-            BOOST_FOREACH(uint256 hash, vWorkQueue)
+-                EraseOrphanTx(hash);
+         }
+         else if (fMissingInputs)
+         {
+-            printf("storing orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+-            AddOrphanTx(vMsg);
+-
+-            // DoS prevention: do not allow mapOrphanTransactions to grow unbounded
+-            int nEvicted = LimitOrphanTxSize(MAX_ORPHAN_TRANSACTIONS);
+-            if (nEvicted > 0)
+-                printf("mapOrphan overflow, removed %d tx\n", nEvicted);
++            printf("REJECTED orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
+         }
+         if (tx.nDoS) pfrom->Misbehaving(tx.nDoS);
+     }
+diff -uNr a/bitcoin/src/main.h b/bitcoin/src/main.h
+--- a/bitcoin/src/main.h 66af7bed57921718a5e073db591e4dc838622df4af4e5662a0b2f46f20ee60c98fec6d967bdb71a4c1cf82e3dc9f2f6e0aeddaef9c7246b7797e6b4db5f1080d
++++ b/bitcoin/src/main.h ecafbdf451a63be8ea30ba33b93f62a155511051154af8369284519e6f493d2b3546ff2d3e7f7a3ec263f50a2080da9665b24dce3aebb4cd54b92acb12f37024
+@@ -30,7 +30,6 @@
+ static const unsigned int MAX_BLOCK_SIZE = 1000000;
+ static const unsigned int MAX_BLOCK_SIZE_GEN = MAX_BLOCK_SIZE/2;
+ static const int MAX_BLOCK_SIGOPS = MAX_BLOCK_SIZE/50;
+-static const int MAX_ORPHAN_TRANSACTIONS = MAX_BLOCK_SIZE/100;
+ static const int64 COIN = 100000000;
+ static const int64 CENT = 1000000;
+ static const int64 MIN_TX_FEE = 50000;

@@ -1,0 +1,215 @@
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp d68207833444ea7d6f91bc579cb5543121f9f5bb90a72b713cca1d90a453bca3a4e660afe66e836fd8ad1e3e21ee322ecd54114fc541fb30924ebbb0d6544a41
++++ b/bitcoin/src/init.cpp 2a962f65fd9a55bfd5db5ed17a95d57ec009905436eb550bcda1c6a024935f1c88b62d509a4c5ac3ddda00970412bfba71aae29f389c191af22c2f1dcf758c07
+@@ -160,7 +160,6 @@
+             "  -datadir=<dir>   \t\t  " + _("Specify data directory\n") +
+             "  -timeout=<n>     \t  "   + _("Specify connection timeout (in milliseconds)\n") +
+             "  -proxy=<ip:port> \t  "   + _("Connect through socks4 proxy\n") +
+-            "  -dns             \t  "   + _("Allow DNS lookups for addnode and connect\n") +
+             "  -port=<port>     \t\t  " + _("Listen for connections on <port> (default: 8333 or testnet: 18333)\n") +
+             "  -maxconnections=<n>\t  " + _("Maintain at most <n> connections to peers (default: 125)\n") +
+             "  -addnode=<ip>    \t  "   + _("Add a node to connect to\n") +
+@@ -414,10 +413,8 @@
+         // Note: the GetBoolArg() calls for all of these must happen later.
+         SoftSetArg("-nolisten", true);
+         SoftSetArg("-noirc", true);
+-        SoftSetArg("-dns", false);
+     }
+ 
+-    fAllowDNS = GetBoolArg("-dns");
+     fNoListen = GetBoolArg("-nolisten");
+ 
+     // Command-line args override in-wallet settings:
+@@ -435,7 +432,7 @@
+     {
+         BOOST_FOREACH(string strAddr, mapMultiArgs["-addnode"])
+         {
+-            CAddress addr(strAddr, fAllowDNS);
++            CAddress addr(strAddr);
+             addr.nTime = 0; // so it won't relay unless successfully connected
+             if (addr.IsValid())
+                 AddAddress(addr);
+diff -uNr a/bitcoin/src/irc.cpp b/bitcoin/src/irc.cpp
+--- a/bitcoin/src/irc.cpp 775141f07ce491a331e51fe97b43d4f2d1891eb720fc6706d06747959653e8171cb46daa77efd73e202b1e1419f26036c92cc106de34d22245489b3f7b333bcb
++++ b/bitcoin/src/irc.cpp a2d021c40268e8dfadd89ce84f19a0fae780599823cff27d0afeefd7e842f4e1828b18d2bcf97497ba510efbdfb927041a4fd4dccf9e83dcad04c73439ad1565
+@@ -269,10 +269,6 @@
+     {
+         CAddress addrConnect("92.243.23.21", 6667); // irc.lfnet.org
+ 
+-        CAddress addrIRC("irc.lfnet.org", 6667, true);
+-        if (addrIRC.IsValid())
+-            addrConnect = addrIRC;
+-
+         SOCKET hSocket;
+         if (!ConnectSocket(addrConnect, hSocket))
+         {
+diff -uNr a/bitcoin/src/net.cpp b/bitcoin/src/net.cpp
+--- a/bitcoin/src/net.cpp a5977f1e2ad59eeeefbcb59e32a935724653fd328e65570d9b7a6270f1ca1f27a00e2221c05da122372d203b3ccc82dd04d3eadc745a6d7f7add3f5cf6aca410
++++ b/bitcoin/src/net.cpp eaf9888f03cfc0267577d217d24b0fba45d5d141e9d8536081059b97195590a0f7aa8d27704cabd46d1af5033733b96d1bb01c47dcfbd636db659db101cc4a45
+@@ -29,9 +29,8 @@
+ // Global state variables
+ //
+ bool fClient = false;
+-bool fAllowDNS = false;
+ uint64 nLocalServices = (fClient ? 0 : NODE_NETWORK);
+-CAddress addrLocalHost("0.0.0.0", 0, false, nLocalServices);
++CAddress addrLocalHost("0.0.0.0", 0, nLocalServices);
+ static CNode* pnodeLocalHost = NULL;
+ uint64 nLocalHostNonce = 0;
+ array<int, 10> vnThreadsRunning;
+@@ -193,7 +192,7 @@
+ }
+ 
+ // portDefault is in host order
+-bool Lookup(const char *pszName, vector<CAddress>& vaddr, int nServices, int nMaxSolutions, bool fAllowLookup, int portDefault, bool fAllowPort)
++bool Lookup(const char *pszName, vector<CAddress>& vaddr, int nServices, int nMaxSolutions, int portDefault, bool fAllowPort)
+ {
+     vaddr.clear();
+     if (pszName[0] == 0)
+@@ -231,33 +230,14 @@
+         return true;
+     }
+ 
+-    if (!fAllowLookup)
+-        return false;
+-
+-    struct hostent* phostent = gethostbyname(pszHost);
+-    if (!phostent)
+-        return false;
+-
+-    if (phostent->h_addrtype != AF_INET)
+-        return false;
+-
+-    char** ppAddr = phostent->h_addr_list;
+-    while (*ppAddr != NULL && vaddr.size() != nMaxSolutions)
+-    {
+-        CAddress addr(((struct in_addr*)ppAddr[0])->s_addr, port, nServices);
+-        if (addr.IsValid())
+-            vaddr.push_back(addr);
+-        ppAddr++;
+-    }
+-
+-    return (vaddr.size() > 0);
++    return false;
+ }
+ 
+ // portDefault is in host order
+-bool Lookup(const char *pszName, CAddress& addr, int nServices, bool fAllowLookup, int portDefault, bool fAllowPort)
++bool Lookup(const char *pszName, CAddress& addr, int nServices, int portDefault, bool fAllowPort)
+ {
+     vector<CAddress> vaddr;
+-    bool fRet = Lookup(pszName, vaddr, nServices, 1, fAllowLookup, portDefault, fAllowPort);
++    bool fRet = Lookup(pszName, vaddr, nServices, 1, portDefault, fAllowPort);
+     if (fRet)
+         addr = vaddr[0];
+     return fRet;
+@@ -972,7 +952,7 @@
+         {
+             BOOST_FOREACH(string strAddr, mapMultiArgs["-connect"])
+             {
+-                CAddress addr(strAddr, fAllowDNS);
++                CAddress addr(strAddr);
+                 if (addr.IsValid())
+                     OpenNetworkConnection(addr);
+                 for (int i = 0; i < 10 && i < nLoop; i++)
+@@ -990,7 +970,7 @@
+     {
+         BOOST_FOREACH(string strAddr, mapMultiArgs["-addnode"])
+         {
+-            CAddress addr(strAddr, fAllowDNS);
++            CAddress addr(strAddr);
+             if (addr.IsValid())
+             {
+                 OpenNetworkConnection(addr);
+@@ -1275,7 +1255,7 @@
+ void StartNode(void* parg)
+ {
+     if (pnodeLocalHost == NULL)
+-        pnodeLocalHost = new CNode(INVALID_SOCKET, CAddress("127.0.0.1", 0, false, nLocalServices));
++        pnodeLocalHost = new CNode(INVALID_SOCKET, CAddress("127.0.0.1", 0, nLocalServices));
+ 
+     // Get local host ip
+     struct ifaddrs* myaddrs;
+diff -uNr a/bitcoin/src/net.h b/bitcoin/src/net.h
+--- a/bitcoin/src/net.h 0b8486f417ca786accc0335c0381a2fd80393e842f79a9926c556f81d6b09e41615de890477dadad86816f672a07b1df2a495d0b95c85a3bf2fd8a8aa67b2863
++++ b/bitcoin/src/net.h fd5e99a998637d3a0f154c2124a264a76649d115fe5b38bebeb4bf3abc1943de9031ebd2ca002f81f1d7ed53c8e72f072689e16264be1e6944ae2cf0926ea226
+@@ -26,8 +26,8 @@
+ static const unsigned int PUBLISH_HOPS = 5;
+ 
+ bool ConnectSocket(const CAddress& addrConnect, SOCKET& hSocketRet, int nTimeout=nConnectTimeout);
+-bool Lookup(const char *pszName, std::vector<CAddress>& vaddr, int nServices, int nMaxSolutions, bool fAllowLookup = false, int portDefault = 0, bool fAllowPort = false);
+-bool Lookup(const char *pszName, CAddress& addr, int nServices, bool fAllowLookup = false, int portDefault = 0, bool fAllowPort = false);
++bool Lookup(const char *pszName, std::vector<CAddress>& vaddr, int nServices, int nMaxSolutions, int portDefault = 0, bool fAllowPort = false);
++bool Lookup(const char *pszName, CAddress& addr, int nServices, int portDefault = 0, bool fAllowPort = false);
+ bool GetMyExternalIP(unsigned int& ipRet);
+ bool AddAddress(CAddress addr, int64 nTimePenalty=0, CAddrDB *pAddrDB=NULL);
+ void AddressCurrentlyConnected(const CAddress& addr);
+diff -uNr a/bitcoin/src/protocol.cpp b/bitcoin/src/protocol.cpp
+--- a/bitcoin/src/protocol.cpp e5274fe2ff8aa6840ce5be2e7797766dc4a70a19c2e08954bbfd9cfff4ad9e27614606079a4ce7fc5ae150dfaf2906bee118b543d889710da78475bd12f24c56
++++ b/bitcoin/src/protocol.cpp 071f23cb1e017f72a89271924861d1036e3fb2d9c6459709d8a962cd7aa94f84faa657618d0dd553650a135a6e341ecf4389e2cb911c5e71d8c87d5d24bd77af
+@@ -9,8 +9,8 @@
+ 
+ 
+ // Prototypes from net.h, but that header (currently) stinks, can't #include it without breaking things
+-bool Lookup(const char *pszName, std::vector<CAddress>& vaddr, int nServices, int nMaxSolutions, bool fAllowLookup = false, int portDefault = 0, bool fAllowPort = false);
+-bool Lookup(const char *pszName, CAddress& addr, int nServices, bool fAllowLookup = false, int portDefault = 0, bool fAllowPort = false);
++bool Lookup(const char *pszName, std::vector<CAddress>& vaddr, int nServices, int nMaxSolutions, int portDefault = 0, bool fAllowPort = false);
++bool Lookup(const char *pszName, CAddress& addr, int nServices, int portDefault = 0, bool fAllowPort = false);
+ 
+ static const unsigned char pchIPv4[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff };
+ static const char* ppszTypeName[] =
+@@ -96,28 +96,28 @@
+     nServices = nServicesIn;
+ }
+ 
+-CAddress::CAddress(const char* pszIn, int portIn, bool fNameLookup, uint64 nServicesIn)
++CAddress::CAddress(const char* pszIn, int portIn, uint64 nServicesIn)
+ {
+     Init();
+-    Lookup(pszIn, *this, nServicesIn, fNameLookup, portIn);
++    Lookup(pszIn, *this, nServicesIn, portIn);
+ }
+ 
+-CAddress::CAddress(const char* pszIn, bool fNameLookup, uint64 nServicesIn)
++CAddress::CAddress(const char* pszIn, uint64 nServicesIn)
+ {
+     Init();
+-    Lookup(pszIn, *this, nServicesIn, fNameLookup, 0, true);
++    Lookup(pszIn, *this, nServicesIn, 0, true);
+ }
+ 
+-CAddress::CAddress(std::string strIn, int portIn, bool fNameLookup, uint64 nServicesIn)
++CAddress::CAddress(std::string strIn, int portIn, uint64 nServicesIn)
+ {
+     Init();
+-    Lookup(strIn.c_str(), *this, nServicesIn, fNameLookup, portIn);
++    Lookup(strIn.c_str(), *this, nServicesIn, portIn);
+ }
+ 
+-CAddress::CAddress(std::string strIn, bool fNameLookup, uint64 nServicesIn)
++CAddress::CAddress(std::string strIn, uint64 nServicesIn)
+ {
+     Init();
+-    Lookup(strIn.c_str(), *this, nServicesIn, fNameLookup, 0, true);
++    Lookup(strIn.c_str(), *this, nServicesIn, 0, true);
+ }
+ 
+ void CAddress::Init()
+diff -uNr a/bitcoin/src/protocol.h b/bitcoin/src/protocol.h
+--- a/bitcoin/src/protocol.h 9438a1f1a661180998e98347b42eb49363f6c4fef82f8d970d4d1e0a367aa32055a505431bd86f100929bea481dcaf6fdd6fc95bb4e1d083e7044aee102d4479
++++ b/bitcoin/src/protocol.h ea4fdf494f219f2f3f9215d5dc384554b5dff4f18001cf08eaa39322fad2e5c1d1b74fd2486ea05d40627974df43bafa05d16858c1d98fbd287cb4104006662f
+@@ -67,10 +67,10 @@
+         CAddress();
+         CAddress(unsigned int ipIn, unsigned short portIn=0, uint64 nServicesIn=NODE_NETWORK);
+         explicit CAddress(const struct sockaddr_in& sockaddr, uint64 nServicesIn=NODE_NETWORK);
+-        explicit CAddress(const char* pszIn, int portIn, bool fNameLookup = false, uint64 nServicesIn=NODE_NETWORK);
+-        explicit CAddress(const char* pszIn, bool fNameLookup = false, uint64 nServicesIn=NODE_NETWORK);
+-        explicit CAddress(std::string strIn, int portIn, bool fNameLookup = false, uint64 nServicesIn=NODE_NETWORK);
+-        explicit CAddress(std::string strIn, bool fNameLookup = false, uint64 nServicesIn=NODE_NETWORK);
++        explicit CAddress(const char* pszIn, int portIn, uint64 nServicesIn=NODE_NETWORK);
++        explicit CAddress(const char* pszIn, uint64 nServicesIn=NODE_NETWORK);
++        explicit CAddress(std::string strIn, int portIn, uint64 nServicesIn=NODE_NETWORK);
++        explicit CAddress(std::string strIn, uint64 nServicesIn=NODE_NETWORK);
+ 
+         void Init();
+ 

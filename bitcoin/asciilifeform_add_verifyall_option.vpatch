@@ -1,0 +1,53 @@
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 598bbbd1eab270cfb3e1114e7fa01caba27a2dfd2b57d04043f18ad34c9a1ecdbb896a06eae07a3def03f58a00cd57727af37a14d00353168407700f1ad3307a
++++ b/bitcoin/src/init.cpp 77919b26229f6b0de71504f170a2df528b73604633f286f80628a85c0fe90cf71c18937854436cd243654441d322a8ff29d9b28f2c9ea2628f5f6758d10be8fd
+@@ -174,6 +174,7 @@
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+             "  -debug           \t\t  " + _("Output extra debugging information\n") +
+ 	    "  -caneat          \t\t  " + _("Permit the use of 'eatblock'\n") +
++	    "  -verifyall       \t\t  " + _("Forbid the skipping of ECDSA signature verification between checkpoints.\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+             "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file\n") +
+             "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections\n") +
+@@ -196,6 +197,7 @@
+     fDebug = GetBoolArg("-debug");
+     fDaemon = GetBoolArg("-daemon");
+     fCanEat = GetBoolArg("-caneat");
++    fVerifyAll = GetBoolArg("-verifyall");
+ 
+     if (fDaemon)
+         fServer = true;
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 16256a693b6dd1ecf2224d2055ec17ccd1d24a9c0f2cb0668ec7329f5f959a3fc0a3db66e1400b18eee1bcc4b3bc5a53d98612282d0a8827f1cc895307fc8d2e
++++ b/bitcoin/src/main.cpp 30ee1c16668cb21cdf3b476a5d82c665ef9a0bbede9eba887692e65d48bae74d639085b52b98313283749ae11398a74270e929fe7aae1794d0d4c8b141292ebe
+@@ -832,7 +832,7 @@
+             // Skip ECDSA signature verification when connecting blocks (fBlock=true)
+             // before the last blockchain checkpoint. This is safe because block merkle hashes are
+             // still computed and checked, and any change will be caught at the next checkpoint.
+-            if (!(fBlock && (nBestHeight < Checkpoints::GetTotalBlocksEstimate())))
++            if (fVerifyAll || (!(fBlock && (nBestHeight < Checkpoints::GetTotalBlocksEstimate()))))
+                 // Verify signature
+                 if (!VerifySignature(txPrev, *this, i))
+                     return DoS(100,error("ConnectInputs() : %s VerifySignature failed", GetHash().ToString().substr(0,10).c_str()));
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp 29436752078f28a0d8c38c0a8455ae3d4b17eeb8f8bf4cabad0a3dbc2e28ddebcedf5a160ea0efcabd74be32016efbf890bba0df8e09efd2718735379dbbac7b
++++ b/bitcoin/src/util.cpp 9ed13d4723a1daad64658d59ae99a776253505faf10619b4a011173b66b4a64b852007296f81f40537fde60c44af475cb4c168cc725dbf59273d8cea34371909
+@@ -21,6 +21,7 @@
+ bool fPrintToConsole = false;
+ bool fPrintToDebugger = false;
+ bool fCanEat = false;
++bool fVerifyAll = false;
+ char pszSetDataDir[MAX_PATH] = "";
+ bool fRequestShutdown = false;
+ bool fShutdown = false;
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h 4d2a5c6a0c1f82b5f172a1161e686e54ce17cc65614ef9457b1745f5fb5dddb4056d84ac207d6be1853a576060ea9631fb2cbd0778e0bf022a09b19b24078188
++++ b/bitcoin/src/util.h 235c9e2b087f65731a530fc76df548a427a1833ea3a4ef8791a89b938c74553f7d0117861265c687952ce91f7e0301a1f35cb3436c4cc87d230a443fcb197ef6
+@@ -111,6 +111,7 @@
+ extern bool fPrintToConsole;
+ extern bool fPrintToDebugger;
+ extern bool fCanEat;
++extern bool fVerifyAll;
+ extern char pszSetDataDir[MAX_PATH];
+ extern bool fRequestShutdown;
+ extern bool fShutdown;

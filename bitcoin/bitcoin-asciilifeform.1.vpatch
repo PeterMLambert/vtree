@@ -1,0 +1,261 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp 631071b1ecb5be290ec5c3976c3262f5c05813e0612912890bcc97cf25af5696fd20c46bb9fb50823df1b6bea2c35aeafdea4462abc50933a10d1cc13a19fe69
++++ b/bitcoin/src/bitcoinrpc.cpp 87e6c3d7333251722ad29ff54ec06f4aa276b9430dc12c804bb5fa1513a3e90a0eb206881154e525c88d71857741908f2a82370136876b06bc0506ba53f5873e
+@@ -163,13 +163,9 @@
+         throw runtime_error(
+             "stop\n"
+             "Stop bitcoin server.");
+-#ifndef QT_GUI
+     // Shutdown will take long enough that the response should get back
+     CreateThread(Shutdown, NULL);
+     return "bitcoin server stopping";
+-#else
+-    throw runtime_error("NYI: cannot shut down GUI with RPC command");
+-#endif
+ }
+ 
+ 
+@@ -1552,11 +1548,6 @@
+     if (pwalletMain->IsCrypted())
+         throw JSONRPCError(-15, "Error: running with an encrypted wallet, but encryptwallet was called.");
+ 
+-#ifdef QT_GUI
+-    // shutting down via RPC while the GUI is running does not work (yet):
+-    throw runtime_error("Not Yet Implemented: use GUI to encrypt wallet, not RPC command");
+-#endif
+-
+     // TODO: get rid of this .c_str() by implementing SecureString::operator=(std::string)
+     // Alternately, find a way to make params[0] mlock()'d to begin with.
+     SecureString strWalletPass;
+@@ -2184,9 +2175,7 @@
+                 strWhatAmI.c_str(),
+                 GetConfigFile().c_str(),
+                 EncodeBase58(&rand_pwd[0],&rand_pwd[0]+32).c_str());
+-#ifndef QT_GUI
+         CreateThread(Shutdown, NULL);
+-#endif
+         return;
+     }
+ 
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp b5486b3cb349b8ac9f3062359d595d28d076062390699fac3f5ad50e89c3c82b1842524c153b09859a46f7f1776c40be134f787b71761962d7170a7cdf8c3459
++++ b/bitcoin/src/db.cpp e5caae03e3ac4a66240bef7eaae55cb4f42b1d81eda2cb2af5ec0f2e36b4371dfca10d3a004fbf041ce85fa2c588534e0629a41aa31d3bb4a0a280221252ad11
+@@ -919,9 +919,7 @@
+                 ssKey >> strKey;
+ 
+                 // Options
+-#ifndef QT_GUI
+                 if (strKey == "fGenerateBitcoins")  ssValue >> fGenerateBitcoins;
+-#endif
+                 if (strKey == "nTransactionFee")    ssValue >> nTransactionFee;
+                 if (strKey == "fLimitProcessors")   ssValue >> fLimitProcessors;
+                 if (strKey == "nLimitProcessors")   ssValue >> nLimitProcessors;
+diff -uNr a/bitcoin/src/headers.h b/bitcoin/src/headers.h
+--- a/bitcoin/src/headers.h 4d28e9cd20caddb467b279fc8c18282f3690d1c5c8d2cbfcf1b9d4fc3ae2e009960ded1240b88fc23e2fe69d69410a9ffe50cfad1a3f3a87496bb0868d8cecf4
++++ b/bitcoin/src/headers.h df1306462a92466a6661e4e98b4091fe0de3ff53c781a8dc5fd6c575f052ca4adc47e5e1a37b6904ccfeb107bf7899335dd5bbb4428e647da6acfffd2e0ca6c6
+@@ -89,8 +89,4 @@
+ #include "bignum.h"
+ #include "base58.h"
+ #include "main.h"
+-#ifdef QT_GUI
+-#include "qtui.h"
+-#else
+ #include "noui.h"
+-#endif
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 1bb5d8af6051e25fc87ab7438b6dafc864be7792b04c6aa0d8942efe701b2b4abfcd1902b33cc4b1c2993668676e3c7d8f90bd6c075c70906d0c7e9c2db4e83b
++++ b/bitcoin/src/init.cpp 5954c41570791ed6a4012660f36523d5de96c502fc5960046b8d844dccf51cc92f39eca4748bd52443bb556e79e7895b51c8da297f468f063115fc7fa9060bb1
+@@ -12,16 +12,6 @@
+ #include <boost/filesystem/fstream.hpp>
+ #include <boost/interprocess/sync/file_lock.hpp>
+ 
+-#if defined(BITCOIN_NEED_QT_PLUGINS) && !defined(_BITCOIN_QT_PLUGINS_INCLUDED)
+-#define _BITCOIN_QT_PLUGINS_INCLUDED
+-#define __INSURE__
+-#include <QtPlugin>
+-Q_IMPORT_PLUGIN(qcncodecs)
+-Q_IMPORT_PLUGIN(qjpcodecs)
+-Q_IMPORT_PLUGIN(qtwcodecs)
+-Q_IMPORT_PLUGIN(qkrcodecs)
+-Q_IMPORT_PLUGIN(qtaccessiblewidgets)
+-#endif
+ 
+ using namespace std;
+ using namespace boost;
+@@ -91,7 +81,7 @@
+ //
+ // Start
+ //
+-#if !defined(QT_GUI)
++
+ int main(int argc, char* argv[])
+ {
+     bool fRet = false;
+@@ -102,7 +92,7 @@
+ 
+     return 1;
+ }
+-#endif
++
+ 
+ bool AppInit(int argc, char* argv[])
+ {
+@@ -206,10 +196,7 @@
+ #endif
+ #endif
+             "  -paytxfee=<amt>  \t  "   + _("Fee per kB to add to transactions you send\n") +
+-#ifdef QT_GUI
+-            "  -server          \t\t  " + _("Accept command line and JSON-RPC commands\n") +
+-#endif
+-#if !defined(WIN32) && !defined(QT_GUI)
++#if !defined(WIN32)
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+ #endif
+             "  -testnet         \t\t  " + _("Use the test network\n") +
+@@ -241,19 +228,14 @@
+ 
+         // Remove tabs
+         strUsage.erase(std::remove(strUsage.begin(), strUsage.end(), '\t'), strUsage.end());
+-#if defined(QT_GUI) && defined(WIN32)
+-        // On windows, show a message box, as there is no stderr
+-        wxMessageBox(strUsage, "Usage");
+-#else
+         fprintf(stderr, "%s", strUsage.c_str());
+-#endif
+         return false;
+     }
+ 
+     fTestNet = GetBoolArg("-testnet");
+     fDebug = GetBoolArg("-debug");
+ 
+-#if !defined(WIN32) && !defined(QT_GUI)
++#if !defined(WIN32)
+     fDaemon = GetBoolArg("-daemon");
+ #else
+     fDaemon = false;
+@@ -265,14 +247,11 @@
+         fServer = GetBoolArg("-server");
+ 
+     /* force fServer when running without GUI */
+-#if !defined(QT_GUI)
+     fServer = true;
+-#endif
+     fPrintToConsole = GetBoolArg("-printtoconsole");
+     fPrintToDebugger = GetBoolArg("-printtodebugger");
+     fLogTimestamps = GetBoolArg("-logtimestamps");
+ 
+-#ifndef QT_GUI
+     for (int i = 1; i < argc; i++)
+         if (!IsSwitchChar(argv[i][0]))
+             fCommandLine = true;
+@@ -282,9 +261,8 @@
+         int ret = CommandLineRPC(argc, argv);
+         exit(ret);
+     }
+-#endif
+ 
+-#if !defined(WIN32) && !defined(QT_GUI)
++#if !defined(WIN32)
+     if (fDaemon)
+     {
+         // Daemonize
+@@ -541,10 +519,8 @@
+     if (fServer)
+         CreateThread(ThreadRPCServer, NULL);
+ 
+-#if !defined(QT_GUI)
+     while (1)
+         Sleep(5000);
+-#endif
+ 
+     return true;
+ }
+diff -uNr a/bitcoin/src/qtui.h b/bitcoin/src/qtui.h
+--- a/bitcoin/src/qtui.h 66f2b1854332f9019bebb0786491be6d0757d51adac896b5e42592b3c563346cd9feb138fc782c52709145e0834e482e5f0320f8066ec22fdc95abf42faa6059
++++ b/bitcoin/src/qtui.h false
+@@ -1,49 +0,0 @@
+-// Copyright (c) 2010 Satoshi Nakamoto
+-// Distributed under the MIT/X11 software license, see the accompanying
+-// file license.txt or http://www.opensource.org/licenses/mit-license.php.
+-#ifndef BITCOIN_EXTERNUI_H
+-#define BITCOIN_EXTERNUI_H
+-
+-#include <string>
+-#include <boost/function/function0.hpp>
+-#include "wallet.h"
+-
+-typedef void wxWindow;
+-#define wxYES                   0x00000002
+-#define wxOK                    0x00000004
+-#define wxNO                    0x00000008
+-#define wxYES_NO                (wxYES|wxNO)
+-#define wxCANCEL                0x00000010
+-#define wxAPPLY                 0x00000020
+-#define wxCLOSE                 0x00000040
+-#define wxOK_DEFAULT            0x00000000
+-#define wxYES_DEFAULT           0x00000000
+-#define wxNO_DEFAULT            0x00000080
+-#define wxCANCEL_DEFAULT        0x80000000
+-#define wxICON_EXCLAMATION      0x00000100
+-#define wxICON_HAND             0x00000200
+-#define wxICON_WARNING          wxICON_EXCLAMATION
+-#define wxICON_ERROR            wxICON_HAND
+-#define wxICON_QUESTION         0x00000400
+-#define wxICON_INFORMATION      0x00000800
+-#define wxICON_STOP             wxICON_HAND
+-#define wxICON_ASTERISK         wxICON_INFORMATION
+-#define wxICON_MASK             (0x00000100|0x00000200|0x00000400|0x00000800)
+-#define wxFORWARD               0x00001000
+-#define wxBACKWARD              0x00002000
+-#define wxRESET                 0x00004000
+-#define wxHELP                  0x00008000
+-#define wxMORE                  0x00010000
+-#define wxSETUP                 0x00020000
+-
+-extern int MyMessageBox(const std::string& message, const std::string& caption="Message", int style=wxOK, wxWindow* parent=NULL, int x=-1, int y=-1);
+-#define wxMessageBox  MyMessageBox
+-extern int ThreadSafeMessageBox(const std::string& message, const std::string& caption, int style=wxOK, wxWindow* parent=NULL, int x=-1, int y=-1);
+-extern bool ThreadSafeAskFee(int64 nFeeRequired, const std::string& strCaption, wxWindow* parent);
+-extern void CalledSetStatusBar(const std::string& strText, int nField);
+-extern void UIThreadCall(boost::function0<void> fn);
+-extern void MainFrameRepaint();
+-extern void InitMessage(const std::string &message);
+-extern std::string _(const char* psz);
+-
+-#endif
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h 75bc498bf713d76d2e9a489c71604dbb77792673c7f87343d4c6fcf5f20fac57cdffd5f15513b00f21f9de257adbeb3ca581147f41a8be96d69379269021c723
++++ b/bitcoin/src/util.h a39ea68039e96132373815ada8bcebd6611278868e86ca8c302db31cdd9cf1cdbd73961b062fce4cac43f99fff9f901f07e549d4023569325908c716509856f6
+@@ -134,12 +134,11 @@
+     return ret;
+ }
+ #define closesocket(s)      myclosesocket(s)
+-#if !defined(QT_GUI)
+ inline const char* _(const char* psz)
+ {
+     return psz;
+ }
+-#endif
++
+ 
+ 
+ 
+diff -uNr a/bitcoin/src/wallet.cpp b/bitcoin/src/wallet.cpp
+--- a/bitcoin/src/wallet.cpp da1e35bcce58f94ae0c44b6c2d8ac21d3b8263a594b93efa335a6c804a1b115c16a977ab237d78c4e9eb6899ff5c9a108f36a9a2fc9fad96ddaa2e30267587f7
++++ b/bitcoin/src/wallet.cpp c95a36390729d1d846dc7036d5489178a361af69d310dcc250096deae764729550ac117096adf54084fd0f9a7798228c8282656441cba93351d810001f4d311b
+@@ -267,7 +267,6 @@
+         if (fInsertedNew || fUpdated)
+             if (!wtx.WriteToDisk())
+                 return false;
+-#ifndef QT_GUI
+         // If default receiving address gets used, replace it with a new one
+         CScript scriptDefaultKey;
+         scriptDefaultKey.SetBitcoinAddress(vchDefaultKey);
+@@ -283,7 +282,6 @@
+                 }
+             }
+         }
+-#endif
+         // Notify UI
+         vWalletUpdated.push_back(hash);
+ 

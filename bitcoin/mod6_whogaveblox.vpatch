@@ -1,0 +1,103 @@
+diff -uNr a/bitcoin/manifest b/bitcoin/manifest
+--- a/bitcoin/manifest 5091aee977f4e3d8b13b3df1775a0a70647f7a3baf66dc5ef8693c3333e4223a4efeea781afbcb1b10755664fe8fcb29212fe9f0fcb127d048bc4090bb022f77
++++ b/bitcoin/manifest 1b686bcb52a6a5df9ee7db45315e32fd9b90ebff8783cde2aec664538b6722a972be2c060c4dc97eb5138f454413a2df670ed361b120bfa43acba686aeb9a54f
+@@ -11,7 +11,7 @@
+ 542413 asciilifeform_zap_hardcoded_seeds asciilifeform Remove hardcoded node seeds
+ 542413 bitcoin-v0_5_3_1-static_makefile_v002.8 mod6 Add static makefile options
+ 542413 asciilifeform-kills-integer-retardation asciilifeform Fix integer type problems
+-542413 asciilifeform_zap_showmyip_crud asciilifeform Abolishes the 'showmyip.com' idiocy; prerequisite for the total removal of all instances of DNS invocation
++542413 asciilifeform_zap_showmyip_crud asciilifeform Abolishes the 'showmyip.com' idiocy; Prerequisite for the total removal of all instances of DNS invocation
+ 542413 bitcoin-v0_5_3_1-rev_bump ben_vulpes Bump version number to 0.5.3.1
+ 542413 asciilifeform_and_now_we_have_block_dumper_corrected asciilifeform Add 'dumpblock' RPC command
+ 542413 asciilifeform_dns_thermonyukyoolar_kleansing asciilifeform Abolishes all invocations of DNS
+@@ -26,8 +26,9 @@
+ 542413 mod6_der_high_low_s mod6 Add command-line flags to set Low-S or High-S
+ 542413 makefiles mod6 Add makefiles to build entire TRB
+ 542413 asciilifeform_aggressive_pushgetblocks asciilifeform Issue PushGetBlocks command to any peer that issues 'version' command
+-614342 trb_keccak_regrind mod6 Not a vpatch, whole TRB tree keccak regrind; removes UTF-8 char from original genesis.vpatch
+-614347 mod6_privkey_tools.vpatch mod6 adds privkey tools
+-614351 mod6_manifest.vpatch mod6 Adds TRB manifest; updates version comments
+-616451 mod6_phexdigit_fix.vpatch mod6 Adds missing comma to separate values in the phexdigit array in util.cpp.
+-617254 mod6_excise_hash_truncation mod6 Regrind of ben_vulpes original; removes truncation of hashes printed to TRB log file
++614342 trb_keccak_regrind mod6 Not a vpatch, whole TRB tree keccak regrind; Also removes UTF-8 char from original genesis.vpatch
++614347 mod6_privkey_tools mod6 Adds privkey tools
++614351 mod6_manifest mod6 Adds TRB manifest; Updates version comments
++616451 mod6_phexdigit_fix mod6 Adds missing comma to separate values in the phexdigit array in util.cpp.
++617254 mod6_excise_hash_truncation mod6 Regrind of ben_vulpes original; Removes truncation of hashes printed to TRB log file
++617255 mod6_whogaveblox mod6 Regrind of asciilifeform original; Record the origin of every incoming candidate block (whether accepted or rejected)
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 0971a01f7fa9f4d6209a769a8d5249afac1e458907c031626ee764b6f85416aeda8de595e8f18f3e9968d7e699f35259bc833bba1d88c14ddb26d29afd45c7fb
++++ b/bitcoin/src/main.cpp 1f0735d2cee2f9ca2a177aead4ecc7a1371d59c4375aedb172ee99c28b02fa28e664decec9580a510bfca4738d85e377fb74396fe4979b75adbe1a3ec92b01c9
+@@ -1322,14 +1322,25 @@
+ 
+ bool ProcessBlock(CNode* pfrom, CBlock* pblock)
+ {
++    // Whose block we are trying.
++    string peer_ip;
++
++    if (pfrom != NULL) {
++      peer_ip = pfrom->addr.ToStringIP(); // if candidate block came from a peer
++    } else {
++      peer_ip = "LOCAL"; // if it came from, e.g., EatBlock
++    }
++
+     // Check for duplicate
+     uint256 hash = pblock->GetHash();
+     if (mapBlockIndex.count(hash))
+-        return error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().c_str());
++        return error("ProcessBlock() : already have block %d %s from peer %s",
++                     mapBlockIndex[hash]->nHeight, hash.ToString().c_str(),
++                     peer_ip.c_str());
+ 
+     // Preliminary checks
+     if (!pblock->CheckBlock())
+-        return error("ProcessBlock() : CheckBlock FAILED");
++      return error("ProcessBlock() : CheckBlock FAILED from peer %s", peer_ip.c_str());
+ 
+     CBlockIndex* pcheckpoint = Checkpoints::GetLastCheckpoint(mapBlockIndex);
+     if (pcheckpoint && pblock->hashPrevBlock != hashBestChain)
+@@ -1340,7 +1351,8 @@
+         {
+             if (pfrom)
+                 pfrom->Misbehaving(100);
+-            return error("ProcessBlock() : block with timestamp before last checkpoint");
++            return error("ProcessBlock() : block with timestamp before last checkpoint from peer %s",
++                         peer_ip.c_str());
+         }
+         CBigNum bnNewBlock;
+         bnNewBlock.SetCompact(pblock->nBits);
+@@ -1350,14 +1362,17 @@
+         {
+             if (pfrom)
+                 pfrom->Misbehaving(100);
+-            return error("ProcessBlock() : block with too little proof-of-work");
++            return error("ProcessBlock() : block with too little proof-of-work from peer %s",
++                         peer_ip.c_str());
+         }
+     }
+ 
+     // If don't already have its previous block, throw it out!
+     if (!mapBlockIndex.count(pblock->hashPrevBlock))
+     {
+-        printf("ProcessBlock: BASTARD BLOCK, prev=%s, DISCARDED\n", pblock->hashPrevBlock.ToString().c_str());
++        printf("ProcessBlock: BASTARD BLOCK, prev=%s, DISCARDED from peer %s\n",
++               pblock->hashPrevBlock.ToString().c_str(),
++               peer_ip.c_str());
+ 
+         // Ask this guy to fill in what we're missing
+         if (pfrom)
+@@ -1368,9 +1383,11 @@
+ 
+     // Store to disk
+     if (!pblock->AcceptBlock())
+-        return error("ProcessBlock() : AcceptBlock FAILED");
+-
+-    printf("ProcessBlock: ACCEPTED\n");
++        return error("ProcessBlock() : AcceptBlock FAILED from peer %s", peer_ip.c_str());
++    
++    printf("ProcessBlock: ACCEPTED block %s from: %s\n",
++           hash.ToString().c_str(), peer_ip.c_str());
++    
+     return true;
+ }
+ 

@@ -1,0 +1,356 @@
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp e5caae03e3ac4a66240bef7eaae55cb4f42b1d81eda2cb2af5ec0f2e36b4371dfca10d3a004fbf041ce85fa2c588534e0629a41aa31d3bb4a0a280221252ad11
++++ b/bitcoin/src/db.cpp d6224a6fe15bd7712174fd0d420d8b289204712d5cbde94aef0cc6ef96ec2fe60aabe4cd71360d32a2464e87c6bfaff59d0464fde880302bb8180dea4371ce57
+@@ -927,7 +927,6 @@
+                 if (strKey == "fMinimizeOnClose")   ssValue >> fMinimizeOnClose;
+                 if (strKey == "fUseProxy")          ssValue >> fUseProxy;
+                 if (strKey == "addrProxy")          ssValue >> addrProxy;
+-                if (fHaveUPnP && strKey == "fUseUPnP")           ssValue >> fUseUPnP;
+             }
+             else if (strType == "minversion")
+             {
+@@ -950,9 +949,6 @@
+     printf("fMinimizeOnClose = %d\n", fMinimizeOnClose);
+     printf("fUseProxy = %d\n", fUseProxy);
+     printf("addrProxy = %s\n", addrProxy.ToString().c_str());
+-    if (fHaveUPnP)
+-        printf("fUseUPnP = %d\n", fUseUPnP);
+-
+ 
+     // Rewrite encrypted wallets of versions 0.4.0 and 0.5.0rc:
+     if (fIsEncrypted && (nFileVersion == 40000 || nFileVersion == 50000))
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 5954c41570791ed6a4012660f36523d5de96c502fc5960046b8d844dccf51cc92f39eca4748bd52443bb556e79e7895b51c8da297f468f063115fc7fa9060bb1
++++ b/bitcoin/src/init.cpp b94202848156190628ddc0602ec88642916c827888164b435f09433f67b60f37cb43f6d4c6e6769af7ad39e9adec3163bf641d0ac5879f16b7578e4b8e827d66
+@@ -188,13 +188,6 @@
+             "  -bantime=<n>     \t  "   + _("Number of seconds to keep misbehaving peers from reconnecting (default: 86400)\n") +
+             "  -maxreceivebuffer=<n>\t  " + _("Maximum per-connection receive buffer, <n>*1000 bytes (default: 10000)\n") +
+             "  -maxsendbuffer=<n>\t  "   + _("Maximum per-connection send buffer, <n>*1000 bytes (default: 10000)\n") +
+-#ifdef USE_UPNP
+-#if USE_UPNP
+-            "  -noupnp          \t  "   + _("Don't attempt to use UPnP to map the listening port\n") +
+-#else
+-            "  -upnp            \t  "   + _("Attempt to use UPnP to map the listening port\n") +
+-#endif
+-#endif
+             "  -paytxfee=<amt>  \t  "   + _("Fee per kB to add to transactions you send\n") +
+ #if !defined(WIN32)
+             "  -daemon          \t\t  " + _("Run in the background as a daemon and accept commands\n") +
+@@ -460,8 +453,6 @@
+         SoftSetArg("-nolisten", true);
+         SoftSetArg("-noirc", true);
+         SoftSetArg("-nodnsseed", true);
+-        SoftSetArg("-noupnp", true);
+-        SoftSetArg("-upnp", false);
+         SoftSetArg("-dns", false);
+     }
+ 
+@@ -469,10 +460,6 @@
+     fNoListen = GetBoolArg("-nolisten");
+ 
+     // Command-line args override in-wallet settings:
+-    if (mapArgs.count("-upnp"))
+-        fUseUPnP = GetBoolArg("-upnp");
+-    else if (mapArgs.count("-noupnp"))
+-        fUseUPnP = !GetBoolArg("-noupnp");
+ 
+     if (!fNoListen)
+     {
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 7e326dcbf51e51c301521358cf2e684840d4fc5c977f0ea8476c3dedd8e91e90548d8240608b76c1fd90f832ec11c1d3f57626948eefc43f244daf869475fe31
++++ b/bitcoin/src/main.cpp 8d9b3ea74202849015588e2ee34549f95d8bc172ac3aeb15c328bc78b10a5fa85006db37922cc5f0769468fabbbcd0b5271d5656d3fc8bb3deaa8cd98a0af980
+@@ -57,11 +57,6 @@
+ int nLimitProcessors = 1;
+ int fMinimizeToTray = true;
+ int fMinimizeOnClose = true;
+-#if USE_UPNP
+-int fUseUPnP = true;
+-#else
+-int fUseUPnP = false;
+-#endif
+ 
+ 
+ //////////////////////////////////////////////////////////////////////////////
+diff -uNr a/bitcoin/src/main.h b/bitcoin/src/main.h
+--- a/bitcoin/src/main.h 67b6643036f41a20fee9d90d36ee22eec8b153bad6efb2342c3ad887523385f089945fdac74e73c5973d04ae1c748bca15b3d7f5b9d1243b8f87a4e6bda5f3c2
++++ b/bitcoin/src/main.h 110908f2c5982131591b43888d7f087848746914e5aebf96e1809219e9c073fcf4665695e3acfd85ed1ad2126b452749273bc70af0536a773b08a1d55575012d
+@@ -40,11 +40,6 @@
+ static const int COINBASE_MATURITY = 100;
+ // Threshold for nLockTime: below this value it is interpreted as block number, otherwise as UNIX timestamp.
+ static const int LOCKTIME_THRESHOLD = 500000000; // Tue Nov  5 00:53:20 1985 UTC
+-#ifdef USE_UPNP
+-static const int fHaveUPnP = true;
+-#else
+-static const int fHaveUPnP = false;
+-#endif
+ 
+ 
+ 
+@@ -74,7 +69,6 @@
+ extern int nLimitProcessors;
+ extern int fMinimizeToTray;
+ extern int fMinimizeOnClose;
+-extern int fUseUPnP;
+ 
+ 
+ 
+diff -uNr a/bitcoin/src/makefile.linux-mingw b/bitcoin/src/makefile.linux-mingw
+--- a/bitcoin/src/makefile.linux-mingw 4b7074d3a08d375347f9534dfb9d5a623e443a04e68a739ca780a569e5b5e91b0eb2c683233a72acab8af08825c29eb731270e065bf37f4d487251abdf15ad78
++++ b/bitcoin/src/makefile.linux-mingw 655fdd6d8e0c4a783d81c2e8a996f2197d3ef48593bffbf5446d6940d9065150cac12cba72bb1bebdefb92cca4cdbfcde515ccdc5279aa375545ac2ecaed07ba
+@@ -4,8 +4,6 @@
+ 
+ DEPSDIR:=/usr/i586-mingw32msvc
+ 
+-USE_UPNP:=0
+-
+ INCLUDEPATHS= \
+  -I"$(DEPSDIR)/boost_1_47_0" \
+  -I"$(DEPSDIR)/db-4.8.30.NC/build_unix" \
+@@ -53,11 +51,6 @@
+     wallet.h
+ 
+ 
+-ifdef USE_UPNP
+-	LIBPATHS += -L"$(DEPSDIR)/miniupnpc"
+-	LIBS += -l miniupnpc -l iphlpapi
+-	DEFS += -DSTATICLIB -DUSE_UPNP=$(USE_UPNP)
+-endif
+ 
+ LIBS += -l mingwthrd -l kernel32 -l user32 -l gdi32 -l comdlg32 -l winspool -l winmm -l shell32 -l comctl32 -l ole32 -l oleaut32 -l uuid -l rpcrt4 -l advapi32 -l ws2_32 -l shlwapi
+ 
+diff -uNr a/bitcoin/src/makefile.unix b/bitcoin/src/makefile.unix
+--- a/bitcoin/src/makefile.unix db27fa66049b17c4c68621529ad41de8973051762f0a0a96dd87fd9c7d7801fefb338342ce262124a0623ee319bf05cb3e25b5eb0cb50e27a918409ef90ca96a
++++ b/bitcoin/src/makefile.unix 99aa39376bce4d549a2c8b442f48814a4987eb6b329bf7541322bbf90449882016313e6ba15738df617f0535e60c1e1c1b18552aed035c6b69e726514d648e7a
+@@ -2,8 +2,6 @@
+ # Distributed under the MIT/X11 software license, see the accompanying
+ # file license.txt or http://www.opensource.org/licenses/mit-license.php.
+ 
+-USE_UPNP:=0
+-
+ DEFS=-DNOPCH
+ 
+ DEFS += $(addprefix -I,$(BOOST_INCLUDE_PATH) $(BDB_INCLUDE_PATH) $(OPENSSL_INCLUDE_PATH))
+@@ -31,14 +29,6 @@
+    -l ssl \
+    -l crypto
+ 
+-ifndef USE_UPNP
+-	override USE_UPNP = -
+-endif
+-ifneq (${USE_UPNP}, -)
+-	LIBS += -l miniupnpc
+-	DEFS += -DUSE_UPNP=$(USE_UPNP)
+-endif
+-
+ ifneq (${USE_SSL}, 0)
+ 	DEFS += -DUSE_SSL
+ endif
+diff -uNr a/bitcoin/src/net.cpp b/bitcoin/src/net.cpp
+--- a/bitcoin/src/net.cpp e76f8111f2c74a992113f6b9691407f6f14e2d37920516727edf7f78fdaf7a4e4d42c3378b46c0b5eab7f45de7e375acdeb6afb9c33725e7081760d15338e281
++++ b/bitcoin/src/net.cpp a1b78a422161c6f5f3ca51a585d8c3f68e9490af3f1ba48b7772cbe4d5a9711619707984376f9a51487aec676f437fbf6df38309d535daccb966873f9608e9f1
+@@ -14,12 +14,6 @@
+ #include <string.h>
+ #endif
+ 
+-#ifdef USE_UPNP
+-#include <miniupnpc/miniwget.h>
+-#include <miniupnpc/miniupnpc.h>
+-#include <miniupnpc/upnpcommands.h>
+-#include <miniupnpc/upnperrors.h>
+-#endif
+ 
+ using namespace std;
+ using namespace boost;
+@@ -29,9 +23,6 @@
+ void ThreadMessageHandler2(void* parg);
+ void ThreadSocketHandler2(void* parg);
+ void ThreadOpenConnections2(void* parg);
+-#ifdef USE_UPNP
+-void ThreadMapPort2(void* parg);
+-#endif
+ void ThreadDNSAddressSeed2(void* parg);
+ bool OpenNetworkConnection(const CAddress& addrConnect);
+ 
+@@ -1110,153 +1101,6 @@
+ 
+ 
+ 
+-#ifdef USE_UPNP
+-void ThreadMapPort(void* parg)
+-{
+-    IMPLEMENT_RANDOMIZE_STACK(ThreadMapPort(parg));
+-    try
+-    {
+-        vnThreadsRunning[5]++;
+-        ThreadMapPort2(parg);
+-        vnThreadsRunning[5]--;
+-    }
+-    catch (std::exception& e) {
+-        vnThreadsRunning[5]--;
+-        PrintException(&e, "ThreadMapPort()");
+-    } catch (...) {
+-        vnThreadsRunning[5]--;
+-        PrintException(NULL, "ThreadMapPort()");
+-    }
+-    printf("ThreadMapPort exiting\n");
+-}
+-
+-void ThreadMapPort2(void* parg)
+-{
+-    printf("ThreadMapPort started\n");
+-
+-    char port[6];
+-    sprintf(port, "%d", GetListenPort());
+-
+-    const char * multicastif = 0;
+-    const char * minissdpdpath = 0;
+-    struct UPNPDev * devlist = 0;
+-    char lanaddr[64];
+-
+-#ifndef UPNPDISCOVER_SUCCESS
+-    /* miniupnpc 1.5 */
+-    devlist = upnpDiscover(2000, multicastif, minissdpdpath, 0);
+-#else
+-    /* miniupnpc 1.6 */
+-    int error = 0;
+-    devlist = upnpDiscover(2000, multicastif, minissdpdpath, 0, 0, &error);
+-#endif
+-
+-    struct UPNPUrls urls;
+-    struct IGDdatas data;
+-    int r;
+-
+-    r = UPNP_GetValidIGD(devlist, &urls, &data, lanaddr, sizeof(lanaddr));
+-    if (r == 1)
+-    {
+-        if (!addrLocalHost.IsRoutable())
+-        {
+-            char externalIPAddress[40];
+-            r = UPNP_GetExternalIPAddress(urls.controlURL, data.first.servicetype, externalIPAddress);
+-            if(r != UPNPCOMMAND_SUCCESS)
+-                printf("UPnP: GetExternalIPAddress() returned %d\n", r);
+-            else
+-            {
+-                if(externalIPAddress[0])
+-                {
+-                    printf("UPnP: ExternalIPAddress = %s\n", externalIPAddress);
+-                    CAddress addrExternalFromUPnP(externalIPAddress, 0, false, nLocalServices);
+-                    if (addrExternalFromUPnP.IsRoutable())
+-                        addrLocalHost = addrExternalFromUPnP;
+-                }
+-                else
+-                    printf("UPnP: GetExternalIPAddress failed.\n");
+-            }
+-        }
+-
+-        string strDesc = "Bitcoin " + FormatFullVersion();
+-#ifndef UPNPDISCOVER_SUCCESS
+-        /* miniupnpc 1.5 */
+-        r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+-                            port, port, lanaddr, strDesc.c_str(), "TCP", 0);
+-#else
+-        /* miniupnpc 1.6 */
+-        r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+-                            port, port, lanaddr, strDesc.c_str(), "TCP", 0, "0");
+-#endif
+-
+-        if(r!=UPNPCOMMAND_SUCCESS)
+-            printf("AddPortMapping(%s, %s, %s) failed with code %d (%s)\n",
+-                port, port, lanaddr, r, strupnperror(r));
+-        else
+-            printf("UPnP Port Mapping successful.\n");
+-        int i = 1;
+-        loop {
+-            if (fShutdown || !fUseUPnP)
+-            {
+-                r = UPNP_DeletePortMapping(urls.controlURL, data.first.servicetype, port, "TCP", 0);
+-                printf("UPNP_DeletePortMapping() returned : %d\n", r);
+-                freeUPNPDevlist(devlist); devlist = 0;
+-                FreeUPNPUrls(&urls);
+-                return;
+-            }
+-            if (i % 600 == 0) // Refresh every 20 minutes
+-            {
+-#ifndef UPNPDISCOVER_SUCCESS
+-                /* miniupnpc 1.5 */
+-                r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+-                                    port, port, lanaddr, strDesc.c_str(), "TCP", 0);
+-#else
+-                /* miniupnpc 1.6 */
+-                r = UPNP_AddPortMapping(urls.controlURL, data.first.servicetype,
+-                                    port, port, lanaddr, strDesc.c_str(), "TCP", 0, "0");
+-#endif
+-
+-                if(r!=UPNPCOMMAND_SUCCESS)
+-                    printf("AddPortMapping(%s, %s, %s) failed with code %d (%s)\n",
+-                        port, port, lanaddr, r, strupnperror(r));
+-                else
+-                    printf("UPnP Port Mapping successful.\n");;
+-            }
+-            Sleep(2000);
+-            i++;
+-        }
+-    } else {
+-        printf("No valid UPnP IGDs found\n");
+-        freeUPNPDevlist(devlist); devlist = 0;
+-        if (r != 0)
+-            FreeUPNPUrls(&urls);
+-        loop {
+-            if (fShutdown || !fUseUPnP)
+-                return;
+-            Sleep(2000);
+-        }
+-    }
+-}
+-
+-void MapPort(bool fMapPort)
+-{
+-    if (fUseUPnP != fMapPort)
+-    {
+-        fUseUPnP = fMapPort;
+-        WriteSetting("fUseUPnP", fUseUPnP);
+-    }
+-    if (fUseUPnP && vnThreadsRunning[5] < 1)
+-    {
+-        if (!CreateThread(ThreadMapPort, NULL))
+-            printf("Error: ThreadMapPort(ThreadMapPort) failed\n");
+-    }
+-}
+-#else
+-void MapPort(bool /* unused fMapPort */)
+-{
+-    // Intentionally left blank.
+-}
+-#endif
+ 
+ 
+ 
+@@ -1872,10 +1716,6 @@
+         if (!CreateThread(ThreadDNSAddressSeed, NULL))
+             printf("Error: CreateThread(ThreadDNSAddressSeed) failed\n");
+ 
+-    // Map ports with UPnP
+-    if (fHaveUPnP)
+-        MapPort(fUseUPnP);
+-
+     // Get addresses from IRC and advertise ours
+     if (!CreateThread(ThreadIRCSeed, NULL))
+         printf("Error: CreateThread(ThreadIRCSeed) failed\n");
+@@ -1903,9 +1743,6 @@
+     nTransactionsUpdated++;
+     int64 nStart = GetTime();
+     while (vnThreadsRunning[0] > 0 || vnThreadsRunning[1] > 0 || vnThreadsRunning[2] > 0 || vnThreadsRunning[3] > 0 || vnThreadsRunning[4] > 0
+-#ifdef USE_UPNP
+-        || vnThreadsRunning[5] > 0
+-#endif
+     )
+     {
+         if (GetTime() - nStart > 20)
+@@ -1917,7 +1754,6 @@
+     if (vnThreadsRunning[2] > 0) printf("ThreadMessageHandler still running\n");
+     if (vnThreadsRunning[3] > 0) printf("ThreadBitcoinMiner still running\n");
+     if (vnThreadsRunning[4] > 0) printf("ThreadRPCServer still running\n");
+-    if (fHaveUPnP && vnThreadsRunning[5] > 0) printf("ThreadMapPort still running\n");
+     if (vnThreadsRunning[6] > 0) printf("ThreadDNSAddressSeed still running\n");
+     while (vnThreadsRunning[2] > 0 || vnThreadsRunning[4] > 0)
+         Sleep(20);

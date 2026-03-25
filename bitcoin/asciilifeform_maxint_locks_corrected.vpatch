@@ -1,0 +1,15 @@
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp ac7f78b43615352ca09dbef35119017736d7c89b1a507a71468cfb126b29f0f5b910cfe2825f3c4ec6f72d18dd3b11f01675a35b9120de5a52de2eb09620efcc
++++ b/bitcoin/src/db.cpp 0db7f37e087f7721132e816947d6098ced86022aa24a56c5e7f8fc4e6a8241eb2c51088dca41e4255f6ce75ed9c01f66b5191db39302125fffd489e7a324a482
+@@ -85,8 +85,9 @@
+ 
+             dbenv.set_lg_dir(strLogDir.c_str());
+             dbenv.set_lg_max(1000000);
+-            dbenv.set_lk_max_locks(40000);
+-            dbenv.set_lk_max_objects(40000);
++            dbenv.set_lk_max_locks(2737000);
++            dbenv.set_lk_max_objects(1119200);
++            dbenv.set_lk_max_lockers(1119200);
+             dbenv.set_errfile(fopen(strErrorFile.c_str(), "a")); /// debug
+             dbenv.set_flags(DB_AUTO_COMMIT, 1);
+             dbenv.set_flags(DB_TXN_WRITE_NOSYNC, 1);

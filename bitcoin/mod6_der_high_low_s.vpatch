@@ -1,0 +1,106 @@
+diff -uNr a/bitcoin/src/init.cpp b/bitcoin/src/init.cpp
+--- a/bitcoin/src/init.cpp 904ad14979be418243c4ae79867fe1068a05ed2ad5e237a14ed457408abf756d0b6f7ac73f63c4a31a815a717bc2cde3b614b4a716603f85b50c8d98ea43d500
++++ b/bitcoin/src/init.cpp 7804879949f916b7e9bb1e1a3fe4e2454edf7b4c91a0f188624474ea0f3f83a8be7da8c23bf5d2c32ccb35bb359193d34d42338da5317db128d7aa98ad675f1d
+@@ -177,6 +177,8 @@
+ 	    "  -verifyall       \t\t  " + _("Forbid the skipping of ECDSA signature verification between checkpoints.\n") +
+ 	    "  -setverstring    \t\t  " + _("Set a custom version string.\n") +
+ 	    "  -setvernum       \t\t  " + _("Set a custom version number.\n") +
++	    "  -highs           \t\t  " + _("Set all transactions to have DER 'S' Value set to 'high'.\n") +
++	    "  -lows            \t\t  " + _("Set all transactions to have DER 'S' Value set to 'low'.\n") +
+             "  -logtimestamps   \t  "   + _("Prepend debug output with timestamp\n") +
+             "  -printtoconsole  \t  "   + _("Send trace/debug info to console instead of debug.log file\n") +
+             "  -rpcuser=<user>  \t  "   + _("Username for JSON-RPC connections\n") +
+@@ -200,6 +202,14 @@
+     fDaemon = GetBoolArg("-daemon");
+     fCanEat = GetBoolArg("-caneat");
+     fVerifyAll = GetBoolArg("-verifyall");
++    fHighS = GetBoolArg("-highs");
++    fLowS = GetBoolArg("-lows");
++
++    if (fHighS && fLowS)
++    {
++	printf("Error: '-highs' and '-lows' can not be set at the same time.\n");
++	return false;
++    }
+ 
+     if (mapArgs.count("-setverstring"))
+     {
+diff -uNr a/bitcoin/src/key.h b/bitcoin/src/key.h
+--- a/bitcoin/src/key.h 07093a81b0656609e0fa8066a5743d874c5dbdf148309dd6e9ed2050ac0cac2b07d5aa64983e6bc71bd2be2fd1d93dd581e66c32a0da81904aa730e32d43cdd1
++++ b/bitcoin/src/key.h 36ddd67ba47c3860ba5747a2388b11e4cb3ed91ae1bc54a051f773e7958d3ec08cbd029607d1878661d644d34910098027600cd7e1bd08aca059452cf03fd0e8
+@@ -291,12 +291,46 @@
+     bool Sign(uint256 hash, std::vector<unsigned char>& vchSig)
+     {
+         vchSig.clear();
+-        unsigned char pchSig[10000];
+-        unsigned int nSize = 0;
+-        if (!ECDSA_sign(0, (unsigned char*)&hash, sizeof(hash), pchSig, &nSize, pkey))
++        ECDSA_SIG *sig = ECDSA_do_sign((unsigned char *) &hash, sizeof(hash), pkey);
++
++        if (sig == NULL)
++        {
++            printf("ERROR, ECDSA_sign failed in key.h:Sign()\n");
+             return false;
+-        vchSig.resize(nSize);
+-        memcpy(&vchSig[0], pchSig, nSize);
++        }
++
++        BN_CTX *ctx = BN_CTX_new();
++        BN_CTX_start(ctx);
++        const EC_GROUP *group = EC_KEY_get0_group(pkey);
++        BIGNUM *order = BN_CTX_get(ctx);
++        BIGNUM *halforder = BN_CTX_get(ctx);
++        EC_GROUP_get_order(group, order, ctx);
++        BN_rshift1(halforder, order);
++
++        if (fHighS && (BN_cmp(sig->s, halforder) < 0))
++        {
++            // enforce high S values
++            BN_sub(sig->s, order, sig->s);
++        }
++
++        if (fLowS && (BN_cmp(sig->s, halforder) > 0))
++        {
++            // enforce low S values
++            BN_sub(sig->s, order, sig->s);
++        }
++
++        BN_CTX_end(ctx);
++        BN_CTX_free(ctx);
++        unsigned int nSize = ECDSA_size(pkey);
++        vchSig.resize(nSize); // Make sure it is big enough
++        unsigned char *pos = &vchSig[0];
++        nSize = i2d_ECDSA_SIG(sig, &pos);
++        //printf("DEBUG DER R: 0x%s\n", BN_bn2hex(sig->r));
++        //printf("DEBUG DER R:   %s\n", BN_bn2dec(sig->r));
++        //printf("DEBUG DER S: 0x%s\n", BN_bn2hex(sig->s));
++        //printf("DEBUG DER S:   %s\n", BN_bn2dec(sig->s));
++        ECDSA_SIG_free(sig);
++        vchSig.resize(nSize); // Shrink to fit actual size
+         return true;
+     }
+ 
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp e74abd10e4e001ca9c202672e2d2678c131f0ad06200e0d8c477728f92b1710644cc15abb7e5773b277f38a00e004a4ec4c7cee799a7e9c82c39297b94d540da
++++ b/bitcoin/src/util.cpp a7a5d3d37b0c59b10bb5d2f6a1e32fcfc3d6c7dc40a819c4dfac72e5b03d345509bea696ec0099cb927b10253a678c3d650635b8116ed8a0f0432832b13eaf5e
+@@ -32,6 +32,8 @@
+ string strMiscWarning;
+ bool fNoListen = false;
+ bool fLogTimestamps = false;
++bool fLowS = false;
++bool fHighS = false;
+ 
+ std::string CLIENT_NAME(DEFAULT_CLIENT_NAME);
+ 
+diff -uNr a/bitcoin/src/util.h b/bitcoin/src/util.h
+--- a/bitcoin/src/util.h 99aa3df7dc2e63380ba9916dae9dfe69d6de7bcbf2bd39809cc528dea2699e3b664294175697d4b6ade7fe39dc42420573f59503653d3c22352270c27cd3c1cc
++++ b/bitcoin/src/util.h bb0bd8f585bf9d34edd89ea93710120105213eb931a48dfb0452055978b31444d988a14c6a9f82a4f9192c230579ee4ba607b867cf2a1a41d57fcad1b3a286ac
+@@ -122,6 +122,8 @@
+ extern bool fNoListen;
+ extern bool fLogTimestamps;
+ extern std::string CLIENT_NAME;
++extern bool fLowS;
++extern bool fHighS;
+ 
+ void RandAddSeed();
+ void RandAddSeedPerfmon();

@@ -1,0 +1,408 @@
+diff -uNr a/bitcoin/manifest b/bitcoin/manifest
+--- a/bitcoin/manifest 63aecffaed0398fb2a4f40b170ef1992bcdf9f81a6a8f1fa9851816e53fbe1ee96f061788210b687c37ae13f43cd28eb668f20eac5e0a468bf450480ffd02d96
++++ b/bitcoin/manifest 5091aee977f4e3d8b13b3df1775a0a70647f7a3baf66dc5ef8693c3333e4223a4efeea781afbcb1b10755664fe8fcb29212fe9f0fcb127d048bc4090bb022f77
+@@ -1,4 +1,33 @@
++542413 genesis mod6 TRB Genesis
++542413 bitcoin-asciilifeform.1 asciilifeform QT_GUI removal
++542413 rm_rf_upnp ben_vulpes Removal of UPnP
++542413 bitcoin-asciilifeform.2 asciilifeform Removal of SSL from http service
++542413 bitcoin-asciilifeform.3-turdmeister-alert-snip asciilifeform Removal of alert spam
++542413 bitcoin-asciilifeform.4-goodbye-win32 asciilifeform Win32 removal
++542413 asciilifeform_orphanage_thermonuke asciilifeform Drop orphans on the floor
++542413 asciilifeform_tx-orphanage_amputation asciilifeform Remove orphan processing
++542413 asciilifeform_dnsseed_snipsnip asciilifeform Abandon the DNS seeding mechanism
++542413 bitcoin-v0_5_3-db_config mod6 Add BDB configuration options
++542413 asciilifeform_zap_hardcoded_seeds asciilifeform Remove hardcoded node seeds
++542413 bitcoin-v0_5_3_1-static_makefile_v002.8 mod6 Add static makefile options
++542413 asciilifeform-kills-integer-retardation asciilifeform Fix integer type problems
++542413 asciilifeform_zap_showmyip_crud asciilifeform Abolishes the 'showmyip.com' idiocy; prerequisite for the total removal of all instances of DNS invocation
++542413 bitcoin-v0_5_3_1-rev_bump ben_vulpes Bump version number to 0.5.3.1
++542413 asciilifeform_and_now_we_have_block_dumper_corrected asciilifeform Add 'dumpblock' RPC command
++542413 asciilifeform_dns_thermonyukyoolar_kleansing asciilifeform Abolishes all invocations of DNS
++542413 mod6_fix_dumpblock_params mod6 Constrain the 'dumpblock' parameters
++542413 asciilifeform_ver_now_5_4_and_irc_is_gone_and_now_must_give_ip Bump version to 0.5.4; Remove IRC seeder and hooks; Removal of mechanisms for determining own external IP
++542413 asciilifeform_maxint_locks_corrected asciilifeform Set BDB configuration options to max
++542413 asciilifeform_and_now_we_have_eatblock asciilifeform Add 'eatblock' RPC command
++542413 asciilifeform_lets_lose_testnet asciilifeform Removal of Testnet
++542413 asciilifeform_add_verifyall_option asciilifeform Add 'verifyall' flag
++542413 programmable-versionstring asciilifeform Add two optional command-line flags to change the version string and number
++542413 malleus_mikehearnificarum asciilifeform Ban peers when attempting to issue unsupported commands
++542413 mod6_der_high_low_s mod6 Add command-line flags to set Low-S or High-S
++542413 makefiles mod6 Add makefiles to build entire TRB
++542413 asciilifeform_aggressive_pushgetblocks asciilifeform Issue PushGetBlocks command to any peer that issues 'version' command
+ 614342 trb_keccak_regrind mod6 Not a vpatch, whole TRB tree keccak regrind; removes UTF-8 char from original genesis.vpatch
+ 614347 mod6_privkey_tools.vpatch mod6 adds privkey tools
+ 614351 mod6_manifest.vpatch mod6 Adds TRB manifest; updates version comments
+ 616451 mod6_phexdigit_fix.vpatch mod6 Adds missing comma to separate values in the phexdigit array in util.cpp.
++617254 mod6_excise_hash_truncation mod6 Regrind of ben_vulpes original; removes truncation of hashes printed to TRB log file
+diff -uNr a/bitcoin/src/db.cpp b/bitcoin/src/db.cpp
+--- a/bitcoin/src/db.cpp ed121a460f49c601b8c56e5e90e9ab728d6edba0674ddb34111e0e520cf84aea918624c677937ce025fd95405b4dbe30a2a160f007846b32817532cd4faba40b
++++ b/bitcoin/src/db.cpp 8d156ea97f8a65cedfb916c7eb8a2ff621f1cf0131efe51cd6bf1d5a8d3d6d0dd24fe05372fb91ed35db27858a737d3e4e741bb0e0e5536893390bebce6ea6dd
+@@ -578,7 +578,7 @@
+     pindexBest = mapBlockIndex[hashBestChain];
+     nBestHeight = pindexBest->nHeight;
+     bnBestChainWork = pindexBest->bnChainWork;
+-    printf("LoadBlockIndex(): hashBestChain=%s  height=%d\n", hashBestChain.ToString().substr(0,20).c_str(), nBestHeight);
++    printf("LoadBlockIndex(): hashBestChain=%s  height=%d\n", hashBestChain.ToString().c_str(), nBestHeight);
+ 
+     // Load bnBestInvalidWork, OK if it doesn't exist
+     ReadBestInvalidWork(bnBestInvalidWork);
+@@ -836,14 +836,6 @@
+                     }
+                     vWalletUpgrade.push_back(hash);
+                 }
+-
+-                //// debug print
+-                //printf("LoadWallet  %s\n", wtx.GetHash().ToString().c_str());
+-                //printf(" %12I64d  %s  %s  %s\n",
+-                //    wtx.vout[0].nValue,
+-                //    DateTimeStrFormat("%x %H:%M:%S", wtx.GetBlockTime()).c_str(),
+-                //    wtx.hashBlock.ToString().substr(0,20).c_str(),
+-                //    wtx.mapValue["message"].c_str());
+             }
+             else if (strType == "acentry")
+             {
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 6424f947d41cd64953a4f2c3aafa97a21e69ceff571caaf9de9175117644ed456f45f1eaa4fbad7d85412d003c121dd9579f5d07a701c5dfd1ba5e209f286dd4
++++ b/bitcoin/src/main.cpp 0971a01f7fa9f4d6209a769a8d5249afac1e458907c031626ee764b6f85416aeda8de595e8f18f3e9968d7e699f35259bc833bba1d88c14ddb26d29afd45c7fb
+@@ -365,8 +365,8 @@
+         if (!ConnectInputs(txdb, mapUnused, CDiskTxPos(1,1,1), pindexBest, nFees, false, false, 0, fInvalid))
+         {
+             if (fInvalid)
+-                return error("AcceptToMemoryPool() : FetchInputs found invalid tx %s", hash.ToString().substr(0,10).c_str());
+-            return error("AcceptToMemoryPool() : ConnectInputs failed %s", hash.ToString().substr(0,10).c_str());
++                return error("AcceptToMemoryPool() : FetchInputs found invalid tx %s", hash.ToString().c_str());
++            return error("AcceptToMemoryPool() : ConnectInputs failed %s", hash.ToString().c_str());
+         }
+ 
+         // Don't accept it if it can't get into a block
+@@ -415,7 +415,7 @@
+     if (ptxOld)
+         EraseFromWallets(ptxOld->GetHash());
+ 
+-    printf("AcceptToMemoryPool(): accepted %s\n", hash.ToString().substr(0,10).c_str());
++    printf("AcceptToMemoryPool(): accepted %s\n", hash.ToString().c_str());
+     return true;
+ }
+ 
+@@ -709,8 +709,8 @@
+         CTxDB().WriteBestInvalidWork(bnBestInvalidWork);
+         MainFrameRepaint();
+     }
+-    printf("InvalidChainFound: invalid block=%s  height=%d  work=%s\n", pindexNew->GetBlockHash().ToString().substr(0,20).c_str(), pindexNew->nHeight, pindexNew->bnChainWork.ToString().c_str());
+-    printf("InvalidChainFound:  current best=%s  height=%d  work=%s\n", hashBestChain.ToString().substr(0,20).c_str(), nBestHeight, bnBestChainWork.ToString().c_str());
++    printf("InvalidChainFound: invalid block=%s  height=%d  work=%s\n", pindexNew->GetBlockHash().ToString().c_str(), pindexNew->nHeight, pindexNew->bnChainWork.ToString().c_str());
++    printf("InvalidChainFound:  current best=%s  height=%d  work=%s\n", hashBestChain.ToString().c_str(), nBestHeight, bnBestChainWork.ToString().c_str());
+     if (pindexBest && bnBestInvalidWork > bnBestChainWork + pindexBest->GetBlockWork() * 6)
+         printf("InvalidChainFound: WARNING: Displayed transactions may not be correct!  You may need to upgrade, or other nodes may need to upgrade.\n");
+ }
+@@ -796,7 +796,7 @@
+                 fFound = txdb.ReadTxIndex(prevout.hash, txindex);
+             }
+             if (!fFound && (fBlock || fMiner))
+-                return fMiner ? false : error("ConnectInputs() : %s prev tx %s index entry not found", GetHash().ToString().substr(0,10).c_str(),  prevout.hash.ToString().substr(0,10).c_str());
++                return fMiner ? false : error("ConnectInputs() : %s prev tx %s index entry not found", GetHash().ToString().c_str(),  prevout.hash.ToString().c_str());
+ 
+             // Read txPrev
+             CTransaction txPrev;
+@@ -806,7 +806,7 @@
+                 CRITICAL_BLOCK(cs_mapTransactions)
+                 {
+                     if (!mapTransactions.count(prevout.hash))
+-                        return error("ConnectInputs() : %s mapTransactions prev not found %s", GetHash().ToString().substr(0,10).c_str(),  prevout.hash.ToString().substr(0,10).c_str());
++                        return error("ConnectInputs() : %s mapTransactions prev not found %s", GetHash().ToString().c_str(),  prevout.hash.ToString().c_str());
+                     txPrev = mapTransactions[prevout.hash];
+                 }
+                 if (!fFound)
+@@ -816,7 +816,7 @@
+             {
+                 // Get prev tx from disk
+                 if (!txPrev.ReadFromDisk(txindex.pos))
+-                    return error("ConnectInputs() : %s ReadFromDisk prev tx %s failed", GetHash().ToString().substr(0,10).c_str(),  prevout.hash.ToString().substr(0,10).c_str());
++                    return error("ConnectInputs() : %s ReadFromDisk prev tx %s failed", GetHash().ToString().c_str(),  prevout.hash.ToString().c_str());
+             }
+ 
+             if (prevout.n >= txPrev.vout.size() || prevout.n >= txindex.vSpent.size())
+@@ -824,7 +824,7 @@
+                 // Revisit this if/when transaction replacement is implemented and allows
+                 // adding inputs:
+                 fInvalid = true;
+-                return DoS(100, error("ConnectInputs() : %s prevout.n out of range %d %d %d prev tx %s\n%s", GetHash().ToString().substr(0,10).c_str(), prevout.n, txPrev.vout.size(), txindex.vSpent.size(), prevout.hash.ToString().substr(0,10).c_str(), txPrev.ToString().c_str()));
++                return DoS(100, error("ConnectInputs() : %s prevout.n out of range %d %d %d prev tx %s\n%s", GetHash().ToString().c_str(), prevout.n, txPrev.vout.size(), txindex.vSpent.size(), prevout.hash.ToString().c_str(), txPrev.ToString().c_str()));
+             }
+ 
+             // If prev is coinbase, check that it's matured
+@@ -839,13 +839,13 @@
+             if (fVerifyAll || (!(fBlock && (nBestHeight < Checkpoints::GetTotalBlocksEstimate()))))
+                 // Verify signature
+                 if (!VerifySignature(txPrev, *this, i))
+-                    return DoS(100,error("ConnectInputs() : %s VerifySignature failed", GetHash().ToString().substr(0,10).c_str()));
++                    return DoS(100,error("ConnectInputs() : %s VerifySignature failed", GetHash().ToString().c_str()));
+ 
+             // Check for conflicts (double-spend)
+             // This doesn't trigger the DoS code on purpose; if it did, it would make it easier
+             // for an attacker to attempt to split the network.
+             if (!txindex.vSpent[prevout.n].IsNull())
+-                return fMiner ? false : error("ConnectInputs() : %s prev tx already used at %s", GetHash().ToString().substr(0,10).c_str(), txindex.vSpent[prevout.n].ToString().c_str());
++                return fMiner ? false : error("ConnectInputs() : %s prev tx already used at %s", GetHash().ToString().c_str(), txindex.vSpent[prevout.n].ToString().c_str());
+ 
+             // Check for negative or overflow input values
+             nValueIn += txPrev.vout[prevout.n].nValue;
+@@ -863,12 +863,12 @@
+         }
+ 
+         if (nValueIn < GetValueOut())
+-            return DoS(100, error("ConnectInputs() : %s value in < value out", GetHash().ToString().substr(0,10).c_str()));
++            return DoS(100, error("ConnectInputs() : %s value in < value out", GetHash().ToString().c_str()));
+ 
+         // Tally transaction fees
+         int64 nTxFee = nValueIn - GetValueOut();
+         if (nTxFee < 0)
+-            return DoS(100, error("ConnectInputs() : %s nTxFee < 0", GetHash().ToString().substr(0,10).c_str()));
++            return DoS(100, error("ConnectInputs() : %s nTxFee < 0", GetHash().ToString().c_str()));
+         if (nTxFee < nMinFee)
+             return false;
+         nFees += nTxFee;
+@@ -1174,7 +1174,7 @@
+     bnBestChainWork = pindexNew->bnChainWork;
+     nTimeBestReceived = GetTime();
+     nTransactionsUpdated++;
+-    printf("SetBestChain: new best=%s  height=%d  work=%s\n", hashBestChain.ToString().substr(0,20).c_str(), nBestHeight, bnBestChainWork.ToString().c_str());
++    printf("SetBestChain: new best=%s  height=%d  work=%s\n", hashBestChain.ToString().c_str(), nBestHeight, bnBestChainWork.ToString().c_str());
+ 
+     return true;
+ }
+@@ -1185,7 +1185,7 @@
+     // Check for duplicate
+     uint256 hash = GetHash();
+     if (mapBlockIndex.count(hash))
+-        return error("AddToBlockIndex() : %s already exists", hash.ToString().substr(0,20).c_str());
++        return error("AddToBlockIndex() : %s already exists", hash.ToString().c_str());
+ 
+     // Construct new block index object
+     CBlockIndex* pindexNew = new CBlockIndex(nFile, nBlockPos, *this);
+@@ -1325,7 +1325,7 @@
+     // Check for duplicate
+     uint256 hash = pblock->GetHash();
+     if (mapBlockIndex.count(hash))
+-        return error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().substr(0,20).c_str());
++        return error("ProcessBlock() : already have block %d %s", mapBlockIndex[hash]->nHeight, hash.ToString().c_str());
+ 
+     // Preliminary checks
+     if (!pblock->CheckBlock())
+@@ -1357,7 +1357,7 @@
+     // If don't already have its previous block, throw it out!
+     if (!mapBlockIndex.count(pblock->hashPrevBlock))
+     {
+-        printf("ProcessBlock: BASTARD BLOCK, prev=%s, DISCARDED\n", pblock->hashPrevBlock.ToString().substr(0,20).c_str());
++        printf("ProcessBlock: BASTARD BLOCK, prev=%s, DISCARDED\n", pblock->hashPrevBlock.ToString().c_str());
+ 
+         // Ask this guy to fill in what we're missing
+         if (pfrom)
+@@ -1553,7 +1553,7 @@
+             pindex->nHeight,
+             pindex->nFile,
+             pindex->nBlockPos,
+-            block.GetHash().ToString().substr(0,20).c_str(),
++            block.GetHash().ToString().c_str(),
+             DateTimeStrFormat("%x %H:%M:%S", block.GetBlockTime()).c_str(),
+             block.vtx.size());
+ 
+@@ -1925,12 +1925,12 @@
+             pindex = pindex->pnext;
+         int nLimit = 500 + locator.GetDistanceBack();
+         unsigned int nBytes = 0;
+-        printf("getblocks %d to %s limit %d\n", (pindex ? pindex->nHeight : -1), hashStop.ToString().substr(0,20).c_str(), nLimit);
++        printf("getblocks %d to %s limit %d\n", (pindex ? pindex->nHeight : -1), hashStop.ToString().c_str(), nLimit);
+         for (; pindex; pindex = pindex->pnext)
+         {
+             if (pindex->GetBlockHash() == hashStop)
+             {
+-                printf("  getblocks stopping at %d %s (%u bytes)\n", pindex->nHeight, pindex->GetBlockHash().ToString().substr(0,20).c_str(), nBytes);
++                printf("  getblocks stopping at %d %s (%u bytes)\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str(), nBytes);
+                 break;
+             }
+             pfrom->PushInventory(CInv(MSG_BLOCK, pindex->GetBlockHash()));
+@@ -1941,7 +1941,7 @@
+             {
+                 // When this block is requested, we'll send an inv that'll make them
+                 // getblocks the next batch of inventory.
+-                printf("  getblocks stopping at limit %d %s (%u bytes)\n", pindex->nHeight, pindex->GetBlockHash().ToString().substr(0,20).c_str(), nBytes);
++                printf("  getblocks stopping at limit %d %s (%u bytes)\n", pindex->nHeight, pindex->GetBlockHash().ToString().c_str(), nBytes);
+                 pfrom->hashContinue = pindex->GetBlockHash();
+                 break;
+             }
+@@ -1974,7 +1974,7 @@
+ 
+         vector<CBlock> vHeaders;
+         int nLimit = 2000 + locator.GetDistanceBack();
+-        printf("getheaders %d to %s limit %d\n", (pindex ? pindex->nHeight : -1), hashStop.ToString().substr(0,20).c_str(), nLimit);
++        printf("getheaders %d to %s limit %d\n", (pindex ? pindex->nHeight : -1), hashStop.ToString().c_str(), nLimit);
+         for (; pindex; pindex = pindex->pnext)
+         {
+             vHeaders.push_back(pindex->GetBlockHeader());
+@@ -2005,7 +2005,7 @@
+         }
+         else if (fMissingInputs)
+         {
+-            printf("REJECTED orphan tx %s\n", inv.hash.ToString().substr(0,10).c_str());
++            printf("REJECTED orphan tx %s\n", inv.hash.ToString().c_str());
+         }
+         if (tx.nDoS) pfrom->Misbehaving(tx.nDoS);
+     }
+@@ -2016,7 +2016,7 @@
+         CBlock block;
+         vRecv >> block;
+ 
+-        printf("received block %s\n", block.GetHash().ToString().substr(0,20).c_str());
++        printf("received block %s\n", block.GetHash().ToString().c_str());
+         // block.print();
+ 
+         CInv inv(MSG_BLOCK, block.GetHash());
+@@ -2524,9 +2524,9 @@
+ 
+     void print() const
+     {
+-        printf("COrphan(hash=%s, dPriority=%.1f)\n", ptx->GetHash().ToString().substr(0,10).c_str(), dPriority);
++        printf("COrphan(hash=%s, dPriority=%.1f)\n", ptx->GetHash().ToString().c_str(), dPriority);
+         BOOST_FOREACH(uint256 hash, setDependsOn)
+-            printf("   setDependsOn %s\n", hash.ToString().substr(0,10).c_str());
++            printf("   setDependsOn %s\n", hash.ToString().c_str());
+     }
+ };
+ 
+@@ -2608,7 +2608,7 @@
+ 
+             if (fDebug && GetBoolArg("-printpriority"))
+             {
+-                printf("priority %-20.1f %s\n%s", dPriority, tx.GetHash().ToString().substr(0,10).c_str(), tx.ToString().c_str());
++                printf("priority %-20.1f %s\n%s", dPriority, tx.GetHash().ToString().c_str(), tx.ToString().c_str());
+                 if (porphan)
+                     porphan->print();
+                 printf("\n");
+diff -uNr a/bitcoin/src/main.h b/bitcoin/src/main.h
+--- a/bitcoin/src/main.h ecafbdf451a63be8ea30ba33b93f62a155511051154af8369284519e6f493d2b3546ff2d3e7f7a3ec263f50a2080da9665b24dce3aebb4cd54b92acb12f37024
++++ b/bitcoin/src/main.h 00bae14f70f53e0826f7f23453a48e59ca34fde46de507482224965ad465acab0c913141e1ea21323c4f5461035b8b4d3ac9b11aa9c16fdea000640145b89fd1
+@@ -222,7 +222,7 @@
+ 
+     std::string ToString() const
+     {
+-        return strprintf("COutPoint(%s, %d)", hash.ToString().substr(0,10).c_str(), n);
++        return strprintf("COutPoint(%s, %d)", hash.ToString().c_str(), n);
+     }
+ 
+     void print() const
+@@ -297,7 +297,7 @@
+         if (prevout.IsNull())
+             str += strprintf(", coinbase %s", HexStr(scriptSig).c_str());
+         else
+-            str += strprintf(", scriptSig=%s", scriptSig.ToString().substr(0,24).c_str());
++            str += strprintf(", scriptSig=%s", scriptSig.ToString().c_str());
+         if (nSequence != UINT_MAX)
+             str += strprintf(", nSequence=%u", nSequence);
+         str += ")";
+@@ -371,7 +371,7 @@
+     {
+         if (scriptPubKey.size() < 6)
+             return "CTxOut(error)";
+-        return strprintf("CTxOut(nValue=%"PRI64d".%08"PRI64d", scriptPubKey=%s)", nValue / COIN, nValue % COIN, scriptPubKey.ToString().substr(0,30).c_str());
++        return strprintf("CTxOut(nValue=%"PRI64d".%08"PRI64d", scriptPubKey=%s)", nValue / COIN, nValue % COIN, scriptPubKey.ToString().c_str());
+     }
+ 
+     void print() const
+@@ -608,7 +608,7 @@
+     {
+         std::string str;
+         str += strprintf("CTransaction(hash=%s, ver=%d, vin.size=%d, vout.size=%d, nLockTime=%d)\n",
+-            GetHash().ToString().substr(0,10).c_str(),
++            GetHash().ToString().c_str(),
+             nVersion,
+             vin.size(),
+             vout.size(),
+@@ -954,10 +954,10 @@
+     void print() const
+     {
+         printf("CBlock(hash=%s, ver=%d, hashPrevBlock=%s, hashMerkleRoot=%s, nTime=%u, nBits=%08x, nNonce=%u, vtx=%d)\n",
+-            GetHash().ToString().substr(0,20).c_str(),
++            GetHash().ToString().c_str(),
+             nVersion,
+-            hashPrevBlock.ToString().substr(0,20).c_str(),
+-            hashMerkleRoot.ToString().substr(0,10).c_str(),
++            hashPrevBlock.ToString().c_str(),
++            hashMerkleRoot.ToString().c_str(),
+             nTime, nBits, nNonce,
+             vtx.size());
+         for (int i = 0; i < vtx.size(); i++)
+@@ -967,7 +967,7 @@
+         }
+         printf("  vMerkleTree: ");
+         for (int i = 0; i < vMerkleTree.size(); i++)
+-            printf("%s ", vMerkleTree[i].ToString().substr(0,10).c_str());
++            printf("%s ", vMerkleTree[i].ToString().c_str());
+         printf("\n");
+     }
+ 
+@@ -1138,8 +1138,8 @@
+     {
+         return strprintf("CBlockIndex(nprev=%08x, pnext=%08x, nFile=%d, nBlockPos=%-6d nHeight=%d, merkle=%s, hashBlock=%s)",
+             pprev, pnext, nFile, nBlockPos, nHeight,
+-            hashMerkleRoot.ToString().substr(0,10).c_str(),
+-            GetBlockHash().ToString().substr(0,20).c_str());
++            hashMerkleRoot.ToString().c_str(),
++            GetBlockHash().ToString().c_str());
+     }
+ 
+     void print() const
+@@ -1209,8 +1209,8 @@
+         str += CBlockIndex::ToString();
+         str += strprintf("\n                hashBlock=%s, hashPrev=%s, hashNext=%s)",
+             GetBlockHash().ToString().c_str(),
+-            hashPrev.ToString().substr(0,20).c_str(),
+-            hashNext.ToString().substr(0,20).c_str());
++            hashPrev.ToString().c_str(),
++            hashNext.ToString().c_str());
+         return str;
+     }
+ 
+diff -uNr a/bitcoin/src/protocol.cpp b/bitcoin/src/protocol.cpp
+--- a/bitcoin/src/protocol.cpp 071f23cb1e017f72a89271924861d1036e3fb2d9c6459709d8a962cd7aa94f84faa657618d0dd553650a135a6e341ecf4389e2cb911c5e71d8c87d5d24bd77af
++++ b/bitcoin/src/protocol.cpp 891cdaa560e5403c9becd96a586998cd345c3045795c8dce601cd7f46119c24cee0857846cd7bf10a1869d8e54e3d52b0e67ddc488f183e992e18d92081c74d7
+@@ -297,7 +297,7 @@
+ 
+ std::string CInv::ToString() const
+ {
+-    return strprintf("%s %s", GetCommand(), hash.ToString().substr(0,20).c_str());
++    return strprintf("%s %s", GetCommand(), hash.ToString().c_str());
+ }
+ 
+ void CInv::print() const
+diff -uNr a/bitcoin/src/wallet.cpp b/bitcoin/src/wallet.cpp
+--- a/bitcoin/src/wallet.cpp b1151747313461aaa55b9b7b3a0bf0e560f3d9200b646859de29b07543d3cb746f109004610ac55433c6a803d59c5cd3c092c4d187999997cadfb85a762bda74
++++ b/bitcoin/src/wallet.cpp ec7774805c2999f289f26c3dc0aa669977ea36b9112c4040d4470760583854821262b5073c74f51dfd6c9b3725660f706c1e7990ce43b94b91d7cff61f047012
+@@ -270,7 +270,7 @@
+         }
+ 
+         //// debug print
+-        printf("AddToWallet %s  %s%s\n", wtxIn.GetHash().ToString().substr(0,10).c_str(), (fInsertedNew ? "new" : ""), (fUpdated ? "update" : ""));
++        printf("AddToWallet %s  %s%s\n", wtxIn.GetHash().ToString().c_str(), (fInsertedNew ? "new" : ""), (fUpdated ? "update" : ""));
+ 
+         // Write to disk
+         if (fInsertedNew || fUpdated)
+@@ -467,7 +467,7 @@
+ 
+ }
+ 
+-void CWalletTx::GetAccountAmounts(const string& strAccount, int64& nGenerated, int64& nReceived, 
++void CWalletTx::GetAccountAmounts(const string& strAccount, int64& nGenerated, int64& nReceived,
+                                   int64& nSent, int64& nFee) const
+ {
+     nGenerated = nReceived = nSent = nFee = 0;
+@@ -667,7 +667,7 @@
+         uint256 hash = GetHash();
+         if (!txdb.ContainsTx(hash))
+         {
+-            printf("Relaying wtx %s\n", hash.ToString().substr(0,10).c_str());
++            printf("Relaying wtx %s\n", hash.ToString().c_str());
+             RelayMessage(CInv(MSG_TX, hash), (CTransaction)*this);
+         }
+     }

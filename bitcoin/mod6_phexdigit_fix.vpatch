@@ -1,0 +1,20 @@
+diff -uNr a/bitcoin/manifest b/bitcoin/manifest
+--- a/bitcoin/manifest 5b7e8c468b60886f17cf5d3b289f89576bcb510691b7299ebfa37e95ea53d254b8ee5b8b20f8ad7e7e1aa41a105aff056673281885ea26e73787dd1aedf91946
++++ b/bitcoin/manifest 63aecffaed0398fb2a4f40b170ef1992bcdf9f81a6a8f1fa9851816e53fbe1ee96f061788210b687c37ae13f43cd28eb668f20eac5e0a468bf450480ffd02d96
+@@ -1,3 +1,4 @@
+ 614342 trb_keccak_regrind mod6 Not a vpatch, whole TRB tree keccak regrind; removes UTF-8 char from original genesis.vpatch
+ 614347 mod6_privkey_tools.vpatch mod6 adds privkey tools
+ 614351 mod6_manifest.vpatch mod6 Adds TRB manifest; updates version comments
++616451 mod6_phexdigit_fix.vpatch mod6 Adds missing comma to separate values in the phexdigit array in util.cpp.
+diff -uNr a/bitcoin/src/util.cpp b/bitcoin/src/util.cpp
+--- a/bitcoin/src/util.cpp a7a5d3d37b0c59b10bb5d2f6a1e32fcfc3d6c7dc40a819c4dfac72e5b03d345509bea696ec0099cb927b10253a678c3d650635b8116ed8a0f0432832b13eaf5e
++++ b/bitcoin/src/util.cpp 2130ec23d80df39382a0ec68b4e0c68526ad4b3b5dfd91375f62fa4c03715ab956c23fe0ff7821fae1a8d8150cc0c4267d5369e85d2ad7a730775afa82ec6d43
+@@ -350,7 +350,7 @@
+       0,1,2,3,4,5,6,7,8,9,-1,-1,-1,-1,-1,-1,
+       -1,0xa,0xb,0xc,0xd,0xe,0xf,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+       -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+-      -1,0xa,0xb,0xc,0xd,0xe,0xf,-1,-1,-1,-1,-1,-1,-1,-1,-1
++      -1,0xa,0xb,0xc,0xd,0xe,0xf,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+       -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+       -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
+       -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,

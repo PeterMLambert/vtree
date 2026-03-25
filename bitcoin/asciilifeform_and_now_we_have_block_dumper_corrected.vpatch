@@ -1,0 +1,73 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp ce40e0dd8882caeed2da59990716cdab09d90f0e1c9aea20688a318451e413fd943b43ac8a725192a8f95c006a99ef35d0807e8e06def62992356fb888b29984
++++ b/bitcoin/src/bitcoinrpc.cpp 218b2429fae339a7c78f2c0a978219b730025e11d88d86f4bca05f1f9646100bee6d510c9e5919d4eeeb9e37b0a09d381bf349f951cd17dbd8c4f9d8d849cbc3
+@@ -1782,12 +1782,39 @@
+ }
+ 
+ 
+-
+-
+-
+-
+-
+-
++Value dumpblock(const Array& params, bool fHelp)
++{
++    if (fHelp || params.size() < 1 || params.size() > 2)
++        throw runtime_error(
++            "dumpblock <height> <filename>\n"
++            "Emit the block at <height> to <filename>.");
++
++    int want_height = 0;
++    if (params.size() > 0)
++        want_height = params[0].get_int();
++
++    if (want_height > nBestHeight)
++        throw runtime_error("Requested block exceeds current nBestHeight!\n");
++
++    // path to dump block to
++    string filename = params[1].get_str();
++
++    // this is O(n^2)...
++    // possibly could be improved if we descend from best height if requested height is closer to it
++    for (map<uint256, CBlockIndex*>::iterator mi = mapBlockIndex.begin(); mi != mapBlockIndex.end(); ++mi)
++    {
++        CBlockIndex *pindex = (*mi).second;
++	if (pindex->nHeight == want_height) {
++	    CBlock block;
++	    block.ReadFromDisk(pindex);
++	    printf("Dumping block %d to %s\n", want_height, filename.c_str());
++	    CAutoFile fileout = fopen(filename.c_str(), "wb+");
++	    fileout << block;
++	    return true;
++	}
++    }
++    return false;
++}
+ 
+ 
+ 
+@@ -1837,6 +1864,7 @@
+     make_pair("settxfee",               &settxfee),
+     make_pair("getmemorypool",          &getmemorypool),
+     make_pair("listsinceblock",        &listsinceblock),
++    make_pair("dumpblock",              &dumpblock),
+ };
+ map<string, rpcfn_type> mapCallTable(pCallTable, pCallTable + sizeof(pCallTable)/sizeof(pCallTable[0]));
+ 
+@@ -1863,6 +1891,7 @@
+     "validateaddress",
+     "getwork",
+     "getmemorypool",
++    "dumpblock",
+ };
+ set<string> setAllowInSafeMode(pAllowInSafeMode, pAllowInSafeMode + sizeof(pAllowInSafeMode)/sizeof(pAllowInSafeMode[0]));
+ 
+@@ -2364,6 +2393,7 @@
+         if (strMethod == "listaccounts"           && n > 0) ConvertTo<boost::int64_t>(params[0]);
+         if (strMethod == "walletpassphrase"       && n > 1) ConvertTo<boost::int64_t>(params[1]);
+         if (strMethod == "listsinceblock"         && n > 1) ConvertTo<boost::int64_t>(params[1]);
++	if (strMethod == "dumpblock"              && n > 0) ConvertTo<boost::int64_t>(params[0]);
+         if (strMethod == "sendmany"               && n > 1)
+         {
+             string s = params[1].get_str();

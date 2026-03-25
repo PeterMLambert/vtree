@@ -1,0 +1,12 @@
+diff -uNr a/bitcoin/src/serialize.h b/bitcoin/src/serialize.h
+--- a/bitcoin/src/serialize.h fa08e3a8029453dca3e5dd6ca382ef541294ce5a7f914975b376f87c4eae2da55b8ca6cea65343ba93e55f39956c4448e96b794ce39b799d65fd100e555262e7
++++ b/bitcoin/src/serialize.h a8b934c161794e0eabbcba01cfb3bd9c08f9c14ee92c2053c9f4707db51139811a37c6c10ef027db3433bec9e8c7d3637354215df85c50c10cb06aa07635d823
+@@ -41,7 +41,7 @@
+ class CAutoFile;
+ static const unsigned int MAX_SIZE = 0x02000000;
+ 
+-static const int VERSION = 50300;
++static const int VERSION = 50301;
+ static const char* pszSubVer = "";
+ static const bool VERSION_IS_BETA = true;
+ 

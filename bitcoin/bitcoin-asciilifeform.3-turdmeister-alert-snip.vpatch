@@ -1,0 +1,357 @@
+diff -uNr a/bitcoin/src/main.cpp b/bitcoin/src/main.cpp
+--- a/bitcoin/src/main.cpp 8d9b3ea74202849015588e2ee34549f95d8bc172ac3aeb15c328bc78b10a5fa85006db37922cc5f0769468fabbbcd0b5271d5656d3fc8bb3deaa8cd98a0af980
++++ b/bitcoin/src/main.cpp e614d63a917f3ba00110c4a3789f1bf8190cdc7ff68efaf022056ffe135cfe758cc5687195bd0c16044d7d27bdb7386aba4cf231acf02ece4ac15b802d00b2bd
+@@ -1720,21 +1720,11 @@
+ 
+ 
+ 
+-
+-
+-
+-
+-
+-
+-
+ //////////////////////////////////////////////////////////////////////////////
+ //
+-// CAlert
++// Warnings (was: CAlert)
+ //
+ 
+-map<uint256, CAlert> mapAlerts;
+-CCriticalSection cs_mapAlerts;
+-
+ string GetWarnings(string strFor)
+ {
+     int nPriority = 0;
+@@ -1757,20 +1747,6 @@
+         strStatusBar = strRPC = "WARNING: Displayed transactions may not be correct!  You may need to upgrade, or other nodes may need to upgrade.";
+     }
+ 
+-    // Alerts
+-    CRITICAL_BLOCK(cs_mapAlerts)
+-    {
+-        BOOST_FOREACH(PAIRTYPE(const uint256, CAlert)& item, mapAlerts)
+-        {
+-            const CAlert& alert = item.second;
+-            if (alert.AppliesToMe() && alert.nPriority > nPriority)
+-            {
+-                nPriority = alert.nPriority;
+-                strStatusBar = alert.strStatusBar;
+-            }
+-        }
+-    }
+-
+     if (strFor == "statusbar")
+         return strStatusBar;
+     else if (strFor == "rpc")
+@@ -1779,59 +1755,6 @@
+     return "error";
+ }
+ 
+-bool CAlert::ProcessAlert()
+-{
+-    if (!CheckSignature())
+-        return false;
+-    if (!IsInEffect())
+-        return false;
+-
+-    CRITICAL_BLOCK(cs_mapAlerts)
+-    {
+-        // Cancel previous alerts
+-        for (map<uint256, CAlert>::iterator mi = mapAlerts.begin(); mi != mapAlerts.end();)
+-        {
+-            const CAlert& alert = (*mi).second;
+-            if (Cancels(alert))
+-            {
+-                printf("cancelling alert %d\n", alert.nID);
+-                mapAlerts.erase(mi++);
+-            }
+-            else if (!alert.IsInEffect())
+-            {
+-                printf("expiring alert %d\n", alert.nID);
+-                mapAlerts.erase(mi++);
+-            }
+-            else
+-                mi++;
+-        }
+-
+-        // Check if this alert has been cancelled
+-        BOOST_FOREACH(PAIRTYPE(const uint256, CAlert)& item, mapAlerts)
+-        {
+-            const CAlert& alert = item.second;
+-            if (alert.Cancels(*this))
+-            {
+-                printf("alert already cancelled by %d\n", alert.nID);
+-                return false;
+-            }
+-        }
+-
+-        // Add to mapAlerts
+-        mapAlerts.insert(make_pair(GetHash(), *this));
+-    }
+-
+-    printf("accepted alert %d, AppliesToMe()=%d\n", nID, AppliesToMe());
+-    MainFrameRepaint();
+-    return true;
+-}
+-
+-
+-
+-
+-
+-
+-
+ 
+ //////////////////////////////////////////////////////////////////////////////
+ //
+@@ -1954,11 +1877,6 @@
+             pfrom->PushGetBlocks(pindexBest, uint256(0));
+         }
+ 
+-        // Relay alerts
+-        CRITICAL_BLOCK(cs_mapAlerts)
+-            BOOST_FOREACH(PAIRTYPE(const uint256, CAlert)& item, mapAlerts)
+-                item.second.RelayTo(pfrom);
+-
+         pfrom->fSuccessfullyConnected = true;
+ 
+         printf("version message: version %d, blocks=%d\n", pfrom->nVersion, pfrom->nStartingHeight);
+@@ -2362,22 +2280,6 @@
+     }
+ 
+ 
+-    else if (strCommand == "alert")
+-    {
+-        CAlert alert;
+-        vRecv >> alert;
+-
+-        if (alert.ProcessAlert())
+-        {
+-            // Relay
+-            pfrom->setKnown.insert(alert.GetHash());
+-            CRITICAL_BLOCK(cs_vNodes)
+-                BOOST_FOREACH(CNode* pnode, vNodes)
+-                    alert.RelayTo(pnode);
+-        }
+-    }
+-
+-
+     else
+     {
+         // Ignore unknown commands for extensibility
+diff -uNr a/bitcoin/src/main.h b/bitcoin/src/main.h
+--- a/bitcoin/src/main.h 110908f2c5982131591b43888d7f087848746914e5aebf96e1809219e9c073fcf4665695e3acfd85ed1ad2126b452749273bc70af0536a773b08a1d55575012d
++++ b/bitcoin/src/main.h 265f35217e2a79155aa98dc832a62f1a24879f70aa594237811392d5f14ec182de78cabaccf7f9d0af07504ff4e37f39ea4c4c6dac7d6d1b8890258ab40c2d33
+@@ -1355,211 +1355,4 @@
+     }
+ };
+ 
+-
+-
+-
+-
+-
+-
+-
+-
+-//
+-// Alerts are for notifying old versions if they become too obsolete and
+-// need to upgrade.  The message is displayed in the status bar.
+-// Alert messages are broadcast as a vector of signed data.  Unserializing may
+-// not read the entire buffer if the alert is for a newer version, but older
+-// versions can still relay the original data.
+-//
+-class CUnsignedAlert
+-{
+-public:
+-    int nVersion;
+-    int64 nRelayUntil;      // when newer nodes stop relaying to newer nodes
+-    int64 nExpiration;
+-    int nID;
+-    int nCancel;
+-    std::set<int> setCancel;
+-    int nMinVer;            // lowest version inclusive
+-    int nMaxVer;            // highest version inclusive
+-    std::set<std::string> setSubVer;  // empty matches all
+-    int nPriority;
+-
+-    // Actions
+-    std::string strComment;
+-    std::string strStatusBar;
+-    std::string strReserved;
+-
+-    IMPLEMENT_SERIALIZE
+-    (
+-        READWRITE(this->nVersion);
+-        nVersion = this->nVersion;
+-        READWRITE(nRelayUntil);
+-        READWRITE(nExpiration);
+-        READWRITE(nID);
+-        READWRITE(nCancel);
+-        READWRITE(setCancel);
+-        READWRITE(nMinVer);
+-        READWRITE(nMaxVer);
+-        READWRITE(setSubVer);
+-        READWRITE(nPriority);
+-
+-        READWRITE(strComment);
+-        READWRITE(strStatusBar);
+-        READWRITE(strReserved);
+-    )
+-
+-    void SetNull()
+-    {
+-        nVersion = 1;
+-        nRelayUntil = 0;
+-        nExpiration = 0;
+-        nID = 0;
+-        nCancel = 0;
+-        setCancel.clear();
+-        nMinVer = 0;
+-        nMaxVer = 0;
+-        setSubVer.clear();
+-        nPriority = 0;
+-
+-        strComment.clear();
+-        strStatusBar.clear();
+-        strReserved.clear();
+-    }
+-
+-    std::string ToString() const
+-    {
+-        std::string strSetCancel;
+-        BOOST_FOREACH(int n, setCancel)
+-            strSetCancel += strprintf("%d ", n);
+-        std::string strSetSubVer;
+-        BOOST_FOREACH(std::string str, setSubVer)
+-            strSetSubVer += "\"" + str + "\" ";
+-        return strprintf(
+-                "CAlert(\n"
+-                "    nVersion     = %d\n"
+-                "    nRelayUntil  = %"PRI64d"\n"
+-                "    nExpiration  = %"PRI64d"\n"
+-                "    nID          = %d\n"
+-                "    nCancel      = %d\n"
+-                "    setCancel    = %s\n"
+-                "    nMinVer      = %d\n"
+-                "    nMaxVer      = %d\n"
+-                "    setSubVer    = %s\n"
+-                "    nPriority    = %d\n"
+-                "    strComment   = \"%s\"\n"
+-                "    strStatusBar = \"%s\"\n"
+-                ")\n",
+-            nVersion,
+-            nRelayUntil,
+-            nExpiration,
+-            nID,
+-            nCancel,
+-            strSetCancel.c_str(),
+-            nMinVer,
+-            nMaxVer,
+-            strSetSubVer.c_str(),
+-            nPriority,
+-            strComment.c_str(),
+-            strStatusBar.c_str());
+-    }
+-
+-    void print() const
+-    {
+-        printf("%s", ToString().c_str());
+-    }
+-};
+-
+-class CAlert : public CUnsignedAlert
+-{
+-public:
+-    std::vector<unsigned char> vchMsg;
+-    std::vector<unsigned char> vchSig;
+-
+-    CAlert()
+-    {
+-        SetNull();
+-    }
+-
+-    IMPLEMENT_SERIALIZE
+-    (
+-        READWRITE(vchMsg);
+-        READWRITE(vchSig);
+-    )
+-
+-    void SetNull()
+-    {
+-        CUnsignedAlert::SetNull();
+-        vchMsg.clear();
+-        vchSig.clear();
+-    }
+-
+-    bool IsNull() const
+-    {
+-        return (nExpiration == 0);
+-    }
+-
+-    uint256 GetHash() const
+-    {
+-        return SerializeHash(*this);
+-    }
+-
+-    bool IsInEffect() const
+-    {
+-        return (GetAdjustedTime() < nExpiration);
+-    }
+-
+-    bool Cancels(const CAlert& alert) const
+-    {
+-        if (!IsInEffect())
+-            return false; // this was a no-op before 31403
+-        return (alert.nID <= nCancel || setCancel.count(alert.nID));
+-    }
+-
+-    bool AppliesTo(int nVersion, std::string strSubVerIn) const
+-    {
+-        return (IsInEffect() &&
+-                nMinVer <= nVersion && nVersion <= nMaxVer &&
+-                (setSubVer.empty() || setSubVer.count(strSubVerIn)));
+-    }
+-
+-    bool AppliesToMe() const
+-    {
+-        return AppliesTo(VERSION, ::pszSubVer);
+-    }
+-
+-    bool RelayTo(CNode* pnode) const
+-    {
+-        if (!IsInEffect())
+-            return false;
+-        // returns true if wasn't already contained in the set
+-        if (pnode->setKnown.insert(GetHash()).second)
+-        {
+-            if (AppliesTo(pnode->nVersion, pnode->strSubVer) ||
+-                AppliesToMe() ||
+-                GetAdjustedTime() < nRelayUntil)
+-            {
+-                pnode->PushMessage("alert", *this);
+-                return true;
+-            }
+-        }
+-        return false;
+-    }
+-
+-    bool CheckSignature()
+-    {
+-        CKey key;
+-        if (!key.SetPubKey(ParseHex("04fc9702847840aaf195de8442ebecedf5b095cdbb9bc716bda9110971b28a49e0ead8564ff0db22209e0374782c093bb899692d524e9d6a6956e7c5ecbcd68284")))
+-            return error("CAlert::CheckSignature() : SetPubKey failed");
+-        if (!key.Verify(Hash(vchMsg.begin(), vchMsg.end()), vchSig))
+-            return error("CAlert::CheckSignature() : verify signature failed");
+-
+-        // Now unserialize the data
+-        CDataStream sMsg(vchMsg);
+-        sMsg >> *(CUnsignedAlert*)this;
+-        return true;
+-    }
+-
+-    bool ProcessAlert();
+-};
+-
+ #endif

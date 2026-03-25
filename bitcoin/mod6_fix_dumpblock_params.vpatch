@@ -1,0 +1,12 @@
+diff -uNr a/bitcoin/src/bitcoinrpc.cpp b/bitcoin/src/bitcoinrpc.cpp
+--- a/bitcoin/src/bitcoinrpc.cpp 218b2429fae339a7c78f2c0a978219b730025e11d88d86f4bca05f1f9646100bee6d510c9e5919d4eeeb9e37b0a09d381bf349f951cd17dbd8c4f9d8d849cbc3
++++ b/bitcoin/src/bitcoinrpc.cpp 4731466a24920c9320dc9f20d9537058dd693da77b8646a3cc47a69d710217574452a18a45d81de82231246fd402d7f80fca14aa85ee14156ffa513e064bfc81
+@@ -1784,7 +1784,7 @@
+ 
+ Value dumpblock(const Array& params, bool fHelp)
+ {
+-    if (fHelp || params.size() < 1 || params.size() > 2)
++    if (fHelp || params.size() != 2)
+         throw runtime_error(
+             "dumpblock <height> <filename>\n"
+             "Emit the block at <height> to <filename>.");

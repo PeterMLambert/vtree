@@ -1,0 +1,18 @@
+diff -uNr a/bitcoin/src/makefile.unix b/bitcoin/src/makefile.unix
+--- a/bitcoin/src/makefile.unix 85700c20bee5a758709d7d3d1f85afa09d3e036af93c4e5b85e76364ed7fdb9b86b664039f61ddf415e62ef36c8f89a7957d3569fa14cc99349f37bd4d947b47
++++ b/bitcoin/src/makefile.unix 0f0e33a7b5754899d74e4653292abed226b5b28a9dfe250544ad7eafd928041bd862b8d8293297dabafd84547124f72e94fe77caaceb7b1f0ed93460aa8ce449
+@@ -27,12 +27,11 @@
+    -l boost_thread$(BOOST_LIB_SUFFIX) \
+    -l db_cxx$(BDB_LIB_SUFFIX) \
+    -l ssl \
+-   -l crypto
++   -l crypto \
++   -static-libgcc
+ 
+ LIBS+= \
+  -Wl,-B$(LMODE2) \
+-   -l z \
+-   -l dl \
+    -l pthread
+ 
+ 
